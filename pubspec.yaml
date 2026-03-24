@@ -1,0 +1,64 @@
+name: helm
+description: "Helm — Remote Mac control via SSH and tmux."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # SSH
+  dartssh2: ^2.16.0
+
+  # Terminal emulation
+  xterm: ^4.0.0
+
+  # Biometric auth
+  local_auth: ^2.3.0
+
+  # Secure storage (SSH keys)
+  flutter_secure_storage: ^10.0.0
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Navigation
+  go_router: ^14.6.3
+
+  # Fonts
+  google_fonts: ^6.2.1
+
+  # Code generation (models)
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # SharedPreferences for profile storage
+  shared_preferences: ^2.3.4
+
+  # UUID generation
+  uuid: ^4.5.1
+
+  # Ed25519 key generation (transitive via dartssh2, declared explicitly)
+  pinenacl: ^0.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+  # Code generation
+  freezed: ^2.5.7
+  json_serializable: ^6.9.2
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.6.3
+
+flutter:
+  uses-material-design: true
