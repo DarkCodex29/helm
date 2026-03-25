@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
+import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
+import 'package:helm/features/terminal/presentation/widgets/session_recovery_banner.dart';
 import 'package:helm/features/terminal/presentation/widgets/special_key_bar.dart';
 import 'package:helm/features/terminal/presentation/widgets/tab_bar_widget.dart';
 import 'package:helm/features/terminal/presentation/widgets/terminal_view_widget.dart';
@@ -15,16 +17,49 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
+  List<TabSnapshot>? _pendingRecovery;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final tabs = ref.read(tabsProvider);
-      if (!tabs.hasTabs) {
-        ref.read(tabsProvider.notifier).openDefaultTab();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final repo = ref.read(sessionSnapshotRepoProvider);
+      final pending = await repo.getPendingRecovery();
+      if (pending != null && pending.isNotEmpty && mounted) {
+        setState(() => _pendingRecovery = pending);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    switch (state) {
+      case AppLifecycleState.paused:
+        // App va a background → guardar snapshot + timestamp.
+        // Si luego hay crash/OOM, este snapshot persiste y se detecta al reabrir.
+        ref.read(tabsProvider.notifier).saveSnapshot();
+      case AppLifecycleState.resumed:
+        // App volvió sin crash → limpiar snapshot para que el próximo inicio
+        // no muestre un falso banner de recuperación.
+        ref.read(sessionSnapshotRepoProvider).markClean();
+        // También ocultar el banner si estaba visible (edge case: resumed
+        // durante la misma sesión antes de que el usuario interactuara).
+        if (_pendingRecovery != null && mounted) {
+          setState(() => _pendingRecovery = null);
+        }
+      default:
+        break;
+    }
   }
 
   @override
@@ -76,9 +111,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
         ],
       ),
-      body: tabsState.hasTabs
-          ? _buildTerminalArea(tabsState)
-          : _buildEmptyState(context),
+      body: Column(
+        children: [
+          if (_pendingRecovery != null)
+            SessionRecoveryBanner(
+              snapshots: _pendingRecovery!,
+              onRecover: () async {
+                final snapshots = _pendingRecovery!;
+                await ref.read(tabsProvider.notifier).recoverSession(snapshots);
+                if (mounted) setState(() => _pendingRecovery = null);
+              },
+              onDiscard: () async {
+                await ref.read(sessionSnapshotRepoProvider).markClean();
+                if (mounted) setState(() => _pendingRecovery = null);
+              },
+            ),
+          Expanded(
+            child: tabsState.hasTabs
+                ? _buildTerminalArea(tabsState)
+                : _buildEmptyState(context),
+          ),
+        ],
+      ),
     );
   }
 

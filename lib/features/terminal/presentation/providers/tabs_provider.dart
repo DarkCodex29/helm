@@ -6,6 +6,7 @@ import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
+import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:uuid/uuid.dart';
@@ -16,6 +17,10 @@ final sshKeyServiceProvider = Provider<SSHKeyService>((_) => SSHKeyService());
 
 final connectionProfileRepositoryProvider =
     Provider<ConnectionProfileRepository>((_) => ConnectionProfileRepository());
+
+final sessionSnapshotRepoProvider = Provider<SessionSnapshotRepository>(
+  (_) => SessionSnapshotRepository(),
+);
 
 class TabsState {
   const TabsState({this.tabs = const [], this.activeIndex = 0});
@@ -110,14 +115,49 @@ class TabsNotifier extends Notifier<TabsState> {
     return ref.read(connectionProfileRepositoryProvider).getAll();
   }
 
-  Future<void> openDefaultTab() async {
-    final repo = ref.read(connectionProfileRepositoryProvider);
-    final profile = await repo.getDefault();
-    if (profile == null) {
-      _log.w('No default profile found — cannot auto-open tab');
-      return;
+  /// Persiste el snapshot de la sesión actual al storage.
+  ///
+  /// Llamado por [HomeScreen] cuando la app pasa a `paused` (background).
+  /// Si no hay tabs abiertas → limpia el snapshot.
+  /// Si hay tabs → guarda snapshot + timestamp para detección de crash.
+  Future<void> saveSnapshot() async {
+    final repo = ref.read(sessionSnapshotRepoProvider);
+    if (state.tabs.isEmpty) {
+      await repo.markClean();
+    } else {
+      final snapshots = state.tabs.map((t) {
+        final idx = state.tabs.indexWhere((x) => x.id == t.id);
+        return TabSnapshot(
+          profileId: t.profile.id,
+          profileName: t.profile.name,
+          tmuxSessionName:
+              t.session.tmuxSessionName ??
+              t.profile.tmuxSession ??
+              '${AppConstants.defaultTmuxSession}-$idx',
+        );
+      }).toList();
+      await repo.markDirty(snapshots);
     }
-    await addTab(profile);
+  }
+
+  /// Reconecta todas las tabs guardadas en un snapshot de crash.
+  Future<void> recoverSession(List<TabSnapshot> snapshots) async {
+    final repo = ref.read(sessionSnapshotRepoProvider);
+    final profileRepo = ref.read(connectionProfileRepositoryProvider);
+
+    for (final snap in snapshots) {
+      ConnectionProfile? profile = await profileRepo.getById(snap.profileId);
+      profile ??= await profileRepo.getDefault();
+
+      if (profile == null) {
+        _log.w('No profile found for recovery snap: ${snap.profileId}');
+        continue;
+      }
+
+      await addTab(profile, tmuxSessionName: snap.tmuxSessionName);
+    }
+
+    await repo.markClean();
   }
 
   /// Opens a tab for the given [shortcut], navigates to its project path,
