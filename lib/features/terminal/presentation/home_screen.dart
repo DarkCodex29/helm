@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
+import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
 import 'package:helm/features/terminal/presentation/widgets/special_key_bar.dart';
 import 'package:helm/features/terminal/presentation/widgets/tab_bar_widget.dart';
@@ -33,10 +34,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF272822),
+      drawer: const ShortcutsDrawer(),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
         titleSpacing: 0,
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: Icon(
+              Icons.menu,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+            tooltip: 'Projects',
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          ),
+        ),
         title: tabsState.hasTabs
             ? TerminalTabBar(
                 tabs: tabsState.tabs,
@@ -62,14 +74,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               tooltip: 'New terminal',
               onPressed: () => _showNewTabDialog(context),
             ),
-          IconButton(
-            icon: Icon(
-              Icons.settings_outlined,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            ),
-            tooltip: 'Settings',
-            onPressed: () => context.push('/settings'),
-          ),
         ],
       ),
       body: tabsState.hasTabs

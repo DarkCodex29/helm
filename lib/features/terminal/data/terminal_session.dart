@@ -28,6 +28,10 @@ class TerminalSession {
 
   SSHClient? _client;
   SSHSession? _session;
+
+  /// Exposes the active [SSHClient] for one-shot command execution.
+  /// Returns null if not connected.
+  SSHClient? get sshClient => _client;
   StreamSubscription<Uint8List>? _stdoutSub;
   StreamSubscription<Uint8List>? _stderrSub;
 

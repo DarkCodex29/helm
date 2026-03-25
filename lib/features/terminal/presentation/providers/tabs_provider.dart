@@ -5,6 +5,7 @@ import 'package:helm/features/connection/data/connection_profile_repository.dart
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
+import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:uuid/uuid.dart';
@@ -117,6 +118,37 @@ class TabsNotifier extends Notifier<TabsState> {
       return;
     }
     await addTab(profile);
+  }
+
+  /// Opens a tab for the given [shortcut], navigates to its project path,
+  /// and optionally runs a command.
+  Future<void> openShortcut(ProjectShortcut shortcut) async {
+    final repo = ref.read(connectionProfileRepositoryProvider);
+
+    // Find the profile by ID, fall back to default.
+    ConnectionProfile? profile = await repo.getById(shortcut.profileId);
+    profile ??= await repo.getDefault();
+
+    if (profile == null) {
+      _log.w('No profile found for shortcut ${shortcut.name}');
+      return;
+    }
+
+    await addTab(profile, tmuxSessionName: shortcut.tmuxSession);
+
+    // Wait for tmux to be ready before sending commands.
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    final session = state.activeTab?.session;
+    if (session == null || !session.isConnected) return;
+
+    // Navigate to project path.
+    final cmd = shortcut.command.isNotEmpty
+        ? 'cd ${shortcut.projectPath} && ${shortcut.command}\n'
+        : 'cd ${shortcut.projectPath}\n';
+
+    session.terminal.onOutput?.call(cmd);
+    _log.i('Opened shortcut: ${shortcut.name} → $cmd');
   }
 }
 

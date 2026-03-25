@@ -12,6 +12,8 @@ class AppConstants {
   static const String sshPrivateKeyStorageKey = 'helm_ssh_private_key';
   static const String sshPublicKeyStorageKey = 'helm_ssh_public_key';
   static const String profilesStorageKey = 'helm_connection_profiles';
+  static const String sessionDirtyKey = 'helm_session_dirty';
+  static const String sessionSnapshotKey = 'helm_session_snapshot';
 
   static const int defaultTerminalColumns = 80;
   static const int defaultTerminalRows = 24;
