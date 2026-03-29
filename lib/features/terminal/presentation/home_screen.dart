@@ -118,8 +118,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               snapshots: _pendingRecovery!,
               onRecover: () async {
                 final snapshots = _pendingRecovery!;
-                await ref.read(tabsProvider.notifier).recoverSession(snapshots);
-                if (mounted) setState(() => _pendingRecovery = null);
+                try {
+                  await ref
+                      .read(tabsProvider.notifier)
+                      .recoverSession(snapshots);
+                } finally {
+                  if (mounted) setState(() => _pendingRecovery = null);
+                }
               },
               onDiscard: () async {
                 await ref.read(sessionSnapshotRepoProvider).markClean();
@@ -163,20 +168,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
+              width: 60,
+              height: 60,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(16),
                 color: const Color(0xFF21262D),
                 border: Border.all(color: const Color(0xFF30363D)),
               ),
               child: const Icon(
                 Icons.terminal,
-                size: 40,
+                size: 30,
                 color: Color(0xFF58A6FF),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
             Text(
               'No active sessions',
               style: theme.textTheme.titleMedium?.copyWith(
@@ -184,7 +189,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Text(
               'Connect to your Mac to start a terminal session',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -192,7 +197,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: () => _showNewTabDialog(context),
               icon: const Icon(Icons.add, size: 18),

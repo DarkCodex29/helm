@@ -32,60 +32,66 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _HelmLogo(),
-                const SizedBox(height: 40),
-                Text(
-                  'Helm',
-                  style: theme.textTheme.headlineLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
-                    letterSpacing: -0.5,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _HelmLogo(),
+              const SizedBox(width: 32),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Helm',
+                    style: theme.textTheme.headlineLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSurface,
+                      letterSpacing: -0.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'SSH Terminal',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 48),
-                authAsync.when(
-                  data: (state) => _buildSubtitle(context, state),
-                  loading: () => Text(
-                    'Authenticating…',
+                  const SizedBox(height: 4),
+                  Text(
+                    'SSH Terminal',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                      letterSpacing: 1.2,
                     ),
                   ),
-                  error: (e, _) => Text(
-                    'Something went wrong',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
+                  const SizedBox(height: 20),
+                  authAsync.when(
+                    data: (state) => _buildSubtitle(context, state),
+                    loading: () => Text(
+                      'Authenticating…',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
+                    ),
+                    error: (e, _) => Text(
+                      'Something went wrong',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 40),
-                authAsync.when(
-                  data: (state) => _buildButton(context, state),
-                  loading: () => SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: theme.colorScheme.primary,
+                  const SizedBox(height: 20),
+                  authAsync.when(
+                    data: (state) => _buildButton(context, state),
+                    loading: () => SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: theme.colorScheme.primary,
+                      ),
                     ),
+                    error: (e, _) => _retryButton(context),
                   ),
-                  error: (e, _) => _retryButton(context),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -133,8 +139,8 @@ class _HelmLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      width: 100,
-      height: 100,
+      width: 80,
+      height: 80,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
@@ -157,7 +163,7 @@ class _HelmLogo extends StatelessWidget {
           ),
         ],
       ),
-      child: Icon(Icons.terminal, size: 52, color: theme.colorScheme.primary),
+      child: Icon(Icons.terminal, size: 40, color: theme.colorScheme.primary),
     );
   }
 }
