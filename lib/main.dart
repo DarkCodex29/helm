@@ -6,8 +6,8 @@ import 'package:helm/app.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
   ]);
   runApp(const ProviderScope(child: HelmApp()));
 }

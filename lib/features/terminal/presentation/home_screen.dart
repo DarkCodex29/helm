@@ -4,10 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
+import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
 import 'package:helm/features/terminal/presentation/widgets/session_recovery_banner.dart';
-import 'package:helm/features/terminal/presentation/widgets/special_key_bar.dart';
 import 'package:helm/features/terminal/presentation/widgets/tab_bar_widget.dart';
+import 'package:helm/features/terminal/presentation/widgets/terminal_keyboard.dart';
 import 'package:helm/features/terminal/presentation/widgets/terminal_view_widget.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -18,13 +19,26 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   List<TabSnapshot>? _pendingRecovery;
+  late final AnimationController _kbAnimController;
+  late final Animation<double> _kbAnimation;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    _kbAnimController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _kbAnimation = CurvedAnimation(
+      parent: _kbAnimController,
+      curve: Curves.easeOutCubic,
+    );
+    _kbAnimController.value = 1.0;
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final repo = ref.read(sessionSnapshotRepoProvider);
       final pending = await repo.getPendingRecovery();
@@ -36,6 +50,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    _kbAnimController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -45,15 +60,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     super.didChangeAppLifecycleState(state);
     switch (state) {
       case AppLifecycleState.paused:
-        // App va a background → guardar snapshot + timestamp.
-        // Si luego hay crash/OOM, este snapshot persiste y se detecta al reabrir.
         ref.read(tabsProvider.notifier).saveSnapshot();
       case AppLifecycleState.resumed:
-        // App volvió sin crash → limpiar snapshot para que el próximo inicio
-        // no muestre un falso banner de recuperación.
         ref.read(sessionSnapshotRepoProvider).markClean();
-        // También ocultar el banner si estaba visible (edge case: resumed
-        // durante la misma sesión antes de que el usuario interactuara).
         if (_pendingRecovery != null && mounted) {
           setState(() => _pendingRecovery = null);
         }
@@ -65,7 +74,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final tabsState = ref.watch(tabsProvider);
+    final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
     final theme = Theme.of(context);
+
+    if (kbVisible) {
+      _kbAnimController.forward();
+    } else {
+      _kbAnimController.reverse();
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF272822),
@@ -145,6 +161,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final activeTab = tabsState.activeTab;
     if (activeTab == null) return _buildEmptyState(context);
 
+    final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
+
     return Column(
       children: [
         Expanded(
@@ -154,8 +172,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             isActive: true,
           ),
         ),
-        SpecialKeyBar(terminal: activeTab.session.terminal),
+        _buildKeyboardToggle(kbVisible),
+        SizeTransition(
+          sizeFactor: _kbAnimation,
+          axisAlignment: 1.0,
+          child: RepaintBoundary(
+            child: TerminalKeyboard(terminal: activeTab.session.terminal),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildKeyboardToggle(bool kbVisible) {
+    return Container(
+      height: 32,
+      decoration: const BoxDecoration(
+        color: Color(0xFF161B22),
+        border: Border(top: BorderSide(color: Color(0xFF30363D), width: 1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
+            icon: Icon(
+              kbVisible ? Icons.keyboard_hide : Icons.keyboard,
+              color: const Color(0xFF8B949E),
+              size: 18,
+            ),
+            tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
+            onPressed: () =>
+                ref.read(keyboardProvider.notifier).toggleVisibility(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -168,8 +220,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 60,
-              height: 60,
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: const Color(0xFF21262D),
@@ -177,11 +229,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               child: const Icon(
                 Icons.terminal,
-                size: 30,
+                size: 40,
                 color: Color(0xFF58A6FF),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 24),
             Text(
               'No active sessions',
               style: theme.textTheme.titleMedium?.copyWith(
@@ -189,7 +241,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
               'Connect to your Mac to start a terminal session',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -197,7 +249,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 32),
             ElevatedButton.icon(
               onPressed: () => _showNewTabDialog(context),
               icon: const Icon(Icons.add, size: 18),

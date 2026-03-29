@@ -80,6 +80,7 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                 ],
                 fontSize: 13,
               ),
+              hardwareKeyboardOnly: true,
               focusNode: _focusNode,
               autofocus: widget.isActive,
               keyboardType: TextInputType.visiblePassword,
