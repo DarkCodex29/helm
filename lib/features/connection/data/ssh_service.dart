@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/utils/logger.dart';
+import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 
 /// Result of a successful SSH connect + shell open operation.
@@ -15,6 +16,10 @@ class SSHConnectionResult {
 
 /// Wraps dartssh2 to provide higher-level connect / shell / disconnect operations.
 class SSHService {
+  SSHService({KnownHostsService? knownHostsService})
+    : _knownHostsService = knownHostsService ?? KnownHostsService();
+
+  final KnownHostsService _knownHostsService;
   static final _log = HelmLogger('SSHService');
 
   // ── Public API ─────────────────────────────────────────────────────────
@@ -42,20 +47,72 @@ class SSHService {
       timeout: const Duration(seconds: 15),
     );
 
+    // Set by the verification callback below when the presented host key
+    // contradicts the pinned one, then rethrown once the handshake fails.
+    HostKeyMismatchException? mismatch;
+
     final client = SSHClient(
       socket,
       username: profile.username,
       identities: identities,
       keepAliveInterval: const Duration(seconds: 30),
-      onVerifyHostKey: (host, key) async => true, // Trust all host keys for now
+      // dartssh2 2.16.0 signature is (String type, Uint8List fingerprint):
+      // `type` is the host key algorithm ("ssh-ed25519"), NOT the hostname,
+      // and `fingerprint` is already an MD5 digest of the host key rather than
+      // the raw key bytes. The hostname therefore has to come from the profile
+      // closure, and the digest is what we pin.
+      onVerifyHostKey: (hostKeyType, hostKeyDigest) async {
+        try {
+          final verification = await _knownHostsService.verifyHostKey(
+            host: profile.host,
+            port: profile.port,
+            hostKeyBytes: hostKeyDigest,
+          );
+
+          if (verification.verdict == HostKeyVerdict.mismatch) {
+            mismatch = HostKeyMismatchException(
+              host: profile.host,
+              port: profile.port,
+              expectedFingerprint: verification.storedFingerprint!,
+              receivedFingerprint: verification.receivedFingerprint,
+            );
+            return false;
+          }
+
+          return true;
+        } catch (e, stackTrace) {
+          // Never complete this callback with an error: dartssh2 forwards the
+          // failure into closeWithError(SSHError), so a non-SSHError object
+          // throws a TypeError inside its handler and the connection hangs
+          // instead of failing. Returning false fails closed, which is also
+          // the right default for a verification step.
+          _log.e(
+            'Host key verification errored for ${profile.host}:${profile.port} '
+            '($hostKeyType)',
+            e,
+            stackTrace,
+          );
+          return false;
+        }
+      },
     );
 
-    final session = await client.shell(
-      pty: SSHPtyConfig(type: 'xterm-256color', width: columns, height: rows),
-    );
+    try {
+      final session = await client.shell(
+        pty: SSHPtyConfig(type: 'xterm-256color', width: columns, height: rows),
+      );
 
-    _log.i('Shell opened for ${profile.name}');
-    return SSHConnectionResult(client: client, session: session);
+      _log.i('Shell opened for ${profile.name}');
+      return SSHConnectionResult(client: client, session: session);
+    } catch (_) {
+      client.close();
+
+      // A rejected host key surfaces as a generic auth-abort error, so replace
+      // it with the mismatch detail the callback captured.
+      final detected = mismatch;
+      if (detected != null) throw detected;
+      rethrow;
+    }
   }
 
   /// Gracefully disconnects the SSH client.
@@ -118,7 +175,22 @@ class SSHService {
   }
 
   /// Maps an exception from dartssh2 to a human-readable error message.
+  ///
+  /// Lines are terminated with CRLF because the only consumer renders this
+  /// straight into the xterm view, where a bare LF would stagger the text.
   static String describeError(Object error) {
+    if (error is HostKeyMismatchException) {
+      return 'Host key verification failed for ${error.host}:${error.port}.\r\n'
+          'The server presented a different SSH host key than the one Helm '
+          'pinned on the first connection. This may be a man-in-the-middle '
+          'attack: someone on the network could be impersonating the server, '
+          'and continuing would expose this session.\r\n'
+          'Expected: ${error.expectedFingerprint}\r\n'
+          'Received: ${error.receivedFingerprint}\r\n'
+          'If the server was legitimately rebuilt or re-keyed, confirm the new '
+          'fingerprint directly on the server, then forget the pinned key for '
+          'this host and reconnect to trust it again.';
+    }
     if (error is SSHAuthError) return 'Authentication failed';
     if (error is SSHError) return 'SSH error: $error';
     return error.toString();
