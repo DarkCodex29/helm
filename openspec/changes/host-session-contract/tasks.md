@@ -52,28 +52,28 @@ Commits: (a) port + adapter + fake (1.1–1.8) — feat(host); (b) adopt in Remo
 
 ## Slice 2: Probe Contract
 
-- [ ] 2.1 Create `docs/host-contract/v1.md`: grammar, escape table, record kinds, evolution rules (per design's Wire Contract v1)
-- [ ] 2.2 Create `lib/core/host/probe/probe_script_v1.dart`: POSIX `sh` string emitting env/mux/session/agent/diag/err/end records, PATH repair, bounded traversal
-- [ ] 2.3 [RED] `test/core/host/probe/host_probe_parser_test.dart` golden fixtures — version match/mismatch (Version Gate scenarios) → FAIL
-- [ ] 2.4 [GREEN] Implement version gate in `host_probe_parser.dart` → PASS
-- [ ] 2.5 [RED] Same — missing `end` → truncated; complete stream reflects status (Truncation Is Explicit) → FAIL
-- [ ] 2.6 [GREEN] Implement → PASS
-- [ ] 2.7 [RED] Same — unknown kind skipped; extra trailing fields ignored (Forward-Compatible Record Reading) → FAIL
-- [ ] 2.8 [GREEN] Implement → PASS
-- [ ] 2.9 [RED] Same — malformed record isolated, siblings unaffected (Record-Level Fault Isolation) → FAIL
-- [ ] 2.10 [GREEN] Implement → PASS
-- [ ] 2.11 [RED] Same — `\`/TAB/LF/CR round-trip exactly (Escaping Round-Trip; threat-matrix "Untrusted host output") → FAIL
-- [ ] 2.12 [GREEN] Implement unescaper → PASS
-- [ ] 2.13 [RED] Same — found-but-off-PATH vs genuinely-absent (Installed-but-Off-PATH scenarios) → FAIL
-- [ ] 2.14 [GREEN] Implement PATH classification → PASS
-- [ ] 2.15 Create `lib/core/host/probe/host_report.dart`: freezed model (env, mux, sessions, agents, diagnostics)
-- [ ] 2.16 [RED] `test/core/host/shell_quote_test.dart` — `x; rm -rf ~`, `$(id)`, backticks, embedded `'`, leading `-` (threat-matrix "Shell argument composition") → FAIL
-- [ ] 2.17 [GREEN] Implement `lib/core/host/shell_quote.dart` (`'\''` idiom) → PASS
-- [ ] 2.18 [RED] Extend `ssh_host_command_runner_test.dart` — probe delivery: exec is the fixed literal `/bin/sh -s`, no pty (threat-matrix "Probe delivery") → FAIL
-- [ ] 2.19 [GREEN] Wire `runScript(probeScriptV1)` call path → PASS
-- [ ] 2.20 [RED] Timeout test — bounded traversal, `timedOut=true`, no partial-report accepted (threat-matrix "Unbounded host traversal") → FAIL
-- [ ] 2.21 [GREEN] Implement timeout handling; consumer treats `timedOut` as no report → PASS
-- [ ] 2.22 Verify: `flutter analyze` && `flutter test`
+- [x] 2.1 Create `docs/host-contract/v1.md`: grammar, escape table, record kinds, evolution rules (per design's Wire Contract v1)
+- [x] 2.2 Create `lib/core/host/probe/probe_script_v1.dart`: POSIX `sh` string emitting env/mux/session/agent/diag/err/end records, PATH repair, bounded traversal
+- [x] 2.3 [RED] `test/core/host/probe/host_probe_parser_test.dart` golden fixtures — version match/mismatch (Version Gate scenarios) → FAIL
+- [x] 2.4 [GREEN] Implement version gate in `host_probe_parser.dart` → PASS
+- [x] 2.5 [RED] Same — missing `end` → truncated; complete stream reflects status (Truncation Is Explicit) → FAIL
+- [x] 2.6 [GREEN] Implement → PASS
+- [x] 2.7 [RED] Same — unknown kind skipped; extra trailing fields ignored (Forward-Compatible Record Reading) → FAIL
+- [x] 2.8 [GREEN] Implement → PASS
+- [x] 2.9 [RED] Same — malformed record isolated, siblings unaffected (Record-Level Fault Isolation) → FAIL
+- [x] 2.10 [GREEN] Implement → PASS
+- [x] 2.11 [RED] Same — `\`/TAB/LF/CR round-trip exactly (Escaping Round-Trip; threat-matrix "Untrusted host output") → FAIL
+- [x] 2.12 [GREEN] Implement unescaper → PASS
+- [x] 2.13 [RED] Same — found-but-off-PATH vs genuinely-absent (Installed-but-Off-PATH scenarios) → FAIL
+- [x] 2.14 [GREEN] Implement PATH classification → PASS
+- [x] 2.15 Create `lib/core/host/probe/host_report.dart`: freezed model (env, mux, sessions, agents, diagnostics)
+- [x] 2.16 [RED] `test/core/host/shell_quote_test.dart` — `x; rm -rf ~`, `$(id)`, backticks, embedded `'`, leading `-` (threat-matrix "Shell argument composition") → FAIL
+- [x] 2.17 [GREEN] Implement `lib/core/host/shell_quote.dart` (`'\''` idiom) → PASS
+- [x] 2.18 [RED] Extend `ssh_host_command_runner_test.dart` — probe delivery: exec is the fixed literal `/bin/sh -s`, no pty (threat-matrix "Probe delivery") → FAIL
+- [x] 2.19 [GREEN] Wire `runScript(probeScriptV1)` call path → PASS
+- [x] 2.20 [RED] Timeout test — bounded traversal, `timedOut=true`, no partial-report accepted (threat-matrix "Unbounded host traversal") → FAIL
+- [x] 2.21 [GREEN] Implement timeout handling; consumer treats `timedOut` as no report → PASS
+- [x] 2.22 Verify: `flutter analyze` && `flutter test`
 
 Commits: (a) docs + probe script (2.1–2.2); (b) parser scenarios (2.3–2.14); (c) report model + shell_quote + wiring + timeout (2.15–2.21)
 
