@@ -35,18 +35,18 @@ Chain strategy: stacked-to-main
 
 ## Slice 1: Host Command Port — FIRST AUTONOMOUS UNIT (no behavior change, pure seam)
 
-- [ ] 1.1 Create `lib/core/host/host_command_runner.dart`: `HostCommandRunner` interface (`run`, `runScript`) + `HostCommandResult` (stdout, stderr, exitCode?, timedOut). Pure types, no RED test.
-- [ ] 1.2 Create `test/helpers/fake_host_command_runner.dart`: scripted stdout/exit/timeout per command.
-- [ ] 1.3 [RED] `test/core/host/ssh_host_command_runner_test.dart` — `run()`: success (stdout/stderr/exitCode, `timedOut=false`) + timeout (`timedOut=true`). `flutter test test/core/host/ssh_host_command_runner_test.dart` → FAIL
-- [ ] 1.4 [GREEN] Create `lib/core/host/ssh_host_command_runner.dart` — implement `run()` via `client.execute` + timeout → PASS
-- [ ] 1.5 [RED] Same file — `runScript()`: exec string is exactly `/bin/sh -s`, no `pty:`, stdin written then closed, no other command issued (host-command-port spec: Script Delivery scenarios) → FAIL
-- [ ] 1.6 [GREEN] Implement `runScript()` → PASS
-- [ ] 1.7 [RED] `test/helpers/fake_host_command_runner_test.dart` — fake satisfies same `run`/`runScript` contract as the adapter (Swappable Transport scenario) → FAIL
-- [ ] 1.8 [GREEN] Fix fake until contract test passes → PASS
-- [ ] 1.9 [RED] `test/features/shortcuts/data/remote_fs_service_test.dart` (new — first tests for this service) — characterize `detectProjects`/`getCurrentDirectory` via the fake → FAIL
-- [ ] 1.10 [GREEN] Modify `lib/features/shortcuts/data/remote_fs_service.dart`: ctor takes `HostCommandRunner`; `_runCommand` calls `runner.run(command)`; command strings unchanged (tmux command stays until 3a's adapter exists) → PASS
-- [ ] 1.11 Modify `lib/features/shortcuts/data/remote_fs_provider.dart`: wire `SshHostCommandRunner`
-- [ ] 1.12 Verify: `flutter analyze` (0 issues) && `flutter test` (all green)
+- [x] 1.1 Create `lib/core/host/host_command_runner.dart`: `HostCommandRunner` interface (`run`, `runScript`) + `HostCommandResult` (stdout, stderr, exitCode?, timedOut). Pure types, no RED test.
+- [x] 1.2 Create `test/helpers/fake_host_command_runner.dart`: scripted stdout/exit/timeout per command.
+- [x] 1.3 [RED] `test/core/host/ssh_host_command_runner_test.dart` — `run()`: success (stdout/stderr/exitCode, `timedOut=false`) + timeout (`timedOut=true`). `flutter test test/core/host/ssh_host_command_runner_test.dart` → FAIL
+- [x] 1.4 [GREEN] Create `lib/core/host/ssh_host_command_runner.dart` — implement `run()` via `client.execute` + timeout → PASS
+- [x] 1.5 [RED] Same file — `runScript()`: exec string is exactly `/bin/sh -s`, no `pty:`, stdin written then closed, no other command issued (host-command-port spec: Script Delivery scenarios) → FAIL
+- [x] 1.6 [GREEN] Implement `runScript()` → PASS
+- [x] 1.7 [RED] `test/helpers/fake_host_command_runner_test.dart` — fake satisfies same `run`/`runScript` contract as the adapter (Swappable Transport scenario) → FAIL
+- [x] 1.8 [GREEN] Fix fake until contract test passes → PASS
+- [x] 1.9 [RED] `test/features/shortcuts/data/remote_fs_service_test.dart` (new — first tests for this service) — characterize `detectProjects`/`getCurrentDirectory` via the fake → FAIL
+- [x] 1.10 [GREEN] Modify `lib/features/shortcuts/data/remote_fs_service.dart`: ctor takes `HostCommandRunner`; `_runCommand` calls `runner.run(command)`; command strings unchanged (tmux command stays until 3a's adapter exists) → PASS
+- [x] 1.11 Modify `lib/features/shortcuts/data/remote_fs_provider.dart`: wire `SshHostCommandRunner`
+- [x] 1.12 Verify: `flutter analyze` (0 issues) && `flutter test` (all green)
 
 Commits: (a) port + adapter + fake (1.1–1.8) — feat(host); (b) adopt in RemoteFsService (1.9–1.12) — refactor(shortcuts)
 

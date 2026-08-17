@@ -1,23 +1,25 @@
-import 'dart:convert';
+import 'package:helm/core/host/host_command_runner.dart';
 
-import 'package:dartssh2/dartssh2.dart';
-
-/// Provides remote filesystem exploration via one-shot SSH commands.
+/// Provides remote filesystem exploration via one-shot host commands.
 ///
-/// Uses an already-established [SSHClient] to detect projects and query
-/// the current working directory without opening a full interactive shell.
+/// Depends on [HostCommandRunner] rather than a specific transport, so a
+/// scripted stand-in can exercise this service without a live connection.
 class RemoteFsService {
+  RemoteFsService(this._runner);
+
+  final HostCommandRunner _runner;
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   /// Detects projects on the remote machine by searching common directories
   /// for project marker files (pubspec.yaml, package.json, *.csproj, go.mod).
   ///
   /// Returns the unique, sorted list of parent directories for each found file.
-  Future<List<String>> detectProjects(SSHClient client) async {
+  Future<List<String>> detectProjects() async {
     const command =
         r'''find ~/Desktop ~/projects ~/proyectos ~/work -maxdepth 3 \( -name "pubspec.yaml" -o -name "package.json" -o -name "*.csproj" -o -name "go.mod" \) -not -path "*/node_modules/*" -not -path "*/.dart_tool/*" 2>/dev/null | head -50''';
 
-    final output = await _runCommand(client, command);
+    final output = await _runCommand(command);
     if (output.isEmpty) return [];
 
     final dirs =
@@ -36,27 +38,23 @@ class RemoteFsService {
   /// Returns the current working directory of the active tmux pane.
   ///
   /// Returns null if the command fails or tmux is not running.
-  Future<String?> getCurrentDirectory(SSHClient client) async {
+  Future<String?> getCurrentDirectory() async {
     const command =
         "tmux display-message -p '#{pane_current_path}' 2>/dev/null";
 
-    final output = await _runCommand(client, command);
+    final output = await _runCommand(command);
     if (output.isEmpty) return null;
     return output;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
 
-  /// Runs [command] on the remote via SSH exec and returns trimmed stdout.
-  Future<String> _runCommand(SSHClient client, String command) async {
+  /// Runs [command] via the host command runner and returns trimmed stdout.
+  Future<String> _runCommand(String command) async {
     try {
-      final session = await client.execute(command);
-      final stdout = await session.stdout.fold<List<int>>(
-        [],
-        (acc, data) => [...acc, ...data],
-      );
-      await session.done;
-      return utf8.decode(stdout, allowMalformed: true).trim();
+      final result = await _runner.run(command);
+      if (result.timedOut) return '';
+      return result.stdout.trim();
     } catch (_) {
       return '';
     }

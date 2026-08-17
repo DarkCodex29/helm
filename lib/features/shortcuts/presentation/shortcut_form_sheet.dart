@@ -115,13 +115,13 @@ class _ProjectShortcutFormSheetState
       return;
     }
 
-    final remoteFsService = ref.read(remoteFsServiceProvider);
+    final remoteFsService = ref.read(remoteFsServiceProvider(sshClient));
     final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _isLoadingProjects = true);
 
     try {
-      final projects = await remoteFsService.detectProjects(sshClient);
+      final projects = await remoteFsService.detectProjects();
 
       if (!mounted) return;
       setState(() => _isLoadingProjects = false);
@@ -222,13 +222,13 @@ class _ProjectShortcutFormSheetState
       return;
     }
 
-    final remoteFsService = ref.read(remoteFsServiceProvider);
+    final remoteFsService = ref.read(remoteFsServiceProvider(sshClient));
     final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _isLoadingCurrentDir = true);
 
     try {
-      final dir = await remoteFsService.getCurrentDirectory(sshClient);
+      final dir = await remoteFsService.getCurrentDirectory();
 
       if (!mounted) return;
       setState(() => _isLoadingCurrentDir = false);
