@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  Stack: Flutter 3.41 / Dart 3.11 (SDK ^3.11.3), iOS + Android shells. Riverpod 2.6
+  (riverpod_generator) for state, go_router for nav, freezed+json_serializable for models.
+  Architecture: feature-first — lib/features/<feature>/{data,domain,presentation}; shared
+  code in lib/core/{constants,router,theme,utils}. Ctor injection with test-friendly
+  defaults (see SSHKeyService, KnownHostsService). HelmLogger, never print.
+  Testing: flutter_test + hand-written fakes (test/helpers/), no mocktail/bloc_test deps.
+  Upcoming: host-side contract for attaching to remote AI agents (connection preflight,
+  multiplexer abstraction herdr|tmux|zellij, host diagnostics) — must be reusable by a
+  second consumer (an internal estimations portal), not app-specific.
+
+rules:
+  proposal:
+    - Design the contract for reuse by a second consumer (future estimations portal); do not couple it to this app's UI or storage
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Model the multiplexer abstraction (herdr | tmux | zellij) as an interface with pluggable implementations, not a tmux-only extension
+    - Include sequence diagrams for connection preflight/detection and diagnostics flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing feature-first structure and ctor-injection-with-default pattern
+      - Use HelmLogger for logging, never print
+      - Centralize new storage keys in lib/core/constants/app_constants.dart
+      - Mirror lib/ paths under test/
+    tdd: true
+    test_command: "flutter test"
+  verify:
+    test_command: "flutter test"
+    build_command: "flutter analyze"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
