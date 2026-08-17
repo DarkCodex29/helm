@@ -46,3 +46,9 @@ app.*.map.json
 
 # Impeccable local state (design system tooling)
 .impeccable/
+
+# Agent tooling local state (skill registry cache)
+.atl/
+
+# CodeGraph index — per-checkout, must never be shared between working copies
+.codegraph/
