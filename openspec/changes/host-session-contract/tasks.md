@@ -79,20 +79,20 @@ Commits: (a) docs + probe script (2.1–2.2); (b) parser scenarios (2.3–2.14);
 
 ## Slice 3a: MultiplexerAdapter + TmuxAdapter
 
-- [ ] 3a.1 Create `lib/core/host/multiplexer_adapter.dart`: `MultiplexerId`, `MuxCapability`, `MultiplexerAdapter`, `AgentAwareMultiplexer` (AD-2)
-- [ ] 3a.2 [RED] `test/core/host/adapters/tmux_adapter_test.dart` — no server running → typed `serverNotRunning`, never `[]` (Explicit State scenario) → FAIL
-- [ ] 3a.3 [GREEN] Create `lib/core/host/adapters/tmux_adapter.dart`: `listSessions()` → PASS
-- [ ] 3a.4 [RED] Same — exited session reported, not omitted → FAIL
-- [ ] 3a.5 [GREEN] Implement → PASS
-- [ ] 3a.6 [RED] Same — `agents == null` on `TmuxAdapter`; caller gets typed unsupported, never `[]` (Agent-State Capability scenario) → FAIL
-- [ ] 3a.7 [GREEN] Implement `agents` getter → `null` → PASS
-- [ ] 3a.8 [RED] Same — `detect()` reports install + version (Uniform Core Operations) → FAIL
-- [ ] 3a.9 [GREEN] Implement `detect()`/`hasSession()` → PASS
-- [ ] 3a.10 [RED] `test/core/host/adapters/attach_command_test.dart` — quoting via `shellQuote`, absolute path, per-adapter (threat-matrix "Shell argument composition") → FAIL
-- [ ] 3a.11 [GREEN] Implement `attachCommand()` using resolved `abs_path` + `shellQuote` → PASS
-- [ ] 3a.12 Delete `lib/features/terminal/domain/services/tmux_service.dart` (superseded)
-- [ ] 3a.13 Modify `lib/features/shortcuts/data/remote_fs_service.dart`: `getCurrentDirectory` uses `TmuxAdapter`/`MultiplexerAdapter` instead of hardcoded `tmux display-message` (design File Changes)
-- [ ] 3a.14 Verify: `flutter analyze` && `flutter test`
+- [x] 3a.1 Create `lib/core/host/multiplexer_adapter.dart`: `MultiplexerId`, `MuxCapability`, `MultiplexerAdapter`, `AgentAwareMultiplexer` (AD-2)
+- [x] 3a.2 [RED] `test/core/host/adapters/tmux_adapter_test.dart` — no server running → typed `serverNotRunning`, never `[]` (Explicit State scenario) → FAIL
+- [x] 3a.3 [GREEN] Create `lib/core/host/adapters/tmux_adapter.dart`: `listSessions()` → PASS
+- [x] 3a.4 [RED] Same — exited session reported, not omitted → FAIL
+- [x] 3a.5 [GREEN] Implement → PASS
+- [x] 3a.6 [RED] Same — `agents == null` on `TmuxAdapter`; caller gets typed unsupported, never `[]` (Agent-State Capability scenario) → FAIL
+- [x] 3a.7 [GREEN] Implement `agents` getter → `null` → PASS
+- [x] 3a.8 [RED] Same — `detect()` reports install + version (Uniform Core Operations) → FAIL
+- [x] 3a.9 [GREEN] Implement `detect()`/`hasSession()` → PASS
+- [x] 3a.10 [RED-NOTE] `test/core/host/adapters/attach_command_test.dart` — quoting via `shellQuote`, absolute path, per-adapter (threat-matrix "Shell argument composition"). NOT a genuine RED: `attachCommand()` was already implemented in 3a.3's cycle (required to satisfy `implements MultiplexerAdapter`); this test file passed 8/8 on first run. Disclosed honestly, same category as slice 1's task 1.7.
+- [x] 3a.11 [GREEN] `attachCommand()` uses resolved `abs_path` + `shellQuote` → PASS (implemented in 3a.3, confirmed by 3a.10's test file)
+- [ ] 3a.12 **DEFERRED — explicit orchestrator override.** Original task said delete `lib/features/terminal/domain/services/tmux_service.dart` (superseded). This apply batch's instructions explicitly overrode that: "do not delete it in this slice... leave the old class in place and note it for a later cleanup, so this unit stays reviewable." Left untouched, unreferenced by any new slice-3a code. Deletion remains a follow-up once slice 5 (which currently owns the only other tmux-attach code path) also lands.
+- [x] 3a.13 Modify `lib/features/shortcuts/data/remote_fs_service.dart`: `getCurrentDirectory` uses `TmuxAdapter` (design's File Changes literally permits "TmuxAdapter/MultiplexerAdapter" — concrete `TmuxAdapter` chosen since `sessionWorkingDirectory` has no defined execution sub-interface in this slice, unlike `agentState`'s `AgentAwareMultiplexer`) instead of hardcoded `tmux display-message`
+- [x] 3a.14 Verify: `flutter analyze` (0 issues) && `flutter test` (101/101 passed)
 
 ## Slice 3b: ZellijAdapter (split out — see risk rationale above)
 

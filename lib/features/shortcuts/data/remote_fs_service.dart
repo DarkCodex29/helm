@@ -1,3 +1,4 @@
+import 'package:helm/core/host/adapters/tmux_adapter.dart';
 import 'package:helm/core/host/host_command_runner.dart';
 
 /// Provides remote filesystem exploration via one-shot host commands.
@@ -5,9 +6,15 @@ import 'package:helm/core/host/host_command_runner.dart';
 /// Depends on [HostCommandRunner] rather than a specific transport, so a
 /// scripted stand-in can exercise this service without a live connection.
 class RemoteFsService {
-  RemoteFsService(this._runner);
+  RemoteFsService(HostCommandRunner runner, {TmuxAdapter? muxAdapter})
+    : _runner = runner,
+      _muxAdapter = muxAdapter ?? TmuxAdapter(runner);
 
   final HostCommandRunner _runner;
+
+  /// Backs [getCurrentDirectory]. Defaults to a [TmuxAdapter] wrapping the
+  /// same [_runner] so existing single-argument construction is unchanged.
+  final TmuxAdapter _muxAdapter;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -37,15 +44,12 @@ class RemoteFsService {
 
   /// Returns the current working directory of the active tmux pane.
   ///
-  /// Returns null if the command fails or tmux is not running.
-  Future<String?> getCurrentDirectory() async {
-    const command =
-        "tmux display-message -p '#{pane_current_path}' 2>/dev/null";
-
-    final output = await _runCommand(command);
-    if (output.isEmpty) return null;
-    return output;
-  }
+  /// Returns null if the command fails or tmux is not running. Delegates
+  /// to [TmuxAdapter.currentPaneDirectory] — the multiplexer abstraction
+  /// now owns this command, but it is unchanged from the value this method
+  /// previously ran directly. See design.md's File Changes entry for this
+  /// file.
+  Future<String?> getCurrentDirectory() => _muxAdapter.currentPaneDirectory();
 
   // ── Private ───────────────────────────────────────────────────────────────
 
