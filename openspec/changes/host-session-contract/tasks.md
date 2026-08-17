@@ -96,11 +96,11 @@ Commits: (a) docs + probe script (2.1–2.2); (b) parser scenarios (2.3–2.14);
 
 ## Slice 3b: ZellijAdapter (split out — see risk rationale above)
 
-- [ ] 3b.1 [RED] `test/core/host/adapters/zellij_adapter_test.dart` — ANSI stripped, `--no-formatting --short` parsed, `EXITED` mapped to exited state (Explicit State scenarios; threat-matrix "Untrusted host output") → FAIL
-- [ ] 3b.2 [GREEN] Create `lib/core/host/adapters/zellij_adapter.dart` → PASS
-- [ ] 3b.3 [RED] Same — `agents == null`; `deadSessionResurrection` capability advertised → FAIL
-- [ ] 3b.4 [GREEN] Implement → PASS
-- [ ] 3b.5 Verify: `flutter analyze` && `flutter test`
+- [x] 3b.1 [RED] `test/core/host/adapters/zellij_adapter_test.dart` — ANSI stripped, `--no-formatting` parsed (NOT `--short` — empirically found unreliable for exited-state detection, see below), `EXITED` mapped to exited state (Explicit State scenarios; threat-matrix "Untrusted host output") → FAIL
+- [x] 3b.2 [GREEN] Create `lib/core/host/adapters/zellij_adapter.dart` → PASS
+- [x] 3b.3 [RED, consolidated into 3b.1's file] `agents == null`; `deadSessionResurrection` capability advertised → covered by the same test file/run as 3b.1 (same precedent as slice 3a's 3a.6/3a.7 consolidation — the class must implement the full `MultiplexerAdapter` interface to compile at all, so all groups in the single test file compile and run together)
+- [x] 3b.4 [GREEN, consolidated into 3b.2] Implement → PASS
+- [x] 3b.5 Verify: `flutter analyze` (0 issues) && `flutter test` (120/120 passed)
 
 ## Slice 4: HerdrAdapter — GATED on real-host verification
 
