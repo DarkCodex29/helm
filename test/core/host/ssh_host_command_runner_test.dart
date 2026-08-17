@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helm/core/host/probe/probe_script_v1.dart';
 import 'package:helm/core/host/ssh_host_command_runner.dart';
 
 void main() {
@@ -80,6 +81,25 @@ void main() {
 
       expect(result.stdout, 'helm-probe/1');
     });
+
+    test(
+      'delivers the real probe script via the fixed literal /bin/sh -s, '
+      'with no other command issued',
+      () async {
+        final channel = _FakeSshCommandChannel(exitCode: 0);
+        final openedCommands = <String>[];
+        final runner = SshHostCommandRunner.withOpener((command) async {
+          openedCommands.add(command);
+          return channel;
+        });
+
+        await runner.runScript(probeScriptV1);
+
+        expect(openedCommands, ['/bin/sh -s']);
+        expect(utf8.decode(channel.stdinBytesWritten), probeScriptV1);
+        expect(channel.stdinClosed, isTrue);
+      },
+    );
   });
 }
 
