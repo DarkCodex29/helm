@@ -8,13 +8,12 @@ import '../../helpers/fake_host_command_runner.dart';
 /// no real agent-aware adapter exists yet (herdr lands in slice 4).
 class _FakeAgentAwareMultiplexer implements AgentAwareMultiplexer {
   @override
-  Future<List<AgentStatus>> listAgents() async => const [];
+  Future<MuxAgentsResult> listAgents() async => const MuxAgentsAvailable([]);
 
   @override
   Future<AgentStatus?> waitForAgent(
     String target, {
     required Set<AgentState> until,
-    Duration? timeout,
   }) async => null;
 }
 

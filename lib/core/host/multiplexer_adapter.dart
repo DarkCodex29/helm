@@ -11,6 +11,13 @@ enum MultiplexerId { herdr, tmux, zellij }
 /// have no execution surface here.
 enum MuxCapability {
   agentState,
+
+  /// Declared for a future adapter that implements a genuine blocking
+  /// wait (e.g. via `herdr agent wait`). No adapter currently advertises
+  /// this: `HerdrAdapter.waitForAgent` is a single-shot check against the
+  /// agent's current state, not a real wait, so it does not advertise
+  /// this capability — advertising a capability a method does not back
+  /// would be dishonest. See design.md AD-2 and the apply report's D4.
   agentWait,
   structuredOutput,
   sessionWorkingDirectory,
@@ -86,6 +93,43 @@ enum AgentState { idle, working, blocked, done, unknown }
 /// See [AgentState].
 typedef AgentStatus = ({String target, String label, AgentState state});
 
+/// Result of [AgentAwareMultiplexer.listAgents].
+///
+/// Mirrors [MuxSessionsResult] for the same reason: an adapter's
+/// agent-tracking server being unreachable is a distinct, explicit state,
+/// never an empty [MuxAgentsAvailable.agents] list — the
+/// multiplexer-abstraction spec's "Explicit State on List Failure, Never
+/// an Empty List" requirement, applied here to agent state rather than
+/// sessions. A thrown exception has the same defect a boolean guard has
+/// per design.md AD-2's rationale for why [MultiplexerAdapter.agents] is
+/// a nullable accessor rather than a `supports()` flag: invisible to the
+/// type system, ignorable while compiling. This sealed result closes that
+/// same gap for the CONTENT of an agent-aware call, not just for whether
+/// the call is reachable at all. See the apply report's D5.
+sealed class MuxAgentsResult {
+  const MuxAgentsResult();
+}
+
+/// Agents were successfully enumerated.
+///
+/// [agents] may itself be empty when the agent-tracking server IS running
+/// and genuinely has zero agents — a different, valid case from
+/// [MuxAgentServerNotRunning].
+final class MuxAgentsAvailable extends MuxAgentsResult {
+  const MuxAgentsAvailable(this.agents);
+
+  final List<AgentStatus> agents;
+}
+
+/// The adapter's agent-tracking server or daemon process is not reachable.
+///
+/// MUST NOT be confused with [MuxAgentsAvailable] carrying an empty list —
+/// that reads as "no agents are working", a different claim from "the
+/// server cannot be reached to find out".
+final class MuxAgentServerNotRunning extends MuxAgentsResult {
+  const MuxAgentServerNotRunning();
+}
+
 /// Execution surface for adapters that advertise [MuxCapability.agentState].
 ///
 /// Reachable only through [MultiplexerAdapter.agents]: there is no
@@ -93,12 +137,17 @@ typedef AgentStatus = ({String target, String label, AgentState state});
 /// without first proving — via a null check — that the adapter supports
 /// agent state. See design.md AD-2.
 abstract interface class AgentAwareMultiplexer {
-  Future<List<AgentStatus>> listAgents();
+  Future<MuxAgentsResult> listAgents();
 
+  /// No [Duration] timeout parameter: an implementation that does not
+  /// genuinely poll or block must not accept an argument it silently
+  /// discards. An adapter that implements a real blocking wait should
+  /// advertise [MuxCapability.agentWait] and may add its own
+  /// timeout-shaped parameter on its own concrete method if needed; the
+  /// shared interface does not promise one. See the apply report's D4.
   Future<AgentStatus?> waitForAgent(
     String target, {
     required Set<AgentState> until,
-    Duration? timeout,
   });
 }
 
