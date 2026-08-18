@@ -4,28 +4,83 @@ import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Resolves [TabSnapshot.sessionRef] from a persisted JSON map, falling
+/// back to the legacy `tmuxSessionName` key when the neutral key is
+/// absent or null (spec.md: session-reference-storage). Same precedence
+/// rule as `ConnectionProfile._readSessionRef` and
+/// `ProjectShortcut._readSessionRef`, but written as a plain hand-written
+/// function rather than a `@JsonKey(readValue:)` callback — [TabSnapshot]
+/// has no freezed/json_serializable codegen at all, so none of the
+/// codegen constraints those two models work around apply here.
+///
+/// - Only `tmuxSessionName` present → its value is returned (Requirement:
+///   Legacy Field Still Readable).
+/// - Only `sessionRef` present → its value is returned.
+/// - Both present → `sessionRef`'s own value wins, unconditionally
+///   (Requirement: Neutral Field Takes Precedence When Both Are Present).
+/// - Neither present → `null`; never invented. Note: since
+///   [TabSnapshot.tmuxSessionName] is a required, non-nullable field
+///   (matching [ProjectShortcut.tmuxSession]'s nullability, not
+///   [ConnectionProfile.tmuxSession]'s), a record missing the
+///   `tmuxSessionName` key entirely already fails to load before this
+///   function ever runs — that is pre-existing behavior, unchanged by
+///   this migration.
+String? _readSessionRef(Map<String, dynamic> json) {
+  final neutral = json['sessionRef'] as String?;
+  if (neutral != null) return neutral;
+  return json['tmuxSessionName'] as String?;
+}
+
 /// Modelo simple que representa una tab abierta al momento del crash.
+///
+/// [tmuxSessionName] is the legacy, multiplexer-specific session name and
+/// stays a required, real field — every [TabSnapshot] has always carried
+/// one, so this migration does not relax that requiredness. [sessionRef]
+/// is its neutral replacement, paired with [multiplexer] to say which
+/// multiplexer that name applies to (`null` ⇒ host default). The legacy
+/// key is never deleted from persisted JSON — see [_readSessionRef] for
+/// the read-time precedence rule; [toJson] always includes both keys
+/// because both remain real fields on this class.
 class TabSnapshot {
   const TabSnapshot({
     required this.profileId,
     required this.profileName,
     required this.tmuxSessionName,
+    this.sessionRef,
+    this.multiplexer,
   });
 
   final String profileId;
   final String profileName;
+
+  /// Superseded by [sessionRef] — see the class doc.
   final String tmuxSessionName;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback.
+  final String? sessionRef;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see `MultiplexerId` in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  final String? multiplexer;
 
   Map<String, dynamic> toJson() => {
     'profileId': profileId,
     'profileName': profileName,
     'tmuxSessionName': tmuxSessionName,
+    'sessionRef': sessionRef,
+    'multiplexer': multiplexer,
   };
 
   factory TabSnapshot.fromJson(Map<String, dynamic> json) => TabSnapshot(
     profileId: json['profileId'] as String,
     profileName: json['profileName'] as String,
     tmuxSessionName: json['tmuxSessionName'] as String,
+    sessionRef: _readSessionRef(json),
+    multiplexer: json['multiplexer'] as String?,
   );
 }
 
