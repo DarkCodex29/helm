@@ -31,6 +31,7 @@ mixin _$ProjectShortcut {
   String get projectPath => throw _privateConstructorUsedError;
 
   /// tmux session name to attach to or create (e.g. "metalpren").
+  /// Superseded by [sessionRef] — see the class doc.
   String get tmuxSession => throw _privateConstructorUsedError;
 
   /// Command to run after navigating to [projectPath] (e.g. "opencode").
@@ -42,6 +43,22 @@ mixin _$ProjectShortcut {
 
   /// Sort order for display in the sidebar.
   int get sortOrder => throw _privateConstructorUsedError;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern.
+  @JsonKey(readValue: _readSessionRef)
+  String? get sessionRef => throw _privateConstructorUsedError;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see `MultiplexerId` in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  String? get multiplexer => throw _privateConstructorUsedError;
 
   /// Serializes this ProjectShortcut to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -68,6 +85,8 @@ abstract class $ProjectShortcutCopyWith<$Res> {
     String command,
     String profileId,
     int sortOrder,
+    @JsonKey(readValue: _readSessionRef) String? sessionRef,
+    String? multiplexer,
   });
 }
 
@@ -93,6 +112,8 @@ class _$ProjectShortcutCopyWithImpl<$Res, $Val extends ProjectShortcut>
     Object? command = null,
     Object? profileId = null,
     Object? sortOrder = null,
+    Object? sessionRef = freezed,
+    Object? multiplexer = freezed,
   }) {
     return _then(
       _value.copyWith(
@@ -124,6 +145,14 @@ class _$ProjectShortcutCopyWithImpl<$Res, $Val extends ProjectShortcut>
                 ? _value.sortOrder
                 : sortOrder // ignore: cast_nullable_to_non_nullable
                       as int,
+            sessionRef: freezed == sessionRef
+                ? _value.sessionRef
+                : sessionRef // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            multiplexer: freezed == multiplexer
+                ? _value.multiplexer
+                : multiplexer // ignore: cast_nullable_to_non_nullable
+                      as String?,
           )
           as $Val,
     );
@@ -147,6 +176,8 @@ abstract class _$$ProjectShortcutImplCopyWith<$Res>
     String command,
     String profileId,
     int sortOrder,
+    @JsonKey(readValue: _readSessionRef) String? sessionRef,
+    String? multiplexer,
   });
 }
 
@@ -171,6 +202,8 @@ class __$$ProjectShortcutImplCopyWithImpl<$Res>
     Object? command = null,
     Object? profileId = null,
     Object? sortOrder = null,
+    Object? sessionRef = freezed,
+    Object? multiplexer = freezed,
   }) {
     return _then(
       _$ProjectShortcutImpl(
@@ -202,6 +235,14 @@ class __$$ProjectShortcutImplCopyWithImpl<$Res>
             ? _value.sortOrder
             : sortOrder // ignore: cast_nullable_to_non_nullable
                   as int,
+        sessionRef: freezed == sessionRef
+            ? _value.sessionRef
+            : sessionRef // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        multiplexer: freezed == multiplexer
+            ? _value.multiplexer
+            : multiplexer // ignore: cast_nullable_to_non_nullable
+                  as String?,
       ),
     );
   }
@@ -218,6 +259,8 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
     this.command = '',
     required this.profileId,
     this.sortOrder = 0,
+    @JsonKey(readValue: _readSessionRef) this.sessionRef,
+    this.multiplexer,
   });
 
   factory _$ProjectShortcutImpl.fromJson(Map<String, dynamic> json) =>
@@ -236,6 +279,7 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
   final String projectPath;
 
   /// tmux session name to attach to or create (e.g. "metalpren").
+  /// Superseded by [sessionRef] — see the class doc.
   @override
   final String tmuxSession;
 
@@ -254,9 +298,27 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
   @JsonKey()
   final int sortOrder;
 
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern.
+  @override
+  @JsonKey(readValue: _readSessionRef)
+  final String? sessionRef;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see `MultiplexerId` in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  @override
+  final String? multiplexer;
+
   @override
   String toString() {
-    return 'ProjectShortcut(id: $id, name: $name, projectPath: $projectPath, tmuxSession: $tmuxSession, command: $command, profileId: $profileId, sortOrder: $sortOrder)';
+    return 'ProjectShortcut(id: $id, name: $name, projectPath: $projectPath, tmuxSession: $tmuxSession, command: $command, profileId: $profileId, sortOrder: $sortOrder, sessionRef: $sessionRef, multiplexer: $multiplexer)';
   }
 
   @override
@@ -274,7 +336,11 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
             (identical(other.profileId, profileId) ||
                 other.profileId == profileId) &&
             (identical(other.sortOrder, sortOrder) ||
-                other.sortOrder == sortOrder));
+                other.sortOrder == sortOrder) &&
+            (identical(other.sessionRef, sessionRef) ||
+                other.sessionRef == sessionRef) &&
+            (identical(other.multiplexer, multiplexer) ||
+                other.multiplexer == multiplexer));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -288,6 +354,8 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
     command,
     profileId,
     sortOrder,
+    sessionRef,
+    multiplexer,
   );
 
   /// Create a copy of ProjectShortcut
@@ -316,6 +384,8 @@ abstract class _ProjectShortcut implements ProjectShortcut {
     final String command,
     required final String profileId,
     final int sortOrder,
+    @JsonKey(readValue: _readSessionRef) final String? sessionRef,
+    final String? multiplexer,
   }) = _$ProjectShortcutImpl;
 
   factory _ProjectShortcut.fromJson(Map<String, dynamic> json) =
@@ -334,6 +404,7 @@ abstract class _ProjectShortcut implements ProjectShortcut {
   String get projectPath;
 
   /// tmux session name to attach to or create (e.g. "metalpren").
+  /// Superseded by [sessionRef] — see the class doc.
   @override
   String get tmuxSession;
 
@@ -349,6 +420,24 @@ abstract class _ProjectShortcut implements ProjectShortcut {
   /// Sort order for display in the sidebar.
   @override
   int get sortOrder;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern.
+  @override
+  @JsonKey(readValue: _readSessionRef)
+  String? get sessionRef;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see `MultiplexerId` in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  @override
+  String? get multiplexer;
 
   /// Create a copy of ProjectShortcut
   /// with the given fields replaced by the non-null parameter values.

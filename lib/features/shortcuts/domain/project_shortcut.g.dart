@@ -16,6 +16,8 @@ _$ProjectShortcutImpl _$$ProjectShortcutImplFromJson(
   command: json['command'] as String? ?? '',
   profileId: json['profileId'] as String,
   sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+  sessionRef: _readSessionRef(json, 'sessionRef') as String?,
+  multiplexer: json['multiplexer'] as String?,
 );
 
 Map<String, dynamic> _$$ProjectShortcutImplToJson(
@@ -28,4 +30,6 @@ Map<String, dynamic> _$$ProjectShortcutImplToJson(
   'command': instance.command,
   'profileId': instance.profileId,
   'sortOrder': instance.sortOrder,
+  'sessionRef': instance.sessionRef,
+  'multiplexer': instance.multiplexer,
 };
