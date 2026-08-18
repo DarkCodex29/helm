@@ -144,12 +144,12 @@ Commits: (a) characterization tests, no prod change (5.1–5.2); (b) attach fix 
 - [x] 6.11 Run `dart run build_runner build --delete-conflicting-outputs` again after `project_shortcut.dart` changes → regenerated `project_shortcut.freezed.dart`/`.g.dart`; confirmed by reading the generated `.g.dart` that `FromJson` calls `_readSessionRef(json, 'sessionRef')` and `ToJson` emits both `tmuxSession` and `sessionRef` keys
 - [x] 6.12 [RED] `test/features/terminal/data/session_snapshot_repository_test.dart` — `TabSnapshot` hand-written JSON (no codegen), same 3 scenarios → FAIL — genuine RED (compile error, `sessionRef` undefined + no named parameter), same category as 6.1/6.10
 - [x] 6.13 [GREEN] Implement `TabSnapshot.sessionRef` + compat `fromJson`/`toJson` → PASS — plain hand-written `_readSessionRef` (no `@JsonKey`, no codegen involved); 8/8 tests passed; negative control (temporarily broke `_readSessionRef` to return `'BROKEN'`) confirmed 6 of 8 tests fail on a real regression
-- [ ] 6.14 Modify `lib/core/constants/app_constants.dart`: `defaultTmuxSession` → `defaultSessionRef` (value `'helm'` unchanged)
-- [ ] 6.15 Modify `profile_edit_screen.dart`, `shortcut_form_sheet.dart`, `tabs_provider.dart`: field rename + multiplexer selection UI
-- [ ] 6.16 **Note (no code)**: legacy `tmuxSession` key is NOT deleted in this change (locked decision) — enforced permanently by 6.4/6.6/6.10's tests staying in the suite
-- [ ] 6.17 Verify: `flutter analyze` && `flutter test`
+- [x] 6.14 Modify `lib/core/constants/app_constants.dart`: `defaultTmuxSession` → `defaultSessionRef` (value `'helm'` unchanged)
+- [x] 6.15 Modify `profile_edit_screen.dart`, `shortcut_form_sheet.dart`, `tabs_provider.dart`: field rename + multiplexer selection UI. **Mirroring decision resolved and centralized**: `lib/core/host/session_reference.dart` (new) is the sole mirroring point — `mirrorSessionReference`/`resolveOptionalSessionReference`/`resolveRequiredSessionReference`/`encodeMultiplexer`/`decodeMultiplexer`, unit-tested directly (14 tests, no widgets). All three write paths (`profile_edit_screen.dart::_save`, `shortcut_form_sheet.dart::_save`, `tabs_provider.dart::saveSnapshot`) now set `sessionRef` and the legacy field to the identical value on every write. `multiplexer` encoded via `MultiplexerId.name`.
+- [x] 6.16 **Note (no code)**: legacy `tmuxSession`/`tmuxSessionName` key is NOT deleted in this change (locked decision) — confirmed still enforced by 6.4/6.6/6.10/6.12's tests staying in the suite (verified passing, all 3 models, post-6.15)
+- [x] 6.17 Verify: `flutter analyze` (0 issues) && `flutter test` (234/234 passed: 220 baseline + 14 new for `session_reference.dart`)
 
-Commits: (a) `connection_profile.dart` migration + codegen (6.1–6.3); (b) dual-write + precedence + round-trip (6.4–6.9); (c) `project_shortcut.dart` migration (6.10–6.11); (d) `TabSnapshot` + constants + UI wiring (6.12–6.16)
+Commits: (a) `connection_profile.dart` migration + codegen (6.1–6.3); (b) dual-write + precedence + round-trip (6.4–6.9); (c) `project_shortcut.dart` migration (6.10–6.11); (d) `TabSnapshot` migration, landed separately as its own commit (6.12–6.13, see slice 6c in HANDOFF.md — `TabSnapshot` had no codegen step to bundle with, so it never shared a commit with (c)); (e) constants rename + UI mirroring wiring, this unit (6.14–6.17)
 
 ## Slice 7: Diagnostics (display-only)
 

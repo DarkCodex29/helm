@@ -47,7 +47,7 @@ mixin _$ProjectShortcut {
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for
@@ -301,7 +301,7 @@ class _$ProjectShortcutImpl implements _ProjectShortcut {
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for
@@ -424,7 +424,7 @@ abstract class _ProjectShortcut implements ProjectShortcut {
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for

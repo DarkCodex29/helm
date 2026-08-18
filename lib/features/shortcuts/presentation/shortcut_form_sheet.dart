@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/constants/app_constants.dart';
+import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/host/session_reference.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/settings/presentation/settings_provider.dart';
 import 'package:helm/features/shortcuts/data/remote_fs_provider.dart';
@@ -30,9 +33,13 @@ class _ProjectShortcutFormSheetState
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _pathCtrl;
-  late final TextEditingController _tmuxCtrl;
+  late final TextEditingController _sessionRefCtrl;
   late final TextEditingController _commandCtrl;
   String? _selectedProfileId;
+
+  /// `null` means "host default" — see
+  /// `lib/core/host/multiplexer_adapter.dart`.
+  MultiplexerId? _selectedMultiplexer;
 
   bool _isLoadingProjects = false;
   bool _isLoadingCurrentDir = false;
@@ -45,16 +52,19 @@ class _ProjectShortcutFormSheetState
     final e = widget.existing;
     _nameCtrl = TextEditingController(text: e?.name ?? '');
     _pathCtrl = TextEditingController(text: e?.projectPath ?? '');
-    _tmuxCtrl = TextEditingController(text: e?.tmuxSession ?? '');
+    // e?.sessionRef already resolves the legacy/neutral precedence at
+    // load time (see project_shortcut.dart's _readSessionRef).
+    _sessionRefCtrl = TextEditingController(text: e?.sessionRef ?? '');
     _commandCtrl = TextEditingController(text: e?.command ?? 'opencode');
     _selectedProfileId = e?.profileId;
+    _selectedMultiplexer = decodeMultiplexer(e?.multiplexer);
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
     _pathCtrl.dispose();
-    _tmuxCtrl.dispose();
+    _sessionRefCtrl.dispose();
     _commandCtrl.dispose();
     super.dispose();
   }
@@ -69,14 +79,23 @@ class _ProjectShortcutFormSheetState
       return;
     }
 
+    // Mirror the session reference into the legacy field — see
+    // lib/core/host/session_reference.dart for why this is the sole
+    // mirroring point rather than re-derived here.
+    final resolvedSessionRef = resolveRequiredSessionReference(
+      _sessionRefCtrl.text,
+      fallback: AppConstants.defaultSessionRef,
+    );
     final shortcut = ProjectShortcut(
       id: _isEditing ? widget.existing!.id : _uuid.v4(),
       name: _nameCtrl.text.trim(),
       projectPath: _pathCtrl.text.trim(),
-      tmuxSession: _tmuxCtrl.text.trim(),
+      tmuxSession: resolvedSessionRef.legacyValue,
       command: _commandCtrl.text.trim(),
       profileId: profileId,
       sortOrder: _isEditing ? widget.existing!.sortOrder : 0,
+      sessionRef: resolvedSessionRef.sessionRef,
+      multiplexer: encodeMultiplexer(_selectedMultiplexer),
     );
 
     final notifier = ref.read(shortcutsProvider.notifier);
@@ -379,11 +398,17 @@ class _ProjectShortcutFormSheetState
                 ),
                 const SizedBox(height: 8),
                 _FormField(
-                  controller: _tmuxCtrl,
-                  label: 'tmux Session',
+                  controller: _sessionRefCtrl,
+                  label: 'Session reference',
                   hint: 'metalpren',
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                _MultiplexerDropdown(
+                  selected: _selectedMultiplexer,
+                  onChanged: (id) =>
+                      setState(() => _selectedMultiplexer = id),
                 ),
                 const SizedBox(height: 12),
                 _FormField(
@@ -702,6 +727,56 @@ class _ProfileDropdown extends StatelessWidget {
       items: profiles
           .map((p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
           .toList(),
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Lets the user pick which multiplexer [ProjectShortcut.sessionRef]
+/// applies to. `null` means "host default" — this sheet never probes the
+/// host, so no option is disabled or flagged based on what the host
+/// actually has installed; that check happens elsewhere at attach time.
+class _MultiplexerDropdown extends StatelessWidget {
+  const _MultiplexerDropdown({required this.selected, required this.onChanged});
+
+  final MultiplexerId? selected;
+  final ValueChanged<MultiplexerId?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<MultiplexerId?>(
+      // ignore: deprecated_member_use
+      value: selected,
+      dropdownColor: const Color(0xFF21262D),
+      style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 14),
+      decoration: InputDecoration(
+        labelText: 'Multiplexer (optional)',
+        labelStyle: const TextStyle(color: Color(0xFFB1BAC4), fontSize: 13),
+        filled: true,
+        fillColor: const Color(0xFF21262D),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF30363D)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF30363D)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF58A6FF)),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Host default')),
+        ...MultiplexerId.values.map(
+          (id) => DropdownMenuItem(value: id, child: Text(id.name)),
+        ),
+      ],
       onChanged: onChanged,
     );
   }

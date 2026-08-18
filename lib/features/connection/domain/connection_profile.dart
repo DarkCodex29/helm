@@ -81,14 +81,14 @@ class ConnectionProfile with _$ConnectionProfile {
     /// SSH username on the remote machine.
     required String username,
 
-    /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+    /// Optional custom tmux session name. Falls back to AppConstants.defaultSessionRef.
     /// Superseded by [sessionRef] — see the class doc.
     String? tmuxSession,
 
     /// Neutral session reference, meaningful for whichever [multiplexer]
     /// is selected. See [_readSessionRef] for the read-time precedence
     /// rule. Never defaulted here — a null value is not an invented
-    /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+    /// fallback; callers apply AppConstants.defaultSessionRef themselves,
     /// exactly as they already did for [tmuxSession] before this
     /// migration. `invalid_annotation_target` (see the file-level ignore
     /// above) is a known freezed+json_serializable false positive for

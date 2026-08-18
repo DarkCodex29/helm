@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/constants/app_constants.dart';
+import 'package:helm/core/host/session_reference.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/connection/data/connection_profile_repository.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
@@ -63,7 +64,7 @@ class TabsNotifier extends Notifier<TabsState> {
 
     final tabCount = state.tabs.length;
     final sessionName =
-        tmuxSessionName ?? '${AppConstants.defaultTmuxSession}-$tabCount';
+        tmuxSessionName ?? '${AppConstants.defaultSessionRef}-$tabCount';
 
     final session = TerminalSession(
       profile: profile,
@@ -127,13 +128,21 @@ class TabsNotifier extends Notifier<TabsState> {
     } else {
       final snapshots = state.tabs.map((t) {
         final idx = state.tabs.indexWhere((x) => x.id == t.id);
+        final resolvedSessionName =
+            t.session.tmuxSessionName ??
+            t.profile.sessionRef ??
+            t.profile.tmuxSession ??
+            '${AppConstants.defaultSessionRef}-$idx';
+        // Mirror the resolved value into both fields — see
+        // lib/core/host/session_reference.dart for why this must be the
+        // sole mirroring point rather than re-derived here.
+        final mirrored = mirrorSessionReference(resolvedSessionName);
         return TabSnapshot(
           profileId: t.profile.id,
           profileName: t.profile.name,
-          tmuxSessionName:
-              t.session.tmuxSessionName ??
-              t.profile.tmuxSession ??
-              '${AppConstants.defaultTmuxSession}-$idx',
+          tmuxSessionName: mirrored.legacyValue,
+          sessionRef: mirrored.sessionRef,
+          multiplexer: t.profile.multiplexer,
         );
       }).toList();
       await repo.markDirty(snapshots);
@@ -154,7 +163,10 @@ class TabsNotifier extends Notifier<TabsState> {
         continue;
       }
 
-      await addTab(profile, tmuxSessionName: snap.tmuxSessionName);
+      await addTab(
+        profile,
+        tmuxSessionName: snap.sessionRef ?? snap.tmuxSessionName,
+      );
     }
 
     await repo.markClean();
@@ -174,7 +186,10 @@ class TabsNotifier extends Notifier<TabsState> {
       return;
     }
 
-    await addTab(profile, tmuxSessionName: shortcut.tmuxSession);
+    await addTab(
+      profile,
+      tmuxSessionName: shortcut.sessionRef ?? shortcut.tmuxSession,
+    );
 
     // Wait for tmux to be ready before sending commands.
     await Future.delayed(const Duration(milliseconds: 500));

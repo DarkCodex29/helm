@@ -5,7 +5,7 @@ class AppConstants {
   static const String appVersion = '0.1.0';
 
   static const int defaultSshPort = 22;
-  static const String defaultTmuxSession = 'helm';
+  static const String defaultSessionRef = 'helm';
   static const int maxReconnectAttempts = 3;
   static const List<int> reconnectDelays = [1, 3, 5];
 

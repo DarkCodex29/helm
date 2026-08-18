@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/constants/app_constants.dart';
+import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/host/session_reference.dart';
 import 'package:helm/features/connection/data/connection_profile_repository.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -28,12 +30,16 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     text: '${AppConstants.defaultSshPort}',
   );
   final _userCtrl = TextEditingController();
-  final _tmuxCtrl = TextEditingController();
+  final _sessionRefCtrl = TextEditingController();
 
   bool _isDefault = false;
   bool _isSaving = false;
   String? _testStatus;
   bool _testPassed = false;
+
+  /// `null` means "host default multiplexer" — see
+  /// `lib/core/host/multiplexer_adapter.dart`.
+  MultiplexerId? _selectedMultiplexer;
 
   ConnectionProfile? _loadedProfile;
 
@@ -55,7 +61,11 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _hostCtrl.text = profile.host;
         _portCtrl.text = '${profile.port}';
         _userCtrl.text = profile.username;
-        _tmuxCtrl.text = profile.tmuxSession ?? '';
+        // profile.sessionRef already resolves the legacy/neutral
+        // precedence at load time (see connection_profile.dart's
+        // _readSessionRef) — no fallback needed here.
+        _sessionRefCtrl.text = profile.sessionRef ?? '';
+        _selectedMultiplexer = decodeMultiplexer(profile.multiplexer);
         _isDefault = profile.isDefault;
       });
     }
@@ -67,7 +77,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     _hostCtrl.dispose();
     _portCtrl.dispose();
     _userCtrl.dispose();
-    _tmuxCtrl.dispose();
+    _sessionRefCtrl.dispose();
     super.dispose();
   }
 
@@ -171,10 +181,15 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
             _buildSectionLabel(context, 'Advanced'),
             const SizedBox(height: 8),
             _buildTextField(
-              controller: _tmuxCtrl,
-              label: 'tmux session (optional)',
+              controller: _sessionRefCtrl,
+              label: 'Session reference (optional)',
               hint: 'helm',
               prefixIcon: Icons.terminal,
+            ),
+            const SizedBox(height: 12),
+            _MultiplexerDropdown(
+              selected: _selectedMultiplexer,
+              onChanged: (id) => setState(() => _selectedMultiplexer = id),
             ),
             const SizedBox(height: 12),
             Container(
@@ -259,13 +274,21 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     setState(() => _isSaving = true);
 
     final repo = ConnectionProfileRepository();
+    // Mirror the session reference into the legacy field — see
+    // lib/core/host/session_reference.dart for why this is the sole
+    // mirroring point rather than re-derived here.
+    final resolvedSessionRef = resolveOptionalSessionReference(
+      _sessionRefCtrl.text,
+    );
     final profile = ConnectionProfile(
       id: _loadedProfile?.id ?? _uuid.v4(),
       name: _nameCtrl.text.trim(),
       host: _hostCtrl.text.trim(),
       port: int.parse(_portCtrl.text.trim()),
       username: _userCtrl.text.trim(),
-      tmuxSession: _tmuxCtrl.text.trim().isEmpty ? null : _tmuxCtrl.text.trim(),
+      tmuxSession: resolvedSessionRef.legacyValue,
+      sessionRef: resolvedSessionRef.sessionRef,
+      multiplexer: encodeMultiplexer(_selectedMultiplexer),
       isDefault: _isDefault,
     );
 
@@ -339,6 +362,36 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+}
+
+/// Lets the user pick which multiplexer [ConnectionProfile.sessionRef]
+/// applies to. `null` means "host default" — this screen never probes
+/// the host, so no option is disabled or flagged based on what the host
+/// actually has installed; that check happens elsewhere at attach time.
+class _MultiplexerDropdown extends StatelessWidget {
+  const _MultiplexerDropdown({required this.selected, required this.onChanged});
+
+  final MultiplexerId? selected;
+  final ValueChanged<MultiplexerId?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<MultiplexerId?>(
+      // ignore: deprecated_member_use
+      value: selected,
+      decoration: const InputDecoration(
+        labelText: 'Multiplexer (optional)',
+        prefixIcon: Icon(Icons.dashboard_customize_outlined, size: 18),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Host default')),
+        ...MultiplexerId.values.map(
+          (id) => DropdownMenuItem(value: id, child: Text(id.name)),
+        ),
+      ],
+      onChanged: onChanged,
+    );
   }
 }
 

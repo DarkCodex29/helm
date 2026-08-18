@@ -36,14 +36,14 @@ mixin _$ConnectionProfile {
   /// SSH username on the remote machine.
   String get username => throw _privateConstructorUsedError;
 
-  /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Optional custom tmux session name. Falls back to AppConstants.defaultSessionRef.
   /// Superseded by [sessionRef] — see the class doc.
   String? get tmuxSession => throw _privateConstructorUsedError;
 
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for
@@ -288,7 +288,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
   @override
   final String username;
 
-  /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Optional custom tmux session name. Falls back to AppConstants.defaultSessionRef.
   /// Superseded by [sessionRef] — see the class doc.
   @override
   final String? tmuxSession;
@@ -296,7 +296,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for
@@ -412,7 +412,7 @@ abstract class _ConnectionProfile implements ConnectionProfile {
   @override
   String get username;
 
-  /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Optional custom tmux session name. Falls back to AppConstants.defaultSessionRef.
   /// Superseded by [sessionRef] — see the class doc.
   @override
   String? get tmuxSession;
@@ -420,7 +420,7 @@ abstract class _ConnectionProfile implements ConnectionProfile {
   /// Neutral session reference, meaningful for whichever [multiplexer]
   /// is selected. See [_readSessionRef] for the read-time precedence
   /// rule. Never defaulted here — a null value is not an invented
-  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// fallback; callers apply AppConstants.defaultSessionRef themselves,
   /// exactly as they already did for [tmuxSession] before this
   /// migration. `invalid_annotation_target` (see the file-level ignore
   /// above) is a known freezed+json_serializable false positive for
