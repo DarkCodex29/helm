@@ -80,7 +80,31 @@ TMUX_FOUND=$MUX_FOUND
 TMUX_ABS=$MUX_ABS
 _probe_mux zellij zellij
 
-if [ "$TMUX_FOUND" = "1" ]; then
+_tmux_server_running() {
+  # Detect a running tmux SERVER PROCESS by name, never by socket path:
+  # TMUX_TMPDIR/-S can relocate the socket, so a path-based check would
+  # silently skip real sessions on a host that uses either. `ps -u`
+  # scopes the search to THIS user's own processes, so another user's
+  # tmux server -- whose socket this probe cannot reach anyway -- never
+  # produces a false positive.
+  #
+  # `tmux list-sessions` is never used for detection: even with no
+  # server running, the tmux client unconditionally creates the per-UID
+  # socket directory as a side effect before it reports "no server
+  # running" -- exactly the host-footprint regression this gate exists
+  # to prevent.
+  if command -v ps >/dev/null 2>&1; then
+    ps -u "$(id -un)" -o comm= 2>/dev/null | grep -Fxq 'tmux: server'
+    return $?
+  fi
+  # `ps` is unavailable: server state cannot be determined. Fail OPEN
+  # (assume a server may exist) so an undetectable real session is
+  # never silently reported as "no sessions" -- that regression is
+  # worse than the empty socket directory this gate otherwise avoids.
+  return 0
+}
+
+if [ "$TMUX_FOUND" = "1" ] && _tmux_server_running; then
   "$TMUX_ABS" list-sessions -F "#{session_name}${_TAB}#{session_attached}" 2>/dev/null | \
     while IFS= read -r _sline; do
       _sname=${_sline%%"${_TAB}"*}
