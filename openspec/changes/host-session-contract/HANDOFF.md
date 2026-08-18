@@ -1,6 +1,8 @@
 # Handoff — host-session-contract
 
-Rewritten 2026-08-18. Read this first when resuming.
+Rewritten 2026-08-18, updated after slice 6 and the verify cycle. Read this first when resuming.
+
+> **Keeping this accurate is part of the work.** This file went stale once already — it was written before slice 6 landed and still claimed slice 6 was untouched while `tasks.md` said otherwise, which `sdd-verify` caught as a defect in a deliverable. Nothing in the build, test or verify pipeline reads this file, so only a human keeps it honest. If you change status here, cross-check `tasks.md` and `git log`.
 
 ---
 
@@ -8,14 +10,15 @@ Rewritten 2026-08-18. Read this first when resuming.
 
 | | |
 |---|---|
-| Slice units delivered | **9 of 10** (1, 2, 3a, 3b, 4, 5a, 5b, 5c, 7) |
-| Remaining | **Slice 6 only** — the single irreversible slice |
-| Tasks | 82 of 100 (`3a.12` deferred by standing override) |
-| Commits for this change | 12 |
-| Test suite | 39 → **195**, all green |
+| Implementation | **complete** — all 10 slice units (1, 2, 3a, 3b, 4, 5a, 5b, 5c, 6, 7) |
+| Tasks | **100 of 100** |
+| Commits for this change | 21 |
+| Test suite | 39 → **239**, all green |
 | `flutter analyze` | clean |
 | Working tree | clean |
 | Branch | `main` |
+| Verify | 21/23 requirements fully compliant, **0 blockers, 0 CRITICAL** |
+| Archive | **not yet** — see §2 |
 
 ```
 68dbe36  fix(ssh): verify host keys with trust-on-first-use
@@ -31,23 +34,39 @@ a2a0e31  test(terminal): characterize TerminalSession connect, reconnect, ...   
 dd33c8b  fix(terminal): attach via exec-with-pty and close the abandoned shell  # 5b
 ce7cbc1  feat(ssh): classify PTY denial with a dedicated actionable message     # 5c
 f3d6d08  feat(host): report linger and Tailscale host problems without fixing   # 7
+e274fa9  docs(sdd): rewrite the host-session-contract handoff
+ea6f7e1  feat(connection): add a neutral session reference to ConnectionProfile  # 6a
+cb523eb  feat(shortcuts): add a neutral session reference to ProjectShortcut     # 6b
+e99313a  feat(terminal): add a neutral session reference to TabSnapshot          # 6c
+5a8adc2  feat(host): mirror the session reference into the legacy field          # 6d
+c0f2af2  refactor(terminal): delete the superseded TmuxService                   # 3a.12
+3f7db57  fix(terminal): report what the attach session's exit status says        # C1
+92903ae  docs(sdd): correct the attach exit status requirement to match reality
 ```
 
 ---
 
-## 2. What is left: slice 6, and why it was saved for last
+## 2. What is left
 
-Slice 6 migrates three models persisted in `SharedPreferences` — `ConnectionProfile`, `ProjectShortcut`, `TabSnapshot` — off the legacy `tmuxSession` key onto a neutral session reference.
+Implementation is done. What remains is a decision, not code.
 
-**It is the only irreversible slice in the plan.** Everything else can be reverted with a `git revert`. This one rewrites data already sitting on real devices, and a mistake means users lose saved profiles.
+`sdd-verify` returned **0 blockers and 0 CRITICAL findings**, but its strict verdict is `fail`. That is a property of the validation schema, not a defect: `gentle-ai sdd-verify-validate` refuses a `pass` verdict whenever completed requirements or scenarios are below total, regardless of severity. Two scenarios are below total, both pre-existing and both disclosed since the first verify run:
 
-Three things make it delicate:
+- **`host-command-port` — "No file left behind on the host."** Holds by inspection: no file-writing primitive exists in the code path. Not provable by a Flutter unit test; it needs a live-host filesystem check.
+- **`host-probe-contract` — encode side of "Escaping Round-Trip."** The parser's decoder is tested against a hand-built wire string, but the probe script's shell-side `_esc()` encoder **is never executed by any test** — the suite contains no `Process.run` at all. This is the same shape as the failure that cost slice 4 a review round: if the encoder is wrong, every decoder test still passes.
 
-- **Task 6.8 is the single task out of 100** that proves a profile written by the *current shipped build* still loads after the change. Nothing else in the plan covers that. It is the whole safety net.
-- `ConnectionProfile` and `ProjectShortcut` use freezed + json_serializable and need `dart run build_runner build --delete-conflicting-outputs`. `TabSnapshot` has no codegen at all, so the three do not migrate the same way.
-- Locked decision 7 applies: the migration **adds a neutral field with a back-compat reader** and does **not** delete the legacy `tmuxSession` key. Do not "clean up" the old key.
+Of the two, the second is the one worth closing. A `Process.run('sh', ...)` smoke test that pushes each escapable byte class through the real script and back would catch a genuine bug class this suite is currently blind to.
 
-Start it with a fresh session and full attention, not at the tail of a long one.
+So the choice is: close that gap with a shell smoke test, or archive with both recorded as accepted limitations, matching how W1–W4 were handled.
+
+### Verify findings carried forward, all accepted by the owner
+
+- **W1** — the probe script's `_esc()` encoder is never executed by a test (the gap above)
+- **W2** — `HostDiagnostics` has **no production call site**. Every unit requirement passes; nothing surfaces it to a user.
+- **W3** — the agent-state surface (`AgentSupport.resolve`, `HerdrAdapter.agents`) likewise has no caller outside its own tests.
+- **W4** — a fourth `ConnectionProfile` write path at `first_time_setup_screen.dart:92` bypasses the mirroring helper. Not a spec violation — both keys are still emitted and the read-side fallback covers it — but task 6.15's "every write path" audit covered three of at least four construction sites.
+
+**W2 and W3 together are the honest summary of what this change is**: a contract layer, built and tested, whose consumers are future work. The plumbing is in; the faucet is not connected. No task in the plan asked for that wiring. Decide it deliberately rather than discovering it later.
 
 ---
 
@@ -91,14 +110,15 @@ The repository owner decides **every** commit boundary. Apply agents never commi
 |---|---|---|---|
 | 1 | `HostCommandRunner` port + dartssh2 adapter + fake | 12/12 | ✅ 2 commits |
 | 2 | Probe script + parser + `HostReport` + contract doc | 22/22 | ✅ 2 commits |
-| 3a | `MultiplexerAdapter` + capabilities + `TmuxAdapter` | 13/14 | ✅ 1 commit |
+| 3a | `MultiplexerAdapter` + capabilities + `TmuxAdapter` | 14/14 | ✅ 1 commit (+ `3a.12` closed later, `c0f2af2`) |
 | 3b | `ZellijAdapter` | 5/5 | ✅ 1 commit |
 | 4 | `HerdrAdapter` + agent-state capability | 8/8 | ✅ 1 commit |
 | 5a | `TerminalSession` characterization tests | 2/2 | ✅ 1 commit, 0 production lines |
 | 5b | Exec-with-PTY attach + abandoned-shell close | 2/2 | ✅ 1 commit |
 | 5c | PTY-denied classification + regression guards | 7/7 | ✅ 1 commit |
-| 6 | Persisted-model migration | 0/17 | ⬜ **only irreversible slice** |
+| 6 | Persisted-model migration | 17/17 | ✅ 4 commits — **was the only irreversible slice** |
 | 7 | Diagnostics: linger / `KillUserProcesses` + Tailscale | 11/11 | ✅ 1 commit |
+| C1 | Attach exit status classification (verify remediation) | — | ✅ 1 commit + spec amendment |
 
 Both slice 4 and slice 5b **failed their orchestrator gate on the first attempt with a fully green harness**, and were corrected on the second. See §8.
 
@@ -192,11 +212,17 @@ Both failures passed `flutter analyze` and the full test suite before being caug
 
 > Disclosing a defect honestly is necessary but not sufficient. A defect filed as "unavoidable, flagging for awareness" is a defect that ships. Audit the framing, not just the disclosure.
 
+**And a third, caught by verify rather than by the gate — the spec itself was wrong.** `session-attach` required that a detach be distinguishable from the session being killed, through the exit status. Nothing implemented it, and when it finally was, real tmux 3.6a and zellij 0.44.3 were measured: both exit `0` for a detach **and** for the session being killed while the server survives. Zellij gives no distinguishing signal on any observable channel. Only the whole server dying differs (tmux: `1`).
+
+> The requirement was not badly written. It rested on an assumption about tmux that nobody had tested, and that is false. A spec can be the thing that is wrong, and only measurement finds out.
+
+The clause was removed and the measurement recorded inside the requirement so it is not reintroduced by someone reasoning from the same untested assumption. The implementation reports three states instead — ambiguous clean end, verified abnormal end, unknown — rather than faking a binary it cannot honestly claim.
+
 ---
 
 ## 9. Known debt, with owners
 
-- **Task 3a.12 — delete `lib/features/terminal/domain/services/tmux_service.dart`.** Deferred by explicit instruction to keep slice 3a reviewable. It is now **confirmed fully unreferenced** in `lib/` and `test/`, so it is unblocked and safe to delete.
+- ~~Task 3a.12 — delete `tmux_service.dart`.~~ **Closed** at `c0f2af2`, once slice 5b moved the last tmux-attach path onto the adapter and a repo-wide grep confirmed the class was referenced nowhere but its own 88-line file.
 - **`connectAndOpenShell` still opens a shell unconditionally**, including on the attach path where slice 5b immediately closes it again. The clean fix is not opening it at all — but **host-key mismatch detection is coupled to that shell open**: `onVerifyHostKey` only *captures* the mismatch into a local, and it is rethrown inside the `catch` wrapping `client.shell()`. Removing the shell without first relocating that rethrow risks **silently regressing the MITM fix from `68dbe36`**. `connectAndOpenShell` also has **zero test coverage**. Needs its own unit, characterization first.
 - **`TerminalSession.dispose()` is not safe to call twice** — `statusNotifier.dispose()` has no guard, and the second call throws `FlutterError`. Pinned by a passing test, deliberately not fixed. Owner chose a separate follow-up.
 - **`TerminalSession.reconnect()` can propagate an uncaught exception** — it constructs `SSHKeyService()` with no seam and awaits `getPrivateKey()` **outside** the try/catch that only wraps the later `connect()`. Pinned, not fixed. Same follow-up decision.
