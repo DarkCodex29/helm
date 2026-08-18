@@ -42,12 +42,45 @@ channel, and MUST NOT create, write, install, or cache any file on the remote ho
   MUST be closed to signal end-of-input
 - AND no pseudo-terminal MUST be requested for this channel
 
-#### Scenario: No file left behind on the host
+The script's own absence of write primitives is **necessary but not sufficient**, and this
+was learned the hard way. The v1 probe contained no redirection to a file, no `touch`,
+`mkdir`, `cp`, `mv` or `tee` — and still left an empty `/tmp/tmux-<uid>` behind on every
+run, because `tmux list-sessions` creates its per-UID socket directory the moment a client
+starts, with no server to talk to and even when the call then fails. Measured against a
+real Ubuntu 24.04 host: the directory appeared during the call window, was deleted, and
+reappeared on an identical re-run. Reading the source proves how the source reads, not
+what the execution does.
 
-- GIVEN a `runScript` call has completed, whether it succeeded or failed
-- WHEN the remote host is inspected afterward
-- THEN the host MUST show no new file, directory, or cached artifact created by the
-  call
+So the obligation below is on **what the code invokes**, not only on what it writes.
+
+The original scenario asked for the host to be inspected after the call and show no new
+artifact. That is the true statement of intent, and it is retained as the requirement — but
+it cannot be automated in this project's harness, which is a Flutter test suite with no
+remote host. It is evidenced by recorded live measurement instead, and the scenarios below
+carry the parts a test can genuinely assert.
+
+#### Scenario: No command is invoked when there is nothing for it to report
+
+- GIVEN a host where a queried tool is installed but has no running server or state to
+  report
+- WHEN the script runs
+- THEN it MUST NOT invoke that tool's query command at all
+- AND the emitted records MUST be identical to those for a host where the tool is absent
+
+#### Scenario: An undetectable server never becomes a silent absence
+
+- GIVEN a host where the means of detecting a running server is itself unavailable
+- WHEN the script runs
+- THEN it MUST attempt the query rather than report nothing
+- AND the resulting host artifact is an accepted, disclosed exception to this requirement,
+  because reporting no sessions on a host that has them is the greater harm
+
+#### Scenario: Detection is independent of relocatable paths
+
+- GIVEN a host that has relocated a tool's socket or state directory away from its default
+- WHEN the script decides whether to query that tool
+- THEN the decision MUST NOT depend on that path
+- AND a host with real sessions MUST still have them enumerated
 
 ### Requirement: Swappable Transport Implementations
 
