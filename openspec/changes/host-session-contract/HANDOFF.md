@@ -2,18 +2,20 @@
 
 Rewritten 2026-08-18, updated after slice 6 and the verify cycle. Read this first when resuming.
 
-> **Keeping this accurate is part of the work.** This file went stale once already — it was written before slice 6 landed and still claimed slice 6 was untouched while `tasks.md` said otherwise, which `sdd-verify` caught as a defect in a deliverable. Nothing in the build, test or verify pipeline reads this file, so only a human keeps it honest. If you change status here, cross-check `tasks.md` and `git log`.
+> **Keeping this accurate is part of the work, and it has gone stale twice.** First it was written before slice 6 landed and still called slice 6 untouched. Then it was corrected, two more commits landed, and it was stale again — `sdd-verify` caught both, because nothing in the build, test or verify pipeline reads this file. Only a human keeps it honest.
+>
+> **The snapshot below is pinned to a commit for exactly that reason.** If `git rev-parse --short HEAD` does not match it, treat every number here as suspect and cross-check `tasks.md` and `git log`. Silent staleness is the failure mode; a visible mismatch is the defence.
 
 ---
 
-## 1. Snapshot
+## 1. Snapshot — describes commit `ad15caf`
 
 | | |
 |---|---|
 | Implementation | **complete** — all 10 slice units (1, 2, 3a, 3b, 4, 5a, 5b, 5c, 6, 7) |
 | Tasks | **100 of 100** |
-| Commits for this change | 21 |
-| Test suite | 39 → **239**, all green |
+| Commits for this change | 24 |
+| Test suite | 39 → **250**, all green |
 | `flutter analyze` | clean |
 | Working tree | clean |
 | Branch | `main` |
@@ -42,6 +44,9 @@ e99313a  feat(terminal): add a neutral session reference to TabSnapshot         
 c0f2af2  refactor(terminal): delete the superseded TmuxService                   # 3a.12
 3f7db57  fix(terminal): report what the attach session's exit status says        # C1
 92903ae  docs(sdd): correct the attach exit status requirement to match reality
+949caab  docs(sdd): bring the handoff back in line with what actually shipped
+cf77550  test(host-probe): run the real escaping function under a real shell   # W1
+ad15caf  fix(host-probe): stop tmux enumeration creating a socket directory     # footprint
 ```
 
 ---
@@ -50,14 +55,20 @@ c0f2af2  refactor(terminal): delete the superseded TmuxService                  
 
 Implementation is done. What remains is a decision, not code.
 
-`sdd-verify` returned **0 blockers and 0 CRITICAL findings**, but its strict verdict is `fail`. That is a property of the validation schema, not a defect: `gentle-ai sdd-verify-validate` refuses a `pass` verdict whenever completed requirements or scenarios are below total, regardless of severity. Two scenarios are below total, both pre-existing and both disclosed since the first verify run:
+Three verify runs have landed. The latest reports **22/23 requirements, 36/37 scenarios, 0 blockers, 0 CRITICAL** — and still a `fail` verdict, because `gentle-ai sdd-verify-validate` refuses a `pass` whenever completed requirements or scenarios are below total, regardless of severity. That is a schema property, not a defect.
 
-- **`host-command-port` — "No file left behind on the host."** Holds by inspection: no file-writing primitive exists in the code path. Not provable by a Flutter unit test; it needs a live-host filesystem check.
-- **`host-probe-contract` — encode side of "Escaping Round-Trip."** The parser's decoder is tested against a hand-built wire string, but the probe script's shell-side `_esc()` encoder **is never executed by any test** — the suite contains no `Process.run` at all. This is the same shape as the failure that cost slice 4 a review round: if the encoder is wrong, every decoder test still passes.
+**One scenario remains, and it cannot be closed from here**: `host-command-port` — *"No file left behind on the host."* Satisfying it in the completeness accounting needs an automated assertion about a **remote host's filesystem**, which a Flutter test harness structurally cannot make.
 
-Of the two, the second is the one worth closing. A `Process.run('sh', ...)` smoke test that pushes each escapable byte class through the real script and back would catch a genuine bug class this suite is currently blind to.
+It is, however, now **true and measured** rather than merely asserted — see §8, because getting there disproved the previous answer.
 
-So the choice is: close that gap with a shell smoke test, or archive with both recorded as accepted limitations, matching how W1–W4 were handled.
+So the remaining choice is only: archive with that single gap recorded as a standing, disclosed limitation, or invest in an integration harness that can assert against a live host.
+
+### Verify findings carried forward
+
+- **C1** — closed at `3f7db57` plus the spec amendment at `92903ae`
+- **W1** — closed at `cf77550`: the probe's shell-side `_esc()` encoder now runs under a real `/bin/sh`, extracted byte-for-byte from the script constant
+- **W5** — the staleness of this very file. Closed once at `949caab`, then reopened by the two commits after it. Pinning the snapshot to a commit is the attempt to stop that recurring.
+- **W6** — the footprint gate **fails open** when its detection tool is unavailable: it enumerates anyway and may then create the socket directory. A deliberate tradeoff, since silently reporting zero sessions on a host that has them is far worse than an empty directory — but it is a real, narrow exception to the spec's unconditional wording, not a non-issue.
 
 ### Verify findings carried forward, all accepted by the owner
 
@@ -217,6 +228,10 @@ Both failures passed `flutter analyze` and the full test suite before being caug
 > The requirement was not badly written. It rested on an assumption about tmux that nobody had tested, and that is false. A spec can be the thing that is wrong, and only measurement finds out.
 
 The clause was removed and the measurement recorded inside the requirement so it is not reintroduced by someone reasoning from the same untested assumption. The implementation reports three states instead — ambiguous clean end, verified abnormal end, unknown — rather than faking a binary it cannot honestly claim.
+
+**And a fourth: "holds by inspection" was correct about the source and wrong about the behaviour.** Verify listed *"No file left behind on the host"* as untested but holding by inspection — and inspection was right, the script has no write primitive anywhere. Measured against a real host before amending the scenario, the probe turned out to leave an empty `/tmp/tmux-<uid>` behind every single run. Deleting it and re-running brought it straight back; `tmux list-sessions` alone was the culprit. tmux creates its per-UID socket directory the moment a client starts, with no server to talk to and even when the call then fails.
+
+> The script does not write. It invokes tmux, and tmux writes. Reading the source proves how the source reads, not what the execution does. The intended next step had been to amend the scenario to say it held by inspection — which would have written a false promise into the contract with a straight face.
 
 ---
 

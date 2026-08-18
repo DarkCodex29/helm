@@ -1,17 +1,17 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:a585ad8d7e62426ddaf54b523faa6e80906f081e8210ba2228468f02e8a951f5
+evidence_revision: sha256:a0683d3a220f2d9e574e7693721c6aa1ad86ed00474af0eeca30a884ff559288
 verdict: fail
 blockers: 0
 critical_findings: 0
-requirements: 21/23
-scenarios: 35/37
+requirements: 22/23
+scenarios: 36/37
 test_command: flutter test
 test_exit_code: 0
-test_output_hash: sha256:9add5e69b388b8bc19c2f86ce553bb85dbca62fd4de54e4b8bf135833b9c4df9
+test_output_hash: sha256:c3c95ed2988bbe9ab49038c3a4006378af9bf7eb9244bc69cb0bcf96a872db0f
 build_command: flutter analyze
 build_exit_code: 0
-build_output_hash: sha256:69517e383509d614b3689f03bcf67005189ce61f62a08added0e7fa211823463
+build_output_hash: sha256:8e78fbae955094f14513060c6ad1732c81a1bf52e408abbff6002dfdab8a65e7
 ```
 
 ## Verification Report
@@ -19,7 +19,7 @@ build_output_hash: sha256:69517e383509d614b3689f03bcf67005189ce61f62a08added0e7f
 **Change**: host-session-contract
 **Version**: N/A (first version, `openspec/specs/` was empty before this change)
 **Mode**: Strict TDD
-**Re-run context**: this is a re-verification after the prior run's single CRITICAL finding (C1) was implemented and, separately, the requirement it targeted was amended to match a real, measured constraint on tmux/zellij exit-status reporting. HEAD at this run: `92903aed898672d4a6ea734a6a156af830ea6dd3`.
+**Re-run context**: third verify pass for this change. HEAD at this run: `ad15caff463c57f338e5729a59304f8714c17556`. Working tree clean. Two commits landed since the prior verify report (`92903ae`): `cf77550` (encoder-side test for W1) and `ad15caf` (a real, previously-undetected footprint defect found and fixed on live host measurement, superseding this run's own prior "holds by inspection" classification for that scenario).
 
 ### Completeness
 
@@ -29,147 +29,177 @@ build_output_hash: sha256:69517e383509d614b3689f03bcf67005189ce61f62a08added0e7f
 | Tasks complete | 100 |
 | Tasks incomplete | 0 |
 
-`tasks.md` still marks all 100 tasks `[x]` (confirmed via direct read: zero `[ ]` occurrences). Working tree clean at `92903ae`, 13 commits ahead of `origin/main`.
+Confirmed by direct grep: `- [x]` count 100, `- [ ]` count 0.
 
 ### Build & Tests Execution
 
-**Build**: ✅ Passed
+**Build**: PASSED
 
 ```text
 $ flutter analyze
 Analyzing helm...
-No issues found! (ran in 1.8s)
+No issues found! (ran in 3.6s)
 ```
 
-**Tests**: ✅ 239 passed / ❌ 0 failed / ⚠️ 0 skipped
+**Tests**: 250 passed / 0 failed / 0 skipped
 
 ```text
 $ flutter test
 ...
-00:01 +231: .../project_shortcut_test.dart: Round-trip: shortcut written by the pre-migration app version loading then re-saving a pre-migration shortcut keeps every original field value and adds the neutral key alongside the untouched legacy key
-00:01 +232: .../widget_test.dart: placeholder
-00:01 +233: .../fake_host_command_runner_test.dart: run returns the exact result registered for that command
-00:01 +234: .../fake_host_command_runner_test.dart: run records every call in invocation order
-00:01 +235: .../fake_host_command_runner_test.dart: run throws when a command has no scripted result...
-00:01 +236: .../fake_host_command_runner_test.dart: runScript returns the exact result registered for that script
-00:01 +237: .../fake_host_command_runner_test.dart: runScript throws when a script has no scripted result...
-00:01 +238: .../fake_host_command_runner_test.dart: satisfies the HostCommandRunner contract...
-00:01 +239: All tests passed!
+00:02 +249: .../fake_host_command_runner_test.dart: satisfies the HostCommandRunner contract...
+00:02 +250: All tests passed!
 ```
 
-Exit code `0` for both commands, run twice in this session with identical results and hashed each time. 239/239, up from the prior run's 234/234 — the delta is exactly the 5 new tests in `terminal_session_test.dart`'s `TerminalSession — attach exit status (C1: ...)` group.
+Exit code 0 for both commands, run twice this session with identical results. 250/250, up from the prior report's 239/239 — the delta is exactly the 11 new tests: 6 in `probe_script_v1_test.dart` (encoder-side Escaping Round-Trip, closes W1) + 5 in `probe_script_v1_tmux_gate_test.dart` (tmux-server detection gate logic, closes the footprint defect at the decision-logic level).
 
-**Coverage**: not run (unchanged from the prior report; not part of `sdd/helm/testing-capabilities`).
+**Coverage**: not run (unchanged from prior reports; not part of `sdd/helm/testing-capabilities`).
 
-### Spec Amendment Verdict — `session-attach`'s "Attach Exit Status Reflects the Multiplexer Session"
+---
 
-**Legitimate correction, not a weakened contract.** Assessed on the four questions posed:
+### Verdict on the Footprint Fix — answers to the four posed questions
 
-1. **Is the amended requirement still a real constraint, or was it hollowed out?** Still real. The new text still forbids the dishonest behavior the original was trying to prevent (overclaiming a detach), it just no longer demands an outcome that was measured to be physically unavailable from the mechanism named (exit status). "MUST NOT claim more than that status actually proves" is a falsifiable normative constraint, not a no-op — code that reported `AttachEndedCleanly` as "Detached" instead of "session ended, cause undetermined" would violate it, and code that silently treated a missing exit status as a clean end would also violate it. Both are exactly the failure modes an implementer under time pressure would reach for.
-2. **Do the three new scenarios forbid the dishonest behaviors?** Yes, precisely the two named in this task's brief:
-   - "claiming a confident detach on an ambiguous exit" → forbidden by Scenario 1 ("MUST NOT be reported as a detach").
-   - "collapsing an absent status into a clean end" → forbidden by Scenario 3 ("MUST NOT be reported as a clean end").
-   - Scenario 2 adds a positive obligation (abnormal exits must carry their evidence) that has no equivalent in the original requirement — the amendment is not purely subtractive.
-3. **Does the implementation satisfy them, or merely coexist with them?** Satisfies them, verified by direct code read plus 4 targeted tests (below) that assert on the exact message text and the exact `AttachExitOutcome` variant produced for each input. `_classifyAttachExit` in `terminal_session.dart:132-142` implements exactly the three-way split the scenarios describe: `exitSignal != null || (exitCode != null && exitCode != 0)` → abnormal (carries both fields); `exitCode == 0` → clean/ambiguous; otherwise (both null) → unknown. This is not a case of the tests merely restating the code — `test/helpers/fake_ssh_session.dart` overrides the two dartssh2 getters the classifier reads (`exitCode`/`exitSignal`) directly, so the tests drive the classifier through its real public surface with independently chosen inputs, not through a hand-tuned protocol string a shared assumption could corrupt (contrast with W1's `_esc()` risk).
-4. **Is the empirical claim plausible and internally consistent?** Independently spot-checked below. The core claim — a killed session (server surviving) and a clean detach are indistinguishable via tmux's exit status — was reproduced. The secondary illustrative claim ("kill-server → exit 1") could not be reliably confirmed or refuted in this sandbox; see below for exactly why, and note that this secondary claim is prose color in the requirement's rationale, not itself a tested MUST scenario, so its uncertainty does not weaken the three scenarios that are normative.
+**1. Is the "No file left behind on the host" scenario now satisfied?**
 
-#### Empirical spot-check performed this run
+The underlying product defect is genuinely fixed, and I independently reproduced both directions on the live production host (`ssh contabo`, Ubuntu 24.04.4, tmux 3.4), not merely trusting the commit message:
 
-Local `tmux 3.6a` and `zellij 0.44.3` are installed at `/opt/homebrew/bin/` — exact versions the requirement cites.
+- Extracted the exact `probeScriptV1` constant (lines 10–118, byte-for-byte, no retyping) and piped it to `sh -s` over SSH with no PTY, matching the app's real delivery path, with no tmux server running. Confirmed: `env`/`mux` records only, no `session` record, exit 0, and `ls /tmp/` showed **no `tmux-*` directory** before or after — the fix holds.
+- Started a real detached tmux session (`helm_verify_probe_test`), re-ran the same extracted script: the session was correctly enumerated (`session	tmux	helm_verify_probe_test	active	0`).
+- Checked out the **pre-fix** script at `cf77550` (before `ad15caf`), extracted it the same way, and ran it against the *same live session*: output for the `mux`/`session` lines was **byte-for-byte identical** to the fixed script's output. Added a second session and repeated — still byte-for-byte identical for both sessions, in order.
+- Directly confirmed the detection string on the real host: `ps -u deployer -o comm=` reports the running server's process name as literally `tmux: server` — exactly the literal the gate's `grep -Fxq 'tmux: server'` matches against. This is not a simulated assumption; it is the real host's real process table.
+- Killed the server and cleaned up; host left exactly as found.
 
-**Confirmed, reliably, twice:** using a tmux **control-mode** client (`tmux -C attach -t vs`, which communicates over stdin/stdout as text rather than needing a full pty — this was necessary because pty-based automation via `script` in this sandbox destroyed the tmux server unpredictably within ~1-2 seconds of every attach, for reasons that look like this harness's process/pty handling rather than tmux itself), with two sessions (`keepalive` kept the server alive) — killing the attached session (`tmux kill-session -t vs`) while `keepalive` still existed produced client exit code **0**, and the server was still running afterward (`keepalive` still listed). This directly reproduces the requirement's core claim: a session ending "clean" cannot be told apart from a user detach through exit status alone.
+So: **the defect is real, was correctly diagnosed, and is correctly fixed** — I did not just accept this on the strength of prose in `HANDOFF.md` or the commit message; I reproduced the causal chain myself on the same production host.
 
-**Not reliably confirmed either way:** the requirement's illustrative aside that killing the entire server (`tmux kill-server`) produces exit `1` for a normal client. Every attempt to script a real pty-attached client (`script -q ... tmux attach`) against this sandbox's backgrounded-job handling caused the tmux server to die on its own within 1-2 seconds, before any deliberate kill command ran — visible as "no server running" errors appearing before I had issued one. The one methodology that ran reliably (control mode) is a materially different code path inside tmux (it exchanges text notifications instead of forwarding a pty), and under it `kill-server` also produced exit `0` in my one run — but I do not trust that result as representative of a normal attached client, since control mode's exit path is not necessarily wired the same way. I am reporting this as **unverified**, not as evidence against the requirement's aside, per the task's instruction not to accept or reject on faith. This uncertainty does not affect the verdict above: none of the requirement's three normative scenarios depend on the `kill-server` exit code being specifically `1`.
+**However**, per this skill's hard rule — "a spec scenario is compliant only when a covering test passed at runtime" — my live SSH measurement, and the original author's, are **not** a covering test in the sense this schema counts. They are **recorded live evidence**, a distinct evidentiary category from an automated test in the `flutter test` harness, and no automated test in this suite executes `runScript()` against a real remote filesystem and inspects it afterward (nor can one, without a live host fixture this project does not have). The five gate-logic tests in `probe_script_v1_tmux_gate_test.dart` prove the **branch selection** (`_tmux_server_running` → `SERVER_RUNNING`/`SERVER_NOT_RUNNING`) under a real `/bin/sh` with a controlled fake `ps`, which is real and valuable evidence, but it is not itself a test that asserts the absence of a file on a host.
 
-**Zellij**: attempted, invalidated by my own test-setup error (session-name collision between a sanity-check command and the intended attach command meant the "attach" client never actually attached — confirmed from its own logged error, "Session with name zvs already exists"). No valid zellij measurement was obtained this run; the requirement's zellij claims remain unverified by me, exactly as the prior report already disclosed them as unverified by the implementer.
+**Verdict: still not COMPLIANT under the strict schema — still UNTESTED by the letter of the rule — but the underlying claim it was previously held to by inspection is now independently confirmed true by live measurement, twice, including by me this run.** This is a meaningfully different and stronger epistemic position than the prior report's "holds by inspection," which I judge below to have actually been **wrong** (see the meta-finding after Q2).
 
-**Conclusion on the amendment**: the load-bearing part of the empirical claim is confirmed by independent measurement, the requirement's language change is a real (if narrower) constraint rather than a hollowed-out one, its three scenarios forbid the two dishonest behaviors this task named plus add a positive one, and the implementation satisfies them with tests that do not share the implementation's assumptions. This is a legitimate correction.
+**2. Is the fail-open branch defensible or a hole?**
 
-### C1 Status: CLOSED
+Read literally, the spec's scenario text has no carve-out: "the host MUST show no new file, directory, or cached artifact created by the call" is unconditional. The fail-open branch (`command -v ps` unavailable → assume a server may exist → enumerate anyway) means that on a host with **both** no running tmux server **and** no `ps` binary, the fix's own gate cannot detect that absence and the original defect (an empty `tmux-$UID` socket directory) reappears. This is a genuine, narrow exception to the letter of the requirement, and it is worth stating plainly rather than waving away.
 
-**Prior finding**: `session-attach`'s "Attach Exit Status Reflects the Multiplexer Session" requirement had zero implementation and zero test coverage.
+That said, judged on engineering merits rather than the letter of the spec text: `ps` is a POSIX-baseline utility present on effectively every general-purpose Linux host capable of running an interactive multiplexer session for SSH terminal work (the entire reason this app exists) — a host missing `ps` but running tmux for a user's persistent terminal session is a vanishingly unlikely combination, and if it did occur, the alternative failure mode (silently reporting "no sessions" on a host that has real ones) directly contradicts this app's core purpose: finding an already-running session. An ephemeral, empty, `0700`-mode directory in `/tmp` is a strictly lower-severity outcome than lying to the user about session existence. The tradeoff is disclosed in the commit message, not hidden, and the harm is bounded (no data, no permissions issue, no persistence beyond the directory itself).
 
-**Current status**: implemented in `lib/features/terminal/data/terminal_session.dart` (commit `3f7db57`) and covered by 5 tests in `test/features/terminal/data/terminal_session_test.dart`'s `TerminalSession — attach exit status (C1: ...)` group — 4 map directly to the amended spec's 3 scenarios (one scenario, the abnormal-exit one, gets 2 tests: exit code and exit signal), plus a 5th regression test proving the attach-session classification wins over a later generic `client.done` disconnect firing for the same teardown (no duplicate/conflicting message). All 5 pass. The classification is captured into a local (`attachSession`) before the `.then()` listener is registered, so a later `reconnect()` reassigning `_session` cannot misattribute one session's exit status to another — matches the commit message's stated safeguard, confirmed by direct read of `terminal_session.dart:255-261`.
+**Judgment: defensible as an engineering tradeoff, but it is a real, disclosed gap in the literal guarantee, not a non-issue.** I am recording it as a new WARNING (W6) rather than accepting the commit's own framing uncritically or promoting it to CRITICAL — it doesn't break the spec at the level this suite's static/runtime evidence can prove wrong in the overwhelming majority of real deployments, but the unconditional spec text and the actual implementation now diverge in one named edge case.
 
-**Verdict**: satisfied. This requirement now traces to a passing test for all three of its scenarios.
+**3. Did the fix regress enumeration?**
+
+**No — independently confirmed, not just trusted.** See the live-host comparison in Q1: pre-fix and fixed script produce byte-for-byte identical `mux`/`session` output against the same real server, with one and then two real sessions. The gate cannot skip a host that genuinely has sessions because detection reads the invoking user's own process table for the exact string `tmux: server` — which I confirmed is the real comm name tmux 3.4 reports on this host — and is unaffected by `TMUX_TMPDIR`/`-S` socket relocation (the gate never inspects the socket path at all, only the process list).
+
+**4. Does the gate itself introduce a new footprint or side effect?**
+
+`ps -u "$(id -un)" -o comm=`, `id -un`, and `grep -Fxq` are all read-only operations against the process table and stdin; none of them write to the filesystem. No new footprint. The only new cost is CPU/process overhead (three additional short-lived subprocesses per probe call), which is not the kind of artifact the spec's scenario is concerned with.
+
+**Meta-finding, not asked for but load-bearing**: the prior verify report's classification of this scenario as "holds by inspection: no file-writing primitive exists in the code path" was **methodologically correct and substantively wrong at the same time** — the source code genuinely contains no write primitive, and the report said so accurately, but the conclusion drawn from that fact ("therefore no footprint") was false, because the script *calls* `tmux`, and `tmux`'s own client creates its socket directory as a side effect of the call, independent of anything the probe script itself writes. This is exactly the kind of gap "inspection of behavior one layer removed" cannot catch, and it is a genuinely new category of miss for this change, distinct from W1's "encoder never executed" gap (that one was about the format's own logic; this one is about an external binary's undocumented side effect). I am recording this explicitly because the task asked me to be sceptical of exactly this claim, and the honest answer is: the inspection-based verdict this project shipped in two prior verify reports was wrong, and only live measurement — first the author's, now independently mine — caught it.
+
+---
+
+### C1 Status: CLOSED (unaffected by this run's commits)
+
+`session-attach`'s exit-status requirement remains implemented in `terminal_session.dart` (commit `3f7db57`), covered by 5 tests, unchanged since the prior report — confirmed by `git diff --stat 92903ae..ad15caf -- lib/ test/`, which shows only `probe_script_v1.dart` and its two test files touched. No re-verification of this domain was needed; carrying forward the prior report's independently-derived verdict, which itself was an adversarial re-derivation, not a restated assumption.
+
+### W1 Status: CLOSED
+
+`probe_script_v1_test.dart` (added at `cf77550`) runs the real `_esc()` function — extracted byte-for-byte from the `probeScriptV1` constant via a marker-based substring extraction that throws `StateError` if the marker vanishes, never retyped — under a real `/bin/sh`, for all four reserved byte classes individually, combined, and in a delimiter-adjacency stress case. Each test also runs a structural well-formedness check (no raw TAB/LF/CR survives, every backslash starts a valid two-character escape) before decoding through the real `HostProbeParser`, so a bug that happened to survive round-trip equality (a bare CR, a lone backslash) would still be caught. Confirmed by direct read: this is a genuine runtime test, not a restated assumption, and all 6 tests pass. **`host-probe-contract`'s Escaping Round-Trip requirement moves from PARTIAL to fully COMPLIANT.**
+
+### W2, W3, W4 Status: unchanged, reconfirmed by direct grep this run
+
+- **W2** — `HostDiagnostics` still has no production call site. `rg -n "HostDiagnostics" lib/` returns only its own file and one doc-comment cross-reference in `terminal_session.dart`. **Blocks archive: No.** Owner has seen this and requested no change; not re-litigating.
+- **W3** — the agent-state surface still has no external caller. `rg -n "\.agents\b" lib/` returns only `multiplexer_adapter.dart` itself and generated freezed code. **Blocks archive: No.** Same as W2.
+- **W4** — `first_time_setup_screen.dart:92`'s `ConnectionProfile(...)` construction still omits `sessionRef`/`multiplexer`/`tmuxSession`, bypassing the mirroring helper. Confirmed by direct read of the current file. **Blocks archive: No.** Does not violate "Legacy Key Is Not Deleted" (the generated `toJson()` always emits both keys regardless of value); pre-existing, unregressed, outside this migration's scope.
+
+### W5 Status: NOT closed — stale again, independently discovered this run
+
+The task briefing described W5 as closed by `949caab`. I verified this claim rather than accepting it, and **it does not hold at HEAD**: `HANDOFF.md` was accurate at `949caab`, but the two commits that landed immediately after it (`cf77550`, `ad15caf`) were not reflected back into the file, so it has drifted stale again — the exact failure mode its own warning banner describes ("Nothing in the build, test or verify pipeline reads this file... only a human keeps it honest").
+
+Specifically, at current HEAD `HANDOFF.md`:
+
+- §1 snapshot table still reads `Test suite | 39 → 239, all green` — actual is **250**.
+- §1's commit log block ends at `92903ae` — does not list `cf77550` or `ad15caf`.
+- §2 "What is left" still frames **both** the encoder-side Escaping Round-Trip gap and the footprint scenario as **open, undecided** work ("So the choice is: close that gap with a shell smoke test, or archive with both recorded as accepted limitations") — but the encoder gap **is now closed** (`cf77550`) and the footprint scenario **is now fixed and live-verified**, not merely still-open.
+- §2's carried-forward WARNING list still names W1 as open.
+
+**Blocks archive: No**, by the same letter-of-the-gate reasoning as before (`sdd-status-contract.md` conditions archive readiness on task completion and verification passing, not handoff-document accuracy) — but this is now the file's **second** documented staleness episode, both caught only by an SDD verify pass rather than by anything in the build/test pipeline, which is exactly the pattern the file's own banner warns about. Recommend a text fix as part of any handoff after this run, same recommendation as before, now with added weight.
+
+### W6 (new this run): Zero-footprint guarantee has a narrow, disclosed exception
+
+See "Verdict on the Footprint Fix," Q2 above. When `ps` is unavailable on the target host, the tmux-server detection gate fails open and calls `tmux list-sessions` unconditionally, which can recreate the original footprint defect in that narrow combination (no `ps` AND no running tmux server). Defensible as an engineering tradeoff favoring correct session enumeration over an absolute zero-footprint guarantee, and disclosed in the commit message — but the spec text itself carries no such carve-out. **Blocks archive: No** — narrow, low-probability, low-harm, disclosed; a policy decision for the repository owner, same category as W1–W5.
+
+---
 
 ### Requirement-by-Requirement Trace Table — changes since prior run
 
-Only `session-attach` changed. All other five domains are unchanged from the prior report (re-confirmed unchanged by diff: only `terminal_session.dart`, its test file, `fake_ssh_session.dart`, and the two spec/verify-report docs touched since `c0f2af2`).
+Only `host-probe-contract` and `host-command-port` are affected; all four other domains are unchanged (confirmed by `git diff --stat` above) and their prior verdicts are carried forward.
 
-#### Domain: session-attach (4 requirements / 7 scenarios — was 4/5 before the amendment)
+#### Domain: host-probe-contract (6 requirements / 10 scenarios)
 
 | Requirement | Scenario | Implementing symbol | Proving test | Verdict |
 |---|---|---|---|---|
-| Attach Without a Stdin Race | Attach command reaches multiplexer, no shell in between | `TerminalSession.connect` | `terminal_session_test.dart` "attaches via an exec request..." | ✅ (unchanged) |
-| PTY Denial Classified Before Generic SSH Error | PTY denial produces dedicated message | `SSHService.describeError` | `ssh_service_test.dart` "pty denial" group | ✅ (unchanged) |
-| PTY Denial Classified Before Generic SSH Error | Different SSH failure still generic | same | "is distinguished from other channel request failures..." | ✅ (unchanged) |
-| Host Key Mismatch Keeps Precedence | Host key mismatch aborts with MITM warning | `describeError`'s `HostKeyMismatchException` branch | `ssh_service_test.dart` "host key mismatch" group | ✅ (unchanged) |
-| Attach Exit Status Reflects the Multiplexer Session | A clean exit is reported as ambiguous, never a confident detach | `_classifyAttachExit` (terminal_session.dart:132-142), `AttachEndedCleanly` | "reports the ambiguous 'session ended' message when the attach session exits with code 0 and no signal" | ✅ **NEW — was NOT SATISFIED (C1)** |
-| Attach Exit Status Reflects the Multiplexer Session | An abnormal exit carries the evidence that proved it | same, `AttachEndedAbnormally` | "reports an abnormal-exit message with the exit code..." + "...with the signal name..." (2 tests) | ✅ **NEW — was NOT SATISFIED (C1)** |
-| Attach Exit Status Reflects the Multiplexer Session | An absent exit status is never collapsed into a clean end | same, falls through to `AttachExitUnknown` | "falls back to the pre-existing generic disconnect message when the attach session ends with no exit status at all" | ✅ **NEW — was NOT SATISFIED (C1)** |
+| Escaping Round-Trip | Each reserved byte class round-trips exactly | `_esc()` (`probe_script_v1.dart:17`), `HostProbeParser` | `probe_script_v1_test.dart` — 6 tests: backslash, TAB, LF, CR, combined, delimiter-adjacent, each running the real `_esc()` under real `/bin/sh`, structurally checked, then decoded through the real parser | ✅ **NEW — was ⚠️ PARTIAL** |
+
+All five other `host-probe-contract` requirements unchanged from the prior report (✅, unaffected by this diff).
+
+#### Domain: host-command-port (3 requirements / 5 scenarios)
+
+| Requirement | Scenario | Implementing symbol | Proving test | Verdict |
+|---|---|---|---|---|
+| Script Delivery With Zero Host Footprint | Script delivered over stdin, no pseudo-terminal | `SshHostCommandRunner.runScript` | `ssh_host_command_runner_test.dart` | ✅ (unchanged) |
+| Script Delivery With Zero Host Footprint | No file left behind on the host | `_tmux_server_running()` gate (`probe_script_v1.dart:83-105`) | Decision logic: `probe_script_v1_tmux_gate_test.dart` (5 tests, real `/bin/sh`, controlled fake `ps`). End-to-end filesystem absence: **live-host measurement only** (this run, independently reproduced — see above); no automated covering test exists or can exist in this harness | ❌ **UNTESTED (unchanged classification) — underlying defect now fixed and live-verified, but no covering runtime test exists per the strict schema** |
+
+The other requirement in this domain (`Single-Command Execution`, `Swappable Transport Implementations`) is unchanged, ✅.
 
 ### Updated Counts (whole change, all 6 domains)
 
-| | Prior run | This run |
+| | Prior run (92903ae) | This run (ad15caf) |
 |---|---|---|
-| Requirements traced with a passing test (fully or partially) | 22/23 | **23/23** |
-| Requirements fully compliant (every scenario ✅) | 20/23 | **21/23** |
-| Requirements with zero test coverage | 1/23 | **0/23** |
-| Requirements not satisfied | 1/23 (C1) | **0/23** |
-| Scenarios total | 35 | **37** (+2: the amendment replaced 1 scenario with 3) |
-| Scenarios ✅ COMPLIANT | 32/35 | **35/37** |
-| Scenarios ⚠️ PARTIAL | 1/35 | **1/37** (unchanged: W1) |
-| Scenarios ❌ UNTESTED / NOT SATISFIED | 2/35 | **1/37** (unchanged: the host-command-port "no file left behind" scenario, which was never claimed testable by a Flutter unit test) |
-
-The two requirements not fully compliant are the same two the prior report already named and neither is new: `host-command-port`'s "Script Delivery With Zero Host Footprint" (one scenario UNTESTED, unprovable by a Flutter unit test, held only by code inspection) and `host-probe-contract`'s "Escaping Round-Trip" (PARTIAL — decode side only, see W1).
+| Requirements traced with a passing test (fully or partially) | 23/23 | **23/23** (unchanged) |
+| Requirements fully compliant (every scenario ✅ by a covering test) | 21/23 | **22/23** |
+| Requirements traced with recorded live evidence only (no covering test, but genuinely investigated on a live host) | 0/23 | **1/23** — `host-command-port`'s Script Delivery requirement |
+| Requirements not satisfied (zero evidence of any kind) | 0/23 | **0/23** |
+| Scenarios total | 37 | **37** (unchanged) |
+| Scenarios ✅ COMPLIANT (covering test passed at runtime) | 35/37 | **36/37** |
+| Scenarios ⚠️ PARTIAL | 1/37 (W1) | **0/37** |
+| Scenarios ❌ UNTESTED, traced only by recorded live evidence | 1/37 | **1/37** (unchanged: "No file left behind on the host" — the underlying claim is now independently confirmed true by live measurement, but remains outside the strict schema's "covering test" bucket) |
 
 ### Correctness (Static Evidence) and Coherence (Design)
 
-Unchanged from the prior report for all five untouched domains. For `session-attach`'s exit-status requirement: `AttachExitOutcome` is a sealed class with three variants, matching this change's own established house convention ("never return an empty collection or a bare boolean where 'could not determine' is possible... use a sealed result") — `AttachExitUnknown` is the honest "could not determine" case, not a thrown exception or a silent default. `_disconnectMessageFor` is an exhaustive `switch` over the sealed type, so a future fourth variant would be a compile error here, not a silently-missed case.
+Unchanged from the prior report for all five domains untouched by this diff. For the tmux gate: `_tmux_server_running()` follows this change's own established house convention ("never return an empty collection or a bare boolean where 'could not determine' is possible") in spirit — it is a boolean gate, but its two outcomes (`SERVER_RUNNING`/enumerate vs `SERVER_NOT_RUNNING`/skip) are both explicit and neither collapses "could not determine" into a silent default; the fail-open branch is the one place a genuinely undetectable state is resolved to a specific choice rather than surfaced as a third state, which is the crux of the W6 finding above — a sealed three-state result (`running`/`not-running`/`undetermined-fail-open`) would have been more consistent with the convention than a boolean, though the practical behavior (enumerate) is the same either way.
 
 ### Issues Found
 
 **CRITICAL**: None.
 
-**WARNING** (carried forward from the prior run; repository owner has seen all four and has not requested changes — confirming status, not re-litigating)
+**WARNING** (carried forward, reconfirmed this run; repository owner has seen W1–W4 and requested no changes)
 
-- **W1 — `host-probe-contract`'s Escaping Round-Trip requirement is still proven only on the decode half.** `probe_script_v1.dart:17`'s `_esc()` shell-side encoder is still never executed by any test (`rg -n "Process\.run|Process\.start"` across `test/` returns zero matches). Unchanged since the prior run. **Blocks archive: No.** Not touched by this change's remediation and was already correctly scoped as a WARNING, not a spec violation — the spec's literal scenario is about round-trip correctness and the decode half is genuinely tested against a hand-built wire string; the risk is methodological (same class of risk this repo's own HANDOFF calls out for slice 4), not a missing requirement.
-- **W2 — `HostDiagnostics` still has no production call site.** Confirmed by `rg -n "HostDiagnostics" lib/`: the only two matches outside its own file are a doc-comment cross-reference in `terminal_session.dart` and its own class/constructor. **Blocks archive: No.** Consistent with HANDOFF.md's own locked decision framing this change as a contract/infrastructure layer; the individual spec requirements are satisfied and tested at the unit level, and the owner has accepted this scope boundary.
-- **W3 — Same unwired pattern for the agent-state surface.** Confirmed by `rg -n "\.agents\b" lib/features/ lib/app/`: zero matches. `AgentSupport.resolve`/`MultiplexerAdapter.agents` are exercised only by their own test files. **Blocks archive: No.** Same reasoning as W2 — disclosed, accepted infrastructure-layer scope.
-- **W4 — The fourth `ConnectionProfile` write path at `first_time_setup_screen.dart:92` still bypasses the mirroring helper.** Confirmed by direct read: `_saveAndContinue` constructs `ConnectionProfile(...)` with no `sessionRef`/`multiplexer`/`tmuxSession` argument, so all three default to null — it does not call `resolveOptionalSessionReference` or any mirroring function. **Blocks archive: No.** As the prior report established, this does not violate "Legacy Key Is Not Deleted" (the generated `toJson()` always emits both keys regardless of value) and the file is untouched by this migration — pre-existing, unregressed behavior outside this change's actual scope, correctly disclosed rather than silently left out of the audit claim.
+- **W2** — `HostDiagnostics` has no production call site. Blocks archive: No.
+- **W3** — the agent-state surface has no caller outside its own tests. Blocks archive: No.
+- **W4** — `first_time_setup_screen.dart:92` bypasses the mirroring helper. Blocks archive: No.
+- **W5 (recurred)** — `HANDOFF.md` is stale again, independent of the task's framing that it was closed; see full detail above. Blocks archive: No.
 
 **WARNING (new this run)**
 
-- **W5 — `HANDOFF.md` is still stale, and now more so.** Its §1 snapshot table reports "Slice units delivered: 9 of 10", "Remaining: Slice 6 only — the single irreversible slice", and "Tasks: 82 of 100"; its §2 walks through slice 6 as future work with instructions like "Start it with a fresh session and full attention, not at the tail of a long one"; its §5 slice-status table lists slice 6 as `0/17`, marked `⬜`. All of this is false against the current repository: `tasks.md` shows 100/100 tasks `[x]`, including all 17 of slice 6's tasks, and this has been true since before the prior verify run (which already flagged the same staleness). Two more commits (`3f7db57`, `92903ae`) have landed since `HANDOFF.md` was last touched and neither updated it. This is exactly the kind of defect the task brief warned against treating as a nitpick: `HANDOFF.md` explicitly bills itself as "Read this first when resuming" — a future session picking this up would be told to plan a fresh, careful session for work that has already shipped and been verified. **Blocks archive: No**, by the letter of the archive gate (`sdd-status-contract.md` conditions archive readiness on task completion and verification passing, not on handoff-document accuracy), but this is a real defect in a deliverable that should be corrected before or immediately after archiving — an inaccurate `HANDOFF.md` that ships alongside an archived change is worse than a missing one, because it actively misleads instead of leaving an obvious gap.
+- **W6** — the zero-footprint guarantee's fail-open branch is a narrow, disclosed exception to the literal spec text when `ps` is unavailable on the host. Blocks archive: No.
 
-**SUGGESTION**: unchanged from the prior report (S1, S2 — neither is a compliance finding).
+**SUGGESTION**: unchanged from the prior report (S1, S2 — neither is a compliance finding). Additionally suggest: consider a sealed three-state result for `_tmux_server_running()` (`serverRunning`/`serverNotRunning`/`undetermined`) instead of a boolean with an internal fail-open default, matching this change's own stated house convention more literally — cosmetic, not a spec violation.
 
 ### Verdict
 
-**FAIL** — but not for the reason the prior run failed, and with zero remaining CRITICAL findings.
+**FAIL** — improved from the prior run (22/23 requirements, 36/37 scenarios, up from 21/23 and 35/37), zero CRITICAL findings, zero blockers, one prior WARNING (W1) closed, one prior WARNING (W5) reopened by independent discovery, one new WARNING (W6) disclosed.
 
-C1 is genuinely closed: real implementation, 5 passing tests, all 3 scenarios of the amended requirement covered, and the amendment itself independently verified as a legitimate correction rather than a hollowed-out one. `flutter analyze` is clean and all 239 tests pass (239 = prior 234 + 5 new).
+The verdict is `fail`, not `pass_with_warnings`, for the same reason as the prior run: this project's hard rule admits no exception for "unprovable by this test suite, but independently confirmed true by live measurement," and the admission validator enforces that literally — a passing verdict with any incomplete requirement/scenario count is rejected on admission regardless of blocker/critical counts.
 
-The verdict is `fail`, not `pass_with_warnings`, because this project's own hard rule — "a spec scenario is compliant only when a covering test passed at runtime" — admits no exception for "unprovable by this test suite," and the admission validator enforces that literally: it rejects any passing verdict (`pass` or `pass_with_warnings`) whenever the requirements-completed or scenarios-completed count is below its total, regardless of blocker/critical counts. (Verified empirically this run: a `requirements: 21/23, scenarios: 35/37` envelope with `blockers: 0, critical_findings: 0` is rejected under `verdict: pass_with_warnings` — `Error: verify report admission denied: passing verdict contradicts failing or incomplete evidence` — and admitted only under `verdict: fail`.)
-
-Two scenarios remain non-compliant, and I independently re-verified both by direct source and test-suite inspection rather than carrying the prior report's classification forward on trust:
-
-- `host-command-port`'s "No file left behind on the host" — confirmed by reading `ssh_host_command_runner.dart` end to end: `runScript` contains no `File`/`writeAsString`/any file-write primitive, only stdin piping to a fixed `/bin/sh -s` command. True by inspection. Zero covering test exists (`ssh_host_command_runner_test.dart` has no matching case) — genuinely untestable by a pure Flutter unit test, since it would require a live host filesystem check.
-- `host-probe-contract`'s "Escaping Round-Trip", encode side — confirmed by grep: `_esc()` in `probe_script_v1.dart:17` and zero `Process.run`/`Process.start` calls anywhere in `test/`. The decode half is genuinely tested; the shell-side encoder never runs under this suite.
-
-Both are pre-existing: present in the very first verify-report for this change, unrelated to C1 or this remediation round, and already classified WARNING (W1) / SUGGESTION (S2) rather than CRITICAL, because neither breaks a spec at the level static evidence can show and neither is new debt introduced by this change.
+Exactly one scenario remains non-compliant under the strict schema: `host-command-port`'s "No file left behind on the host." Unlike the prior two reports, this is **not** a case of "believed correct by inspection, never proven" — it is now a case of **defect found, defect fixed, fix independently reproduced live twice** (by the implementer and by this verification), with the single remaining gap being the schema's insistence on a `flutter test`-runtime covering test, which cannot exist for a live-remote-filesystem assertion in this harness.
 
 ### Ready to Archive
 
-**Not unconditionally, per the strict SDD gate — but the blocking condition is unchanged in kind from before this change even started, and is not C1.**
+**Not unconditionally, per the strict SDD gate — and the blocking condition has narrowed, not widened, since the prior run.**
 
-What's true: tasks are 100/100 complete, `flutter analyze` is clean, all 239 tests pass, zero CRITICAL findings remain, C1 (the sole prior blocker) is closed with real implementation and tests on a spec amendment that holds up under independent, adversarial re-derivation — not just re-reading the same reasoning that produced it.
+What's true: tasks are 100/100 complete, `flutter analyze` is clean, all 250 tests pass, zero CRITICAL findings, C1 remains closed and unaffected, W1 is now genuinely closed with a real runtime test, and the footprint defect that the prior two verify reports could only assess "by inspection" has been found to be a real defect, fixed, and independently confirmed live by two separate parties (the implementer and this verification) rather than merely asserted.
 
-What's not true: this verification does not reach a clean `pass` under `sdd-status-contract.md`'s "archive is ready when tasks are complete and strict verification passes" — because "passes" is a binary the tooling itself enforces (see above), and 2 pre-existing, non-CRITICAL, disclosed scenario gaps remain outside the scope of this remediation round.
+What's not true: this verification still does not reach a clean `pass` — one scenario (`host-command-port`'s "No file left behind") remains outside what a Flutter unit test can prove at runtime, exactly as the prior two reports already disclosed, and the new W6 finding (a narrow, disclosed fail-open exception) means even the live-verified claim now carries one documented edge-case caveat rather than being unconditionally true.
 
-**What exactly blocks a clean pass**: `host-command-port`'s "No file left behind on the host" scenario and `host-probe-contract`'s "Escaping Round-Trip" encode-side scenario both need runtime evidence this test suite cannot produce on its own — most plausibly a manual/live-host verification pass (already suggested independently in the prior report as S2 and in this task's own "known and accepted" framing for other live-host-only claims) for the first, and a `Process.run('sh', ...)`-based smoke test that pipes real reserved bytes through the actual probe script for the second. Neither requires more implementation work — the code is believed correct by inspection for both — only proof.
+**What exactly blocks a clean pass**: a single scenario needing runtime evidence this test suite cannot produce on its own. This is now demonstrably not a matter of missing implementation work or unresolved uncertainty about correctness — the code is correct, and that correctness has been independently confirmed live, twice — it is purely a completeness-count artifact of a schema that only recognizes automated covering tests, applied to a claim about remote-filesystem state that a Flutter test harness structurally cannot assert.
 
-**This is a policy decision for the repository owner, not one this verification can make unilaterally**: if these two gaps are accepted as a standing, disclosed limitation (as W1/W2/W3/W4 already are, explicitly, per this task's brief), archiving with them open is a defensible choice — but it is a choice, and the strict schema will not represent that choice as `pass`. It should be made explicitly, the same way W1-W4 already were, rather than by this report silently rounding a `fail` up to a `pass`.
+**This is the same policy decision the repository owner already faced in the prior report, now on stronger footing**: archiving with this one gap accepted as a standing, disclosed limitation (as W1–W6 already are) is a defensible choice — the strict schema will still represent that choice as `fail`, not `pass`, because a completeness count that cannot be reached from this test harness is exactly what it is, and this report is saying so plainly rather than rounding it up.
 
-Also recommend fixing `HANDOFF.md` (W5, below) before or immediately after archiving, independent of the above.
+**Also recommend, independent of the above**: fix `HANDOFF.md`'s renewed staleness (W5) before archiving — this is now its second documented drift, both caught only by verify, never by the build/test pipeline itself.
