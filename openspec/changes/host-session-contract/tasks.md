@@ -115,8 +115,8 @@ Commits: (a) docs + probe script (2.1–2.2); (b) parser scenarios (2.3–2.14);
 
 ## Slice 5: Exec-with-PTY Attach — characterization tests land FIRST
 
-- [ ] 5.1 [RED] `test/features/terminal/data/terminal_session_test.dart` — characterize CURRENT `connect`/`reconnect`/`dispose`/`onResize`/`_bridgeIO` (zero coverage today); build any needed seam (e.g. `test/helpers/fake_ssh_service.dart`). `flutter test test/features/terminal/data/terminal_session_test.dart` → FAIL
-- [ ] 5.2 [GREEN] Build the seam + tests until green against CURRENT `terminal_session.dart`, unmodified → PASS. Do not touch production code here.
+- [x] 5.1 [RED] `test/features/terminal/data/terminal_session_test.dart` — characterize CURRENT `connect`/`reconnect`/`dispose`/`onResize`/`_bridgeIO` (zero coverage today); build any needed seam (e.g. `test/helpers/fake_ssh_service.dart`). `flutter test test/features/terminal/data/terminal_session_test.dart` → FAIL (file/fakes did not exist; compile error)
+- [x] 5.2 [GREEN] Built the seam (test-only; zero production changes — see apply-progress for the dartssh2-internal-import disclosure) + 28 tests until green against CURRENT `terminal_session.dart`, unmodified → PASS. Production code NOT touched.
 - [ ] 5.3 [RED] Extend same file — attach command sent as part of the PTY exec request, never written to a separately-opened shell's stdin (Attach Without a Stdin Race) → FAIL against current impl (writes `tmux new-session` to stdin at lines 67–70)
 - [ ] 5.4 [GREEN] Modify `lib/features/terminal/data/terminal_session.dart`: delete the stdin write; attach via `client.execute(adapter.attachCommand(ref), pty:)` → PASS
 - [ ] 5.5 [RED] `test/features/connection/data/ssh_service_test.dart` — `SSHChannelRequestError('Failed to start pty')` classified before the generic `SSHError` branch (PTY Denial; AD-4) → FAIL
