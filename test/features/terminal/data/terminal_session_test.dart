@@ -490,6 +490,198 @@ void main() {
     );
   });
 
+  group(
+    'TerminalSession — attach exit status (C1: distinguishing detach '
+    'from a killed session)',
+    () {
+      test(
+        'reports the ambiguous "session ended" message when the attach '
+        'session exits with code 0 and no signal -- detach and a session '
+        'kill with the multiplexer server still alive are '
+        'indistinguishable from exit status alone, per '
+        'AttachExitOutcome\'s doc comment',
+        () async {
+          final service = FakeSSHService();
+          final attachSession = FakeSSHSession();
+          service.queueConnectSuccess(
+            SSHConnectionResult(
+              client: _buildFakeClient(),
+              session: FakeSSHSession(),
+            ),
+          );
+          final terminal = RecordingTerminal();
+          final session = TerminalSession(
+            profile: _testProfile,
+            sshService: service,
+            tmuxSessionName: 'mysession',
+            terminal: terminal,
+            attachOpener: (client, command, pty) async => attachSession,
+          );
+          await session.connect('key');
+
+          await attachSession.endWithExitCode(0);
+
+          expect(
+            session.statusNotifier.value,
+            ConnectionStatus.disconnected,
+          );
+          expect(
+            terminal.writes,
+            contains(
+              '\r\n[Helm] Disconnected — the session ended (you may have '
+              'detached, or it was closed on the host)\r\n',
+            ),
+          );
+        },
+      );
+
+      test(
+        'reports an abnormal-exit message with the exit code when the '
+        'attach session exits non-zero -- the only case verified to '
+        'distinguish a killed session from a detach (tmux `kill-server`)',
+        () async {
+          final service = FakeSSHService();
+          final attachSession = FakeSSHSession();
+          service.queueConnectSuccess(
+            SSHConnectionResult(
+              client: _buildFakeClient(),
+              session: FakeSSHSession(),
+            ),
+          );
+          final terminal = RecordingTerminal();
+          final session = TerminalSession(
+            profile: _testProfile,
+            sshService: service,
+            tmuxSessionName: 'mysession',
+            terminal: terminal,
+            attachOpener: (client, command, pty) async => attachSession,
+          );
+          await session.connect('key');
+
+          await attachSession.endWithExitCode(1);
+
+          expect(
+            terminal.writes,
+            contains(
+              '\r\n[Helm] Disconnected — the session exited abnormally '
+              '(exit code 1)\r\n',
+            ),
+          );
+        },
+      );
+
+      test(
+        'reports an abnormal-exit message with the signal name when the '
+        'attach session ends via an exit signal',
+        () async {
+          final service = FakeSSHService();
+          final attachSession = FakeSSHSession();
+          service.queueConnectSuccess(
+            SSHConnectionResult(
+              client: _buildFakeClient(),
+              session: FakeSSHSession(),
+            ),
+          );
+          final terminal = RecordingTerminal();
+          final session = TerminalSession(
+            profile: _testProfile,
+            sshService: service,
+            tmuxSessionName: 'mysession',
+            terminal: terminal,
+            attachOpener: (client, command, pty) async => attachSession,
+          );
+          await session.connect('key');
+
+          await attachSession.endWithExitSignal(
+            SSHSessionExitSignal(
+              signalName: 'KILL',
+              coreDumped: false,
+              errorMessage: '',
+              languageTag: '',
+            ),
+          );
+
+          expect(
+            terminal.writes,
+            contains(
+              '\r\n[Helm] Disconnected — the session exited abnormally '
+              '(signal KILL)\r\n',
+            ),
+          );
+        },
+      );
+
+      test(
+        'falls back to the pre-existing generic disconnect message when '
+        'the attach session ends with no exit status at all -- e.g. an '
+        'abrupt transport drop before any exit-status/exit-signal '
+        'request arrived',
+        () async {
+          final service = FakeSSHService();
+          final attachSession = FakeSSHSession();
+          service.queueConnectSuccess(
+            SSHConnectionResult(
+              client: _buildFakeClient(),
+              session: FakeSSHSession(),
+            ),
+          );
+          final terminal = RecordingTerminal();
+          final session = TerminalSession(
+            profile: _testProfile,
+            sshService: service,
+            tmuxSessionName: 'mysession',
+            terminal: terminal,
+            attachOpener: (client, command, pty) async => attachSession,
+          );
+          await session.connect('key');
+
+          await attachSession.endWithNoExitStatus();
+
+          expect(terminal.writes, contains('\r\n[Helm] Disconnected\r\n'));
+        },
+      );
+
+      test(
+        'the attach session ending wins over a later client.done firing '
+        'for the same disconnect -- only the exit-status-classified '
+        'message is written, never a duplicate generic one',
+        () async {
+          final service = FakeSSHService();
+          final socket = FakeSSHSocket();
+          final client = SSHClient(socket, username: 'tester');
+          final attachSession = FakeSSHSession();
+          service.queueConnectSuccess(
+            SSHConnectionResult(client: client, session: FakeSSHSession()),
+          );
+          final terminal = RecordingTerminal();
+          final session = TerminalSession(
+            profile: _testProfile,
+            sshService: service,
+            tmuxSessionName: 'mysession',
+            terminal: terminal,
+            attachOpener: (c, command, pty) async => attachSession,
+          );
+          await session.connect('key');
+
+          await attachSession.endWithExitCode(0);
+          socket.simulateRemoteClosed();
+          await Future.delayed(Duration.zero);
+          await Future.delayed(Duration.zero);
+
+          final disconnectWrites = terminal.writes
+              .where((w) => w.contains('Disconnected'))
+              .toList();
+          expect(disconnectWrites, hasLength(1));
+          expect(
+            disconnectWrites.single,
+            '\r\n[Helm] Disconnected — the session ended (you may have '
+            'detached, or it was closed on the host)\r\n',
+          );
+        },
+      );
+    },
+  );
+
   group('TerminalSession.dispose', () {
     test(
       'cancels stream subscriptions, disconnects the client, and sets '

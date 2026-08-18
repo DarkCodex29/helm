@@ -69,6 +69,62 @@ class FakeSSHSession extends SSHSession {
   @override
   Stream<Uint8List> get stderr => _stderrController.stream;
 
+  // ── Exit status / done (TerminalSession's AttachExitOutcome) ─────────
+  //
+  // The real SSHSession.exitCode/exitSignal are backed by fields private
+  // to dartssh2's own ssh_session.dart, set only from an inbound
+  // SSH_Message_Channel_Request the inert channel above never receives —
+  // so they cannot be driven through the real machinery. These override
+  // the getters directly, matching the pattern already used for
+  // stdout/stderr/write above. `done` is likewise overridden with an
+  // independently-controlled completer rather than relying on the inert
+  // channel's own `_done` (which SSHChannelController.close() only
+  // completes once its remote stream is also closed — never true for an
+  // inert channel that receives no messages) — see `_completeDone` below.
+  int? _fakeExitCode;
+  SSHSessionExitSignal? _fakeExitSignal;
+  final _doneCompleter = Completer<void>();
+
+  @override
+  int? get exitCode => _fakeExitCode;
+
+  @override
+  SSHSessionExitSignal? get exitSignal => _fakeExitSignal;
+
+  @override
+  Future<void> get done => _doneCompleter.future;
+
+  /// Simulates the remote reporting a clean exit (an `exit-status` channel
+  /// request) then closing the channel, completing [done] — as tmux and
+  /// zellij both do when their attach client process exits.
+  Future<void> endWithExitCode(int exitCode) async {
+    _fakeExitCode = exitCode;
+    await _completeDone();
+  }
+
+  /// Simulates the remote reporting an `exit-signal` channel request then
+  /// closing the channel, completing [done].
+  Future<void> endWithExitSignal(SSHSessionExitSignal signal) async {
+    _fakeExitSignal = signal;
+    await _completeDone();
+  }
+
+  /// Simulates the channel closing with neither an `exit-status` nor an
+  /// `exit-signal` request ever received — e.g. an abrupt transport drop —
+  /// completing [done] with both [exitCode] and [exitSignal] left null.
+  Future<void> endWithNoExitStatus() async {
+    await _completeDone();
+  }
+
+  Future<void> _completeDone() async {
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.complete();
+    }
+    // Let done.then()'s microtask run before the caller proceeds, so
+    // tests can assert on its side effects immediately after awaiting.
+    await Future.delayed(Duration.zero);
+  }
+
   @override
   void write(Uint8List data) {
     writes.add(data);
