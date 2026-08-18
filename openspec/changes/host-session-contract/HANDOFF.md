@@ -19,6 +19,8 @@ flutter analyze                             # expected: no issues
 gentle-ai sdd-status host-session-contract --cwd "$PWD" --json | jq -c '{nextRecommended, blockedReasons}'
 ```
 
+And one caveat the commands cannot give you: **they surface a stale number, never a false sentence.** This file already claimed "0 CRITICAL across four runs" when one run had recorded a CRITICAL, and no command would have caught it. Prose here is only as true as the last person who checked it against the verify report.
+
 What is durable and worth stating:
 
 | | |
@@ -26,7 +28,7 @@ What is durable and worth stating:
 | Implementation | **complete** — all 10 slice units (1, 2, 3a, 3b, 4, 5a, 5b, 5c, 6, 7) |
 | Tasks | **100 of 100** |
 | Branch | `main` |
-| Verify | **0 blockers, 0 CRITICAL** across four runs |
+| Verify | five runs; **0 blockers throughout**. Two runs found one CRITICAL each and both were closed: C1 at `3f7db57`, and an untested replacement scenario at `7e90562`. The fifth run is clean. |
 | Archive | **not yet** — see §2 |
 | Receipt-driven review | **off for this clone** by owner decision; global setting untouched |
 
