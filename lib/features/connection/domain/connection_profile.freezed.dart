@@ -37,7 +37,26 @@ mixin _$ConnectionProfile {
   String get username => throw _privateConstructorUsedError;
 
   /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Superseded by [sessionRef] — see the class doc.
   String? get tmuxSession => throw _privateConstructorUsedError;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern; the annotation is correctly applied to the
+  /// generated field (confirmed: `connection_profile.g.dart` calls
+  /// `_readSessionRef(json, 'sessionRef')`).
+  @JsonKey(readValue: _readSessionRef)
+  String? get sessionRef => throw _privateConstructorUsedError;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see [MultiplexerId] in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  String? get multiplexer => throw _privateConstructorUsedError;
 
   /// Whether this is the default profile to connect to on launch.
   bool get isDefault => throw _privateConstructorUsedError;
@@ -66,6 +85,8 @@ abstract class $ConnectionProfileCopyWith<$Res> {
     int port,
     String username,
     String? tmuxSession,
+    @JsonKey(readValue: _readSessionRef) String? sessionRef,
+    String? multiplexer,
     bool isDefault,
   });
 }
@@ -91,6 +112,8 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
     Object? port = null,
     Object? username = null,
     Object? tmuxSession = freezed,
+    Object? sessionRef = freezed,
+    Object? multiplexer = freezed,
     Object? isDefault = null,
   }) {
     return _then(
@@ -119,6 +142,14 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
                 ? _value.tmuxSession
                 : tmuxSession // ignore: cast_nullable_to_non_nullable
                       as String?,
+            sessionRef: freezed == sessionRef
+                ? _value.sessionRef
+                : sessionRef // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            multiplexer: freezed == multiplexer
+                ? _value.multiplexer
+                : multiplexer // ignore: cast_nullable_to_non_nullable
+                      as String?,
             isDefault: null == isDefault
                 ? _value.isDefault
                 : isDefault // ignore: cast_nullable_to_non_nullable
@@ -145,6 +176,8 @@ abstract class _$$ConnectionProfileImplCopyWith<$Res>
     int port,
     String username,
     String? tmuxSession,
+    @JsonKey(readValue: _readSessionRef) String? sessionRef,
+    String? multiplexer,
     bool isDefault,
   });
 }
@@ -169,6 +202,8 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
     Object? port = null,
     Object? username = null,
     Object? tmuxSession = freezed,
+    Object? sessionRef = freezed,
+    Object? multiplexer = freezed,
     Object? isDefault = null,
   }) {
     return _then(
@@ -197,6 +232,14 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
             ? _value.tmuxSession
             : tmuxSession // ignore: cast_nullable_to_non_nullable
                   as String?,
+        sessionRef: freezed == sessionRef
+            ? _value.sessionRef
+            : sessionRef // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        multiplexer: freezed == multiplexer
+            ? _value.multiplexer
+            : multiplexer // ignore: cast_nullable_to_non_nullable
+                  as String?,
         isDefault: null == isDefault
             ? _value.isDefault
             : isDefault // ignore: cast_nullable_to_non_nullable
@@ -216,6 +259,8 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     this.port = 22,
     required this.username,
     this.tmuxSession,
+    @JsonKey(readValue: _readSessionRef) this.sessionRef,
+    this.multiplexer,
     this.isDefault = false,
   });
 
@@ -244,8 +289,29 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
   final String username;
 
   /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Superseded by [sessionRef] — see the class doc.
   @override
   final String? tmuxSession;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern; the annotation is correctly applied to the
+  /// generated field (confirmed: `connection_profile.g.dart` calls
+  /// `_readSessionRef(json, 'sessionRef')`).
+  @override
+  @JsonKey(readValue: _readSessionRef)
+  final String? sessionRef;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see [MultiplexerId] in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  @override
+  final String? multiplexer;
 
   /// Whether this is the default profile to connect to on launch.
   @override
@@ -254,7 +320,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
 
   @override
   String toString() {
-    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, isDefault: $isDefault)';
+    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, sessionRef: $sessionRef, multiplexer: $multiplexer, isDefault: $isDefault)';
   }
 
   @override
@@ -270,6 +336,10 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
                 other.username == username) &&
             (identical(other.tmuxSession, tmuxSession) ||
                 other.tmuxSession == tmuxSession) &&
+            (identical(other.sessionRef, sessionRef) ||
+                other.sessionRef == sessionRef) &&
+            (identical(other.multiplexer, multiplexer) ||
+                other.multiplexer == multiplexer) &&
             (identical(other.isDefault, isDefault) ||
                 other.isDefault == isDefault));
   }
@@ -284,6 +354,8 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     port,
     username,
     tmuxSession,
+    sessionRef,
+    multiplexer,
     isDefault,
   );
 
@@ -312,6 +384,8 @@ abstract class _ConnectionProfile implements ConnectionProfile {
     final int port,
     required final String username,
     final String? tmuxSession,
+    @JsonKey(readValue: _readSessionRef) final String? sessionRef,
+    final String? multiplexer,
     final bool isDefault,
   }) = _$ConnectionProfileImpl;
 
@@ -339,8 +413,29 @@ abstract class _ConnectionProfile implements ConnectionProfile {
   String get username;
 
   /// Optional custom tmux session name. Falls back to AppConstants.defaultTmuxSession.
+  /// Superseded by [sessionRef] — see the class doc.
   @override
   String? get tmuxSession;
+
+  /// Neutral session reference, meaningful for whichever [multiplexer]
+  /// is selected. See [_readSessionRef] for the read-time precedence
+  /// rule. Never defaulted here — a null value is not an invented
+  /// fallback; callers apply AppConstants.defaultTmuxSession themselves,
+  /// exactly as they already did for [tmuxSession] before this
+  /// migration. `invalid_annotation_target` (see the file-level ignore
+  /// above) is a known freezed+json_serializable false positive for
+  /// this exact pattern; the annotation is correctly applied to the
+  /// generated field (confirmed: `connection_profile.g.dart` calls
+  /// `_readSessionRef(json, 'sessionRef')`).
+  @override
+  @JsonKey(readValue: _readSessionRef)
+  String? get sessionRef;
+
+  /// Which multiplexer [sessionRef] applies to. `null` means the host's
+  /// default multiplexer (see [MultiplexerId] in
+  /// `lib/core/host/multiplexer_adapter.dart`).
+  @override
+  String? get multiplexer;
 
   /// Whether this is the default profile to connect to on launch.
   @override

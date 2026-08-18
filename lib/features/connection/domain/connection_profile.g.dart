@@ -15,6 +15,8 @@ _$ConnectionProfileImpl _$$ConnectionProfileImplFromJson(
   port: (json['port'] as num?)?.toInt() ?? 22,
   username: json['username'] as String,
   tmuxSession: json['tmuxSession'] as String?,
+  sessionRef: _readSessionRef(json, 'sessionRef') as String?,
+  multiplexer: json['multiplexer'] as String?,
   isDefault: json['isDefault'] as bool? ?? false,
 );
 
@@ -27,5 +29,7 @@ Map<String, dynamic> _$$ConnectionProfileImplToJson(
   'port': instance.port,
   'username': instance.username,
   'tmuxSession': instance.tmuxSession,
+  'sessionRef': instance.sessionRef,
+  'multiplexer': instance.multiplexer,
   'isDefault': instance.isDefault,
 };

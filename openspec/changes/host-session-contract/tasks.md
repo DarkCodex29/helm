@@ -131,15 +131,15 @@ Commits: (a) characterization tests, no prod change (5.1–5.2); (b) attach fix 
 
 ## Slice 6: Persisted-Model Migration — ONLY IRREVERSIBLE SLICE
 
-- [ ] 6.1 [RED] `test/features/connection/domain/connection_profile_test.dart` — old-only-key JSON loads, value under `sessionRef` (Legacy Field Still Readable) → FAIL
-- [ ] 6.2 [GREEN] Modify `lib/features/connection/domain/connection_profile.dart`: add `sessionRef`/`multiplexer`; hand-written `fromJson` wrapper normalizes `tmuxSession → sessionRef` before generated `_$ConnectionProfileFromJson` → PASS
-- [ ] 6.3 Run `dart run build_runner build --delete-conflicting-outputs` to regenerate `connection_profile.freezed.dart`/`.g.dart`
-- [ ] 6.4 [RED] Same — save emits BOTH legacy and neutral keys (Legacy Key Is Not Deleted) → FAIL
-- [ ] 6.5 [GREEN] Hand-written `toJson` wrapper emits both keys → PASS
-- [ ] 6.6 [RED] Same — both keys present with different values → neutral wins (Neutral Field Takes Precedence) → FAIL
-- [ ] 6.7 [GREEN] Implement precedence in `fromJson` → PASS
-- [ ] 6.8 [RED] Round-trip test: a profile written by the CURRENT app version (pre-migration JSON shape) still loads correctly after this migration lands → FAIL if regressed
-- [ ] 6.9 [GREEN] Confirm round-trip; fix only if 6.8 fails → PASS
+- [x] 6.1 [RED] `test/features/connection/domain/connection_profile_test.dart` — old-only-key JSON loads, value under `sessionRef` (Legacy Field Still Readable) → FAIL (genuine — compile error, `sessionRef` did not exist)
+- [x] 6.2 [GREEN] Modify `lib/features/connection/domain/connection_profile.dart`: add `sessionRef`/`multiplexer`. **Deviation from the literal task wording, disclosed and verified**: a hand-written `fromJson` factory body does NOT work with this project's freezed 2.5.7 — freezed's JSON-support detection requires the exact one-line `=> _$ConnectionProfileFromJson(json);` delegate, and any other body (even one still calling the generated function) makes freezed skip generating JSON support entirely (`connection_profile.g.dart` was deleted when tried — confirmed empirically before implementing the real fix). The precedence/fallback logic instead lives in a `@JsonKey(readValue: _readSessionRef)` callback on the `sessionRef` field, keeping the canonical `fromJson` delegate intact so `toJson` also stays fully generated → PASS
+- [x] 6.3 Run `dart run build_runner build --delete-conflicting-outputs` to regenerate `connection_profile.freezed.dart`/`.g.dart`
+- [x] 6.4 [RED] Same — save emits BOTH legacy and neutral keys (Legacy Key Is Not Deleted) → NOT genuine RED (disclosed): both fields already existed as of 6.2/6.3, so `toJson()` already emitted both keys; same disclosed-non-genuine-RED category as this change's own precedent at 3a.10/5.7/5.9/7.5/7.7/7.9.
+- [x] 6.5 [GREEN] No hand-written `toJson` override exists — confirmed impossible by inheritance (see 6.2's note: `_$ConnectionProfileImpl implements _ConnectionProfile`, `implements` never inherits a method body, verified empirically that a body written on the abstract class is dead code). The plain generated `toJson()`, unmodified, already emits both keys since both are real fields → PASS, no additional code
+- [x] 6.6 [RED] Same — both keys present with different values → neutral wins (Neutral Field Takes Precedence) → NOT genuine RED (disclosed): `_readSessionRef`'s precedence logic was already correct from 6.2.
+- [x] 6.7 [GREEN] Precedence already implemented in `_readSessionRef` (6.2) → PASS, no additional code
+- [x] 6.8 [RED] Round-trip test: a profile written by the CURRENT app version (pre-migration JSON shape) still loads correctly after this migration lands → Fixtures captured VERBATIM from the unmodified pre-migration class's real `toJson()` output (via a temporary, deleted capture script) before any edit to `connection_profile.dart`. All 3 round-trip tests passed on first run against the already-implemented 6.2/6.3 state (not genuine RED against a broken implementation, since correctness was front-loaded — same disclosed category as 6.4/6.6); a negative control (temporarily breaking `_readSessionRef` to return a sentinel value) confirmed 5 of these 9 tests do fail on a real regression, proving the assertions are not vacuous.
+- [x] 6.9 [GREEN] Confirmed round-trip passes; no fix needed → PASS
 - [ ] 6.10 Repeat 6.1–6.9 for `lib/features/shortcuts/domain/project_shortcut.dart` (`test/features/shortcuts/domain/project_shortcut_test.dart`) — same 3 scenarios + round-trip
 - [ ] 6.11 Run `dart run build_runner build --delete-conflicting-outputs` again after `project_shortcut.dart` changes
 - [ ] 6.12 [RED] `test/features/terminal/data/session_snapshot_repository_test.dart` — `TabSnapshot` hand-written JSON (no codegen), same 3 scenarios → FAIL
