@@ -59,12 +59,43 @@ authentication failure.
 
 ### Requirement: Attach Exit Status Reflects the Multiplexer Session
 
-When an attached session ends, the reported exit status MUST reflect the multiplexer
-session's own exit, so a detach is distinguishable from the session being killed.
+When an attached session ends, the reported outcome MUST be derived from the
+multiplexer session's own exit status, and MUST NOT claim more than that status
+actually proves.
 
-#### Scenario: Detach and session-killed produce different outcomes
+An earlier version of this requirement also demanded that a detach be distinguishable
+from the session being killed. That was measured against real tmux 3.6a and zellij
+0.44.3 and found to be unachievable through exit status: both multiplexers exit `0`
+for a user detach **and** for the target session being killed while the multiplexer's
+server process survives. Zellij emits no distinguishing signal on any observable
+channel. Only the multiplexer's entire server process dying reports differently
+(tmux: exit `1`). tmux's farewell line does differ, but it is rendered terminal
+output rather than exit status, has no zellij counterpart, and reading it would make
+the attach path multiplexer-specific, which it deliberately is not.
 
-- GIVEN an attached session
-- WHEN the user detaches versus when the session is killed on the host
-- THEN the client MUST be able to distinguish the two outcomes from the reported exit
-  status
+The clause was therefore removed rather than satisfied by guesswork. Reporting a
+confident "detached" for an end that is genuinely ambiguous would be worse than
+reporting the ambiguity.
+
+#### Scenario: A clean exit is reported as ambiguous, never as a confident detach
+
+- GIVEN an attached session that ends with an exit status of `0`
+- WHEN the outcome is reported
+- THEN it MUST be reported as a clean end whose cause is undetermined
+- AND it MUST NOT be reported as a detach, since a killed session is indistinguishable
+  from a detach at this layer
+
+#### Scenario: An abnormal exit carries the evidence that proved it
+
+- GIVEN an attached session that ends with a non-zero exit status or an exit signal
+- WHEN the outcome is reported
+- THEN it MUST be reported as an abnormal end
+- AND it MUST carry the exit code or signal that established it
+
+#### Scenario: An absent exit status is never collapsed into a clean end
+
+- GIVEN an attached session that ends without the host sending any exit status or
+  exit signal
+- WHEN the outcome is reported
+- THEN it MUST be reported as unknown
+- AND it MUST NOT be reported as a clean end
