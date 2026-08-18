@@ -119,13 +119,13 @@ Commits: (a) docs + probe script (2.1–2.2); (b) parser scenarios (2.3–2.14);
 - [x] 5.2 [GREEN] Built the seam (test-only; zero production changes — see apply-progress for the dartssh2-internal-import disclosure) + 28 tests until green against CURRENT `terminal_session.dart`, unmodified → PASS. Production code NOT touched.
 - [x] 5.3 [RED] Extend same file — attach command sent as part of the PTY exec request, never written to a separately-opened shell's stdin (Attach Without a Stdin Race) → FAIL against current impl (writes `tmux new-session` to stdin at lines 67–70)
 - [x] 5.4 [GREEN] Modify `lib/features/terminal/data/terminal_session.dart`: delete the stdin write; attach via `client.execute(adapter.attachCommand(ref), pty:)` → PASS
-- [ ] 5.5 [RED] `test/features/connection/data/ssh_service_test.dart` — `SSHChannelRequestError('Failed to start pty')` classified before the generic `SSHError` branch (PTY Denial; AD-4) → FAIL
-- [ ] 5.6 [GREEN] Modify `lib/features/connection/data/ssh_service.dart` `describeError()`: add PTY-denied branch before `if (error is SSHError)` → PASS
-- [ ] 5.7 [RED] Same — a non-PTY-denial `SSHError` still gets the generic message (regression guard) → FAIL if broken
-- [ ] 5.8 [GREEN] Confirm branch order; fix only if 5.7 fails → PASS
-- [ ] 5.9 [RED] Same — host-key mismatch still aborts with MITM message, never "authentication failed" (existing behavior regression guard) → FAIL if broken
-- [ ] 5.10 [GREEN] No prod change expected; fix only if 5.9 fails → PASS
-- [ ] 5.11 Verify: `flutter analyze` && `flutter test`
+- [x] 5.5 [RED] `test/features/connection/data/ssh_service_test.dart` — `SSHChannelRequestError('Failed to start pty')` classified before the generic `SSHError` branch (PTY Denial; AD-4) → FAIL
+- [x] 5.6 [GREEN] Modify `lib/features/connection/data/ssh_service.dart` `describeError()`: add PTY-denied branch before `if (error is SSHError)` → PASS
+- [x] 5.7 [RED] Same — a non-PTY-denial `SSHError` still gets the generic message (regression guard) → FAIL if broken
+- [x] 5.8 [GREEN] Confirm branch order; fix only if 5.7 fails → PASS
+- [x] 5.9 [RED] Same — host-key mismatch still aborts with MITM message, never "authentication failed" (existing behavior regression guard) → FAIL if broken
+- [x] 5.10 [GREEN] No prod change expected; fix only if 5.9 fails → PASS
+- [x] 5.11 Verify: `flutter analyze` && `flutter test`
 
 Commits: (a) characterization tests, no prod change (5.1–5.2); (b) attach fix (5.3–5.4); (c) PTY-denied + regression guards (5.5–5.11)
 

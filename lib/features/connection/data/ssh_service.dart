@@ -174,6 +174,15 @@ class SSHService {
     return null;
   }
 
+  /// Discriminator dartssh2 2.16.0 uses for a denied PTY request
+  /// (`lib/src/ssh_client.dart`, both the `execute()` and `shell()` request
+  /// paths). Pinned by `pubspec.lock`; dartssh2 gives no error code, so this
+  /// string is the only signal. The same literal is also thrown for denied
+  /// agent-forwarding and X11-forwarding requests, so `describeError` checks
+  /// this exact message — not just the `SSHChannelRequestError` type — before
+  /// treating a channel-request failure as a PTY denial.
+  static const _kPtyDeniedMessage = 'Failed to start pty';
+
   /// Maps an exception from dartssh2 to a human-readable error message.
   ///
   /// Lines are terminated with CRLF because the only consumer renders this
@@ -192,6 +201,18 @@ class SSHService {
           'this host and reconnect to trust it again.';
     }
     if (error is SSHAuthError) return 'Authentication failed';
+    if (error is SSHChannelRequestError &&
+        error.message == _kPtyDeniedMessage) {
+      return 'The server refused to allocate a pseudo-terminal for this '
+          'session.\r\n'
+          'This is usually a server-side restriction rather than something '
+          'you did wrong: a forced command, a restricted or non-interactive '
+          'shell, "PermitTTY no" in sshd_config, or a locked-down service '
+          'account that was never meant to run an interactive session.\r\n'
+          'Check the SSH server configuration and the account this key logs '
+          'in as, or ask the server administrator to allow PTY allocation '
+          'for this user.';
+    }
     if (error is SSHError) return 'SSH error: $error';
     return error.toString();
   }

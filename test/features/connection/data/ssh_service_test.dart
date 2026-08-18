@@ -58,6 +58,44 @@ void main() {
         expect(message, isNot('Authentication failed'));
       });
     });
+
+    group('pty denial', () {
+      final message = SSHService.describeError(
+        SSHChannelRequestError('Failed to start pty'),
+      );
+
+      test('is not misreported as the generic SSH error', () {
+        expect(message, isNot(startsWith('SSH error:')));
+      });
+
+      test('is not misreported as an authentication failure', () {
+        expect(message, isNot('Authentication failed'));
+      });
+
+      test('names the pseudo-terminal denial', () {
+        expect(message.toLowerCase(), contains('pseudo-terminal'));
+      });
+
+      test('points to a likely server-side restriction', () {
+        expect(message.toLowerCase(), contains('restrict'));
+      });
+
+      test(
+        'is distinguished from other channel request failures by exact '
+        'message, not just type',
+        () {
+          final otherChannelError = SSHService.describeError(
+            SSHChannelRequestError('Failed to request agent forwarding'),
+          );
+
+          expect(otherChannelError, startsWith('SSH error:'));
+          expect(
+            otherChannelError.toLowerCase(),
+            isNot(contains('pseudo-terminal')),
+          );
+        },
+      );
+    });
   });
 
   group('HostKeyMismatchException', () {
