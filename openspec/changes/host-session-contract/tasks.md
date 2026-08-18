@@ -153,17 +153,17 @@ Commits: (a) `connection_profile.dart` migration + codegen (6.1–6.3); (b) dual
 
 ## Slice 7: Diagnostics (display-only)
 
-- [ ] 7.1 [RED] `test/core/host/host_diagnostics_test.dart` — Tailscale finding displayed, remediation never executed (Diagnostics Are Display-Only) → FAIL
-- [ ] 7.2 [GREEN] Create `lib/core/host/host_diagnostics.dart`: `evaluate()` → `warn(tailscaleOwnsPort22)`, display-only → PASS
-- [ ] 7.3 [RED] Same — linger finding displayed, never executed → FAIL
-- [ ] 7.4 [GREEN] Implement → PASS
-- [ ] 7.5 [RED] Same — systemd absent → `unsupported`, never `disabled` → FAIL
-- [ ] 7.6 [GREEN] Implement → PASS
-- [ ] 7.7 [RED] Same — persistence-off + killing-off → `ok` (no false alarm); persistence-off + killing-on → warn → FAIL
-- [ ] 7.8 [GREEN] Implement truth table → PASS
-- [ ] 7.9 [RED] Same — Tailscale interception detected only post-connect → FAIL
-- [ ] 7.10 [GREEN] Implement post-connect-only call site → PASS
-- [ ] 7.11 Verify: `flutter analyze` && `flutter test`
+- [x] 7.1 [RED] `test/core/host/host_diagnostics_test.dart` — Tailscale finding displayed, remediation never executed (Diagnostics Are Display-Only) → FAIL
+- [x] 7.2 [GREEN] Create `lib/core/host/host_diagnostics.dart`: `evaluate()` → `warn(tailscaleOwnsPort22)`, display-only → PASS
+- [x] 7.3 [RED] Same — linger finding displayed, never executed → FAIL
+- [x] 7.4 [GREEN] Implement → PASS
+- [x] 7.5 [RED] Same — systemd absent → `unsupported`, never `disabled` → FAIL (not genuine — already handled by 7.4's presence gate; disclosed in apply-progress)
+- [x] 7.6 [GREEN] Implement → PASS
+- [x] 7.7 [RED] Same — persistence-off + killing-off → `ok` (no false alarm); persistence-off + killing-on → warn → FAIL (partially genuine: the `linger=on`/`linger=unknown` short-circuit cases were genuine RED, caught an eager-read bug; the `off+off`/`kup-unknown` cases already passed)
+- [x] 7.8 [GREEN] Implement truth table → PASS
+- [x] 7.9 [RED] Same — Tailscale interception detected only post-connect → FAIL (not genuine — the two-method split from 7.2/7.4 already satisfied it; disclosed in apply-progress)
+- [x] 7.10 [GREEN] Implement post-connect-only call site → PASS (no production change needed — `evaluateTailscaleInterception` was already the sole call site from 7.2; documented the invariant)
+- [x] 7.11 Verify: `flutter analyze` (0 issues) && `flutter test` (195/195 passed)
 
 Commits: (a) Tailscale + linger findings (7.1–7.6); (b) truth table + post-connect gating (7.7–7.11)
 </content>
