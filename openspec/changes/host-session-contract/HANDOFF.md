@@ -4,23 +4,31 @@ Rewritten 2026-08-18, updated after slice 6 and the verify cycle. Read this firs
 
 > **Keeping this accurate is part of the work, and it has gone stale twice.** First it was written before slice 6 landed and still called slice 6 untouched. Then it was corrected, two more commits landed, and it was stale again — `sdd-verify` caught both, because nothing in the build, test or verify pipeline reads this file. Only a human keeps it honest.
 >
-> **The snapshot below is pinned to a commit for exactly that reason.** If `git rev-parse --short HEAD` does not match it, treat every number here as suspect and cross-check `tasks.md` and `git log`. Silent staleness is the failure mode; a visible mismatch is the defence.
+> Pinning the snapshot to a commit was the second attempt and it went stale anyway. **The third attempt is to stop keeping volatile numbers here at all** and give the commands that produce them instead — see §1. What remains below is meant to be durable; if you find yourself updating a count in this file, that count belongs in a command.
 
 ---
 
-## 1. Snapshot — describes commit `ad15caf`
+## 1. State
+
+Numbers used to live here and went stale three times, once even contradicting this file's own later prose at the same commit. So the volatile ones are gone. **Run these instead** — they cannot lie:
+
+```sh
+git log --oneline 68dbe36~1..HEAD          # every commit of this change
+flutter test                                # current count; it was 39 before this change began
+flutter analyze                             # expected: no issues
+gentle-ai sdd-status host-session-contract --cwd "$PWD" --json | jq -c '{nextRecommended, blockedReasons}'
+```
+
+What is durable and worth stating:
 
 | | |
 |---|---|
 | Implementation | **complete** — all 10 slice units (1, 2, 3a, 3b, 4, 5a, 5b, 5c, 6, 7) |
 | Tasks | **100 of 100** |
-| Commits for this change | 24 |
-| Test suite | 39 → **250**, all green |
-| `flutter analyze` | clean |
-| Working tree | clean |
 | Branch | `main` |
-| Verify | 21/23 requirements fully compliant, **0 blockers, 0 CRITICAL** |
+| Verify | **0 blockers, 0 CRITICAL** across four runs |
 | Archive | **not yet** — see §2 |
+| Receipt-driven review | **off for this clone** by owner decision; global setting untouched |
 
 ```
 68dbe36  fix(ssh): verify host keys with trust-on-first-use
@@ -55,13 +63,11 @@ ad15caf  fix(host-probe): stop tmux enumeration creating a socket directory     
 
 Implementation is done. What remains is a decision, not code.
 
-Three verify runs have landed. The latest reports **22/23 requirements, 36/37 scenarios, 0 blockers, 0 CRITICAL** — and still a `fail` verdict, because `gentle-ai sdd-verify-validate` refuses a `pass` whenever completed requirements or scenarios are below total, regardless of severity. That is a schema property, not a defect.
+Four verify runs have landed, every one with **0 blockers and 0 CRITICAL**. The verdict is nonetheless `fail` whenever completed requirements or scenarios sit below total, because `gentle-ai sdd-verify-validate` refuses a `pass` in that case regardless of severity. That is a schema property, not a defect — read the current numbers from the tool, not from here.
 
-**One scenario remains, and it cannot be closed from here**: `host-command-port` — *"No file left behind on the host."* Satisfying it in the completeness accounting needs an automated assertion about a **remote host's filesystem**, which a Flutter test harness structurally cannot make.
+The `host-command-port` requirement that carried the last real gap has been amended and its coverage closed. Its original scenario asserted about a **remote host's filesystem**, which a Flutter harness structurally cannot automate; the obligation now sits on what the script **invokes**, which it can. Getting there disproved the previous answer entirely — see §8.
 
-It is, however, now **true and measured** rather than merely asserted — see §8, because getting there disproved the previous answer.
-
-So the remaining choice is only: archive with that single gap recorded as a standing, disclosed limitation, or invest in an integration harness that can assert against a live host.
+What is left is an owner decision about the residual disclosed limitations, not missing work.
 
 ### Verify findings carried forward
 
