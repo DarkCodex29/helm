@@ -163,51 +163,96 @@ void main() {
     });
   });
 
-  group('TerminalSession.connect — the tmux stdin write (pre-5.4 behavior)', () {
+  group('TerminalSession.connect — attach without a stdin race (5.3/5.4)', () {
     test(
-      'writes "tmux new-session -A -s <name>\\n" into the session stdin '
-      'when tmuxSessionName is set — CURRENT behavior; slice 5.3/5.4 '
-      'replaces this with an exec-with-PTY attach, never touching stdin',
+      'attaches via an exec request with the pseudo-terminal allocated up '
+      'front, instead of writing the multiplexer command into an '
+      'already-open shell\'s stdin — session-attach spec\'s "Attach '
+      'Without a Stdin Race" requirement',
       () async {
         final service = FakeSSHService();
-        final fakeSession = FakeSSHSession();
+        final shellSession = FakeSSHSession();
+        final attachSession = FakeSSHSession();
         service.queueConnectSuccess(
-          SSHConnectionResult(client: _buildFakeClient(), session: fakeSession),
+          SSHConnectionResult(
+            client: _buildFakeClient(),
+            session: shellSession,
+          ),
         );
+
+        final openedCommands = <String>[];
+        final openedPtyConfigs = <SSHPtyConfig>[];
+        final terminal = RecordingTerminal();
         final session = TerminalSession(
           profile: _testProfile,
           sshService: service,
           tmuxSessionName: 'mysession',
-          terminal: RecordingTerminal(),
+          terminal: terminal,
+          attachOpener: (client, command, pty) async {
+            openedCommands.add(command);
+            openedPtyConfigs.add(pty);
+            return attachSession;
+          },
         );
 
         await session.connect('key');
 
-        expect(fakeSession.writes, hasLength(1));
-        expect(
-          fakeSession.writes.single,
-          utf8.encode('tmux new-session -A -s mysession\n'),
-        );
+        // The attach command is quoted per design.md AD-3 and reaches the
+        // multiplexer as part of the exec+pty request itself.
+        expect(openedCommands, ["tmux new-session -A -s 'mysession'"]);
+        expect(openedPtyConfigs, hasLength(1));
+        // Nothing is ever written into the shell session that
+        // connectAndOpenShell opened — that channel is never the target
+        // of the attach command.
+        expect(shellSession.writes, isEmpty);
+        expect(attachSession.writes, isEmpty);
+
+        // _bridgeIO must wire up the ATTACH session, not the discarded
+        // shell session.
+        attachSession.emitStdout(utf8.encode('from attached session'));
+        await Future.delayed(Duration.zero);
+        expect(terminal.writes, contains('from attached session'));
+
+        terminal.onOutput?.call('ls\n');
+        expect(attachSession.writes, [utf8.encode('ls\n')]);
+        expect(shellSession.writes, isEmpty);
+
+        // The shell connectAndOpenShell already opened is dead weight once
+        // attach replaces it with the exec+pty session — it must be closed,
+        // not abandoned, or every attach leaks an orphan remote shell
+        // process plus an undrained channel for the life of the connection.
+        expect(shellSession.closeCallCount, 1);
       },
     );
 
     test(
-      'writes nothing to the session stdin when tmuxSessionName is null',
+      'writes nothing to the session stdin during connect() when '
+      'tmuxSessionName is null, and never invokes the attach opener '
+      'either, since there is no session reference to attach to',
       () async {
         final service = FakeSSHService();
         final fakeSession = FakeSSHSession();
         service.queueConnectSuccess(
           SSHConnectionResult(client: _buildFakeClient(), session: fakeSession),
         );
+        var attachOpenerCalls = 0;
         final session = TerminalSession(
           profile: _testProfile,
           sshService: service,
           terminal: RecordingTerminal(),
+          attachOpener: (client, command, pty) async {
+            attachOpenerCalls++;
+            return fakeSession;
+          },
         );
 
         await session.connect('key');
 
         expect(fakeSession.writes, isEmpty);
+        expect(attachOpenerCalls, 0);
+        // On this path result.session IS the terminal — it must never be
+        // closed, unlike the attach path's abandoned shell above.
+        expect(fakeSession.closeCallCount, 0);
       },
     );
   });

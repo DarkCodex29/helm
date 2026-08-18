@@ -54,6 +54,15 @@ class FakeSSHSession extends SSHSession {
   /// Every byte array passed to [write], in call order.
   final List<Uint8List> writes = [];
 
+  /// Number of times [close] has been called.
+  int closeCallCount = 0;
+
+  @override
+  void close() {
+    closeCallCount++;
+    super.close();
+  }
+
   @override
   Stream<Uint8List> get stdout => _stdoutController.stream;
 

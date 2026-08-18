@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:helm/core/host/adapters/tmux_adapter.dart';
+import 'package:helm/core/host/host_command_runner.dart';
+import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -9,13 +12,67 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:xterm/xterm.dart';
 
+/// Opens the exec channel used to attach to a multiplexer session,
+/// allocating the pseudo-terminal as part of the same request rather than
+/// writing the attach command into an already-open shell's stdin. See the
+/// session-attach spec's "Attach Without a Stdin Race" requirement.
+///
+/// Defaults to [SSHClient.execute], which — verified against dartssh2
+/// 2.16.0's source — sends the pty-req before the exec request, exactly
+/// like [SSHClient.shell] does, and returns the same [SSHSession] type, so
+/// [TerminalSession._bridgeIO] needs no changes to work with either path.
+/// Tests inject a scripted implementation to avoid a live SSH transport,
+/// mirroring `SshChannelOpener` in `ssh_host_command_runner.dart`.
+typedef AttachSessionOpener =
+    Future<SSHSession> Function(
+      SSHClient client,
+      String command,
+      SSHPtyConfig pty,
+    );
+
+Future<SSHSession> _defaultAttachOpener(
+  SSHClient client,
+  String command,
+  SSHPtyConfig pty,
+) => client.execute(command, pty: pty);
+
+/// Backs the default [MultiplexerAdapter] injected into [TerminalSession].
+///
+/// [TmuxAdapter.attachCommand] is a pure function (design.md AD-3) and
+/// never calls into its [HostCommandRunner], so this stub is never invoked
+/// in practice. It exists solely to satisfy [TmuxAdapter]'s constructor:
+/// [TerminalSession] has no [HostCommandRunner] of its own yet (that
+/// arrives once a persisted multiplexer choice lands — a later slice), so
+/// there is no real runner available to hand the default adapter here. Any
+/// other [TmuxAdapter] method reaching this stub would be a genuine bug in
+/// this wiring, so it throws loudly rather than returning an empty result.
+class _UnusedHostCommandRunner implements HostCommandRunner {
+  @override
+  Future<HostCommandResult> run(String command, {Duration? timeout}) =>
+      throw UnsupportedError(
+        "TerminalSession's default MultiplexerAdapter is only used for "
+        'attachCommand(), which never calls HostCommandRunner.run().',
+      );
+
+  @override
+  Future<HostCommandResult> runScript(String script, {Duration? timeout}) =>
+      throw UnsupportedError(
+        "TerminalSession's default MultiplexerAdapter is only used for "
+        'attachCommand(), which never calls HostCommandRunner.runScript().',
+      );
+}
+
 class TerminalSession {
   TerminalSession({
     required this.profile,
     required SSHService sshService,
     this.tmuxSessionName,
     Terminal? terminal,
+    MultiplexerAdapter? muxAdapter,
+    AttachSessionOpener? attachOpener,
   }) : _sshService = sshService,
+       _muxAdapter = muxAdapter ?? TmuxAdapter(_UnusedHostCommandRunner()),
+       _attachOpener = attachOpener ?? _defaultAttachOpener,
        terminal = terminal ?? Terminal(maxLines: 5000);
 
   static final _log = HelmLogger('TerminalSession');
@@ -25,6 +82,15 @@ class TerminalSession {
   final String? tmuxSessionName;
 
   final SSHService _sshService;
+
+  /// Resolves the command that attaches to [tmuxSessionName] on the
+  /// active multiplexer. Defaults to a tmux-backed adapter — see
+  /// [_UnusedHostCommandRunner] for why no real [HostCommandRunner] is
+  /// wired in yet.
+  final MultiplexerAdapter _muxAdapter;
+
+  /// Opens the exec+pty session used to attach. See [AttachSessionOpener].
+  final AttachSessionOpener _attachOpener;
 
   SSHClient? _client;
   SSHSession? _session;
@@ -62,14 +128,50 @@ class TerminalSession {
       );
 
       _client = result.client;
-      _session = result.session;
 
-      if (tmuxSessionName != null) {
-        final cmd = 'tmux new-session -A -s $tmuxSessionName\n';
-        result.session.write(utf8.encode(cmd));
+      final sessionRef = tmuxSessionName;
+      if (sessionRef != null) {
+        // Attach without a stdin race (session-attach spec): the attach
+        // command is sent as part of the same exec request that allocates
+        // the pseudo-terminal, never written into an already-open shell's
+        // stdin. See design.md AD-1's verified dartssh2 behavior:
+        // SSHClient.execute sends the pty-req before the exec request.
+        //
+        // On this path, the shell connectAndOpenShell already opened is
+        // dead weight — closed here, BEFORE attaching, so a failed attach
+        // never leaves it open either (no leaked orphan remote shell, no
+        // undrained channel). Verified against dartssh2 2.16.0's source
+        // (ssh_client.dart's `_openSessionChannel`/`_channels` map,
+        // ssh_channel.dart's `SSHChannelController`) that channels are
+        // fully independent: each open channel gets its own allocated id
+        // and its own controller instance, and closing one only ever
+        // touches that channel's own EOF/close state — never `_client`,
+        // `_transport`, or any other channel. Closing this shell cannot
+        // disturb the exec channel opened immediately below.
+        //
+        // SSHSession.close() is `void`, not `Future<void>`, and delegates
+        // to an `async` method with no `await` in its body — so any
+        // close-time failure would be captured into a Future this API
+        // gives the caller no handle to observe. A try/catch here cannot
+        // catch anything: Dart never lets an `async` call throw
+        // synchronously to begin with. That gap belongs to dartssh2's
+        // API shape, not to this call site.
+        result.session.close();
+
+        _session = await _attachOpener(
+          result.client,
+          _muxAdapter.attachCommand(sessionRef),
+          SSHPtyConfig(
+            type: 'xterm-256color',
+            width: terminal.viewWidth,
+            height: terminal.viewHeight,
+          ),
+        );
+      } else {
+        _session = result.session;
       }
 
-      _bridgeIO(result.session);
+      _bridgeIO(_session!);
       statusNotifier.value = ConnectionStatus.connected;
       _log.i('Session connected: ${profile.name}');
 
