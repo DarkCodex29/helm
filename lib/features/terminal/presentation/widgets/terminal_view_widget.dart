@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
@@ -100,87 +101,98 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
             final isConnecting = status == ConnectionStatus.connecting;
 
             return Positioned.fill(
-              child: GestureDetector(
-                onTap: isConnecting ? null : () => widget.session.reconnect(),
-                child: Container(
-                  decoration: const BoxDecoration(color: Color(0xCC0D1117)),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isConnecting) ...[
-                          const SizedBox(
-                            width: 36,
-                            height: 36,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF58A6FF),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Connecting…',
-                            style: TextStyle(
-                              color: Color(0xFF58A6FF),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ] else ...[
-                          Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              color: const Color(0xFF21262D),
-                              border: Border.all(
-                                color: const Color(
-                                  0xFFF85149,
-                                ).withValues(alpha: 0.4),
+              // `explicitChildNodes` keeps the reconnect button a node of
+              // its own instead of being folded into this overlay node,
+              // so both identifiers stay addressable at the same time.
+              child: Semantics(
+                identifier: TerminalSemantics.connectionStatusOverlay,
+                container: true,
+                explicitChildNodes: true,
+                child: GestureDetector(
+                  onTap: isConnecting ? null : () => widget.session.reconnect(),
+                  child: Container(
+                    decoration: const BoxDecoration(color: Color(0xCC0D1117)),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isConnecting) ...[
+                            const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF58A6FF),
                               ),
                             ),
-                            child: const Icon(
-                              Icons.wifi_off,
-                              color: Color(0xFFF85149),
-                              size: 32,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Connection lost',
-                            style: TextStyle(
-                              color: Color(0xFFE6EDF3),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Tap to reconnect',
-                            style: TextStyle(
-                              color: Color(0xFF8B949E),
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          ElevatedButton.icon(
-                            onPressed: () => widget.session.reconnect(),
-                            icon: const Icon(Icons.refresh, size: 16),
-                            label: const Text('Reconnect'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF58A6FF),
-                              foregroundColor: const Color(0xFF0D1117),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 10,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Connecting…',
+                              style: TextStyle(
+                                color: Color(0xFF58A6FF),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                          ),
+                          ] else ...[
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                color: const Color(0xFF21262D),
+                                border: Border.all(
+                                  color: const Color(
+                                    0xFFF85149,
+                                  ).withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.wifi_off,
+                                color: Color(0xFFF85149),
+                                size: 32,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Connection lost',
+                              style: TextStyle(
+                                color: Color(0xFFE6EDF3),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Tap to reconnect',
+                              style: TextStyle(
+                                color: Color(0xFF8B949E),
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Semantics(
+                              identifier: TerminalSemantics.reconnectButton,
+                              child: ElevatedButton.icon(
+                                onPressed: () => widget.session.reconnect(),
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text('Reconnect'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF58A6FF),
+                                  foregroundColor: const Color(0xFF0D1117),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ),

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/session_reference.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/data/connection_profile_repository.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -218,10 +219,13 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _isSaving ? null : _testConnection,
-                icon: const Icon(Icons.wifi_tethering, size: 18),
-                label: const Text('Test Connection'),
+              child: Semantics(
+                identifier: ProfileEditSemantics.testConnectionButton,
+                child: OutlinedButton.icon(
+                  onPressed: _isSaving ? null : _testConnection,
+                  icon: const Icon(Icons.wifi_tethering, size: 18),
+                  label: const Text('Test Connection'),
+                ),
               ),
             ),
             if (_testStatus != null) ...[
@@ -377,20 +381,23 @@ class _MultiplexerDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<MultiplexerId?>(
-      // ignore: deprecated_member_use
-      value: selected,
-      decoration: const InputDecoration(
-        labelText: 'Multiplexer (optional)',
-        prefixIcon: Icon(Icons.dashboard_customize_outlined, size: 18),
-      ),
-      items: [
-        const DropdownMenuItem(value: null, child: Text('Host default')),
-        ...MultiplexerId.values.map(
-          (id) => DropdownMenuItem(value: id, child: Text(id.name)),
+    return Semantics(
+      identifier: ProfileEditSemantics.multiplexerDropdown,
+      child: DropdownButtonFormField<MultiplexerId?>(
+        // ignore: deprecated_member_use
+        value: selected,
+        decoration: const InputDecoration(
+          labelText: 'Multiplexer (optional)',
+          prefixIcon: Icon(Icons.dashboard_customize_outlined, size: 18),
         ),
-      ],
-      onChanged: onChanged,
+        items: [
+          const DropdownMenuItem(value: null, child: Text('Host default')),
+          ...MultiplexerId.values.map(
+            (id) => DropdownMenuItem(value: id, child: Text(id.name)),
+          ),
+        ],
+        onChanged: onChanged,
+      ),
     );
   }
 }

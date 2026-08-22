@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/connection_profile_repository.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
@@ -159,12 +160,15 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
                 subtitle: 'Enter the details to connect to your Mac.',
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: _profileNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Profile Name',
-                  hintText: 'e.g. Mac Studio',
-                  prefixIcon: Icon(Icons.label_outline, size: 18),
+              Semantics(
+                identifier: SetupSemantics.profileNameField,
+                child: TextField(
+                  controller: _profileNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Profile Name',
+                    hintText: 'e.g. Mac Studio',
+                    prefixIcon: Icon(Icons.label_outline, size: 18),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -172,49 +176,61 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
                 children: [
                   Expanded(
                     flex: 3,
-                    child: TextField(
-                      controller: _hostController,
-                      decoration: const InputDecoration(
-                        labelText: 'Host / IP',
-                        hintText: '192.168.1.10',
-                        prefixIcon: Icon(Icons.dns_outlined, size: 18),
+                    child: Semantics(
+                      identifier: SetupSemantics.hostField,
+                      child: TextField(
+                        controller: _hostController,
+                        decoration: const InputDecoration(
+                          labelText: 'Host / IP',
+                          hintText: '192.168.1.10',
+                          prefixIcon: Icon(Icons.dns_outlined, size: 18),
+                        ),
+                        keyboardType: TextInputType.text,
                       ),
-                      keyboardType: TextInputType.text,
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: TextField(
-                      controller: _portController,
-                      decoration: const InputDecoration(labelText: 'Port'),
-                      keyboardType: TextInputType.number,
+                    child: Semantics(
+                      identifier: SetupSemantics.portField,
+                      child: TextField(
+                        controller: _portController,
+                        decoration: const InputDecoration(labelText: 'Port'),
+                        keyboardType: TextInputType.number,
+                      ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  labelText: 'Username',
-                  hintText: 'e.g. john',
-                  prefixIcon: Icon(Icons.person_outline, size: 18),
+              Semantics(
+                identifier: SetupSemantics.usernameField,
+                child: TextField(
+                  controller: _usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                    hintText: 'e.g. john',
+                    prefixIcon: Icon(Icons.person_outline, size: 18),
+                  ),
                 ),
               ),
               const SizedBox(height: 36),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: (_keyGenerated && !_isSaving)
-                      ? _saveAndContinue
-                      : null,
-                  child: _isSaving
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save and Continue'),
+                child: Semantics(
+                  identifier: SetupSemantics.saveButton,
+                  child: ElevatedButton(
+                    onPressed: (_keyGenerated && !_isSaving)
+                        ? _saveAndContinue
+                        : null,
+                    child: _isSaving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Save and Continue'),
+                  ),
                 ),
               ),
             ],
@@ -311,12 +327,17 @@ class _SshKeyDisplay extends StatelessWidget {
                     color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                   ),
                 ),
-                GestureDetector(
-                  onTap: onCopy,
-                  child: Icon(
-                    Icons.copy,
-                    size: 16,
-                    color: theme.colorScheme.primary,
+                Semantics(
+                  identifier: SetupSemantics.copyPublicKeyButton,
+                  button: true,
+                  label: 'Copy public key',
+                  child: GestureDetector(
+                    onTap: onCopy,
+                    child: Icon(
+                      Icons.copy,
+                      size: 16,
+                      color: theme.colorScheme.primary,
+                    ),
                   ),
                 ),
               ],
@@ -324,15 +345,18 @@ class _SshKeyDisplay extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.all(14),
-            child: SelectableText(
-              publicKey,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 11,
-                color: Color(0xFFB1BAC4),
-                height: 1.5,
+            child: Semantics(
+              identifier: SetupSemantics.publicKeyText,
+              child: SelectableText(
+                publicKey,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: Color(0xFFB1BAC4),
+                  height: 1.5,
+                ),
+                maxLines: 4,
               ),
-              maxLines: 4,
             ),
           ),
         ],

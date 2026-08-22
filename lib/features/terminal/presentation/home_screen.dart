@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
@@ -91,13 +92,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         elevation: 0,
         titleSpacing: 0,
         leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: Icon(
-              Icons.menu,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+          builder: (ctx) => Semantics(
+            identifier: HomeSemantics.drawerButton,
+            child: IconButton(
+              icon: Icon(
+                Icons.menu,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+              ),
+              tooltip: 'Projects',
+              onPressed: () => Scaffold.of(ctx).openDrawer(),
             ),
-            tooltip: 'Projects',
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
         title: tabsState.hasTabs
@@ -120,10 +124,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
         actions: [
           if (!tabsState.hasTabs)
-            IconButton(
-              icon: const Icon(Icons.add),
-              tooltip: 'New terminal',
-              onPressed: () => _showNewTabDialog(context),
+            Semantics(
+              identifier: HomeSemantics.appBarNewSessionButton,
+              child: IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'New terminal',
+                onPressed: () => _showNewTabDialog(context),
+              ),
             ),
         ],
       ),
@@ -250,10 +257,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () => _showNewTabDialog(context),
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('New Session'),
+            Semantics(
+              identifier: HomeSemantics.newSessionButton,
+              child: ElevatedButton.icon(
+                onPressed: () => _showNewTabDialog(context),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('New Session'),
+              ),
             ),
           ],
         ),

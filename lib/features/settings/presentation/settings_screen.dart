@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/constants/app_constants.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/settings/presentation/settings_provider.dart';
 
@@ -120,10 +121,13 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 48),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/settings/profile'),
-        tooltip: 'Add profile',
-        child: const Icon(Icons.add),
+      floatingActionButton: Semantics(
+        identifier: SettingsSemantics.addProfileButton,
+        child: FloatingActionButton(
+          onPressed: () => context.push('/settings/profile'),
+          tooltip: 'Add profile',
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }
