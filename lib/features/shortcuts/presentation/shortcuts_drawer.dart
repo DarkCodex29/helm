@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/shortcuts/domain/quick_action.dart';
 import 'package:helm/features/shortcuts/presentation/shortcut_form_sheet.dart';
@@ -16,74 +17,79 @@ class ShortcutsDrawer extends ConsumerWidget {
     final tabsState = ref.watch(tabsProvider);
     final activeTab = tabsState.activeTab;
 
-    return Drawer(
-      backgroundColor: const Color(0xFF161B22),
-      width: 280,
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Header ────────────────────────────────────────────────────
-            _DrawerHeader(activeServerName: activeTab?.profile.name),
-            const Divider(color: Color(0xFF30363D), height: 1),
+    return Semantics(
+      identifier: ShortcutsSemantics.drawer,
+      container: true,
+      explicitChildNodes: true,
+      child: Drawer(
+        backgroundColor: const Color(0xFF161B22),
+        width: 280,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Header ────────────────────────────────────────────────────
+              _DrawerHeader(activeServerName: activeTab?.profile.name),
+              const Divider(color: Color(0xFF30363D), height: 1),
 
-            // ── Scrollable content ────────────────────────────────────────
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  // PROJECTS section
-                  _SectionHeader(
-                    label: 'PROJECTS',
-                    onAdd: () => _showProjectForm(context, null),
-                  ),
-                  if (shortcuts.projects.isEmpty)
-                    const _EmptyHint(text: 'No projects yet')
-                  else
-                    ...shortcuts.projects.map(
-                      (s) => _ProjectShortcutTile(
-                        shortcut: s,
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          ref.read(tabsProvider.notifier).openShortcut(s);
-                        },
-                        onEdit: () => _showProjectForm(context, s),
-                        onDelete: () => ref
-                            .read(shortcutsProvider.notifier)
-                            .deleteProject(s.id),
+              // ── Scrollable content ────────────────────────────────────────
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    // PROJECTS section
+                    _SectionHeader(
+                      label: 'PROJECTS',
+                      onAdd: () => _showProjectForm(context, null),
+                    ),
+                    if (shortcuts.projects.isEmpty)
+                      const _EmptyHint(text: 'No projects yet')
+                    else
+                      ...shortcuts.projects.map(
+                        (s) => _ProjectShortcutTile(
+                          shortcut: s,
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            ref.read(tabsProvider.notifier).openShortcut(s);
+                          },
+                          onEdit: () => _showProjectForm(context, s),
+                          onDelete: () => ref
+                              .read(shortcutsProvider.notifier)
+                              .deleteProject(s.id),
+                        ),
                       ),
+
+                    const SizedBox(height: 8),
+                    const Divider(color: Color(0xFF30363D), height: 1),
+
+                    // QUICK ACTIONS section
+                    _SectionHeader(
+                      label: 'QUICK ACTIONS',
+                      onAdd: () => _showQuickActionForm(context, null),
                     ),
+                    if (shortcuts.quickActions.isEmpty)
+                      const _EmptyHint(text: 'No quick actions yet')
+                    else
+                      _QuickActionsRow(
+                        actions: shortcuts.quickActions,
+                        onTap: (action) {
+                          final session = tabsState.activeTab?.session;
+                          if (session != null && session.isConnected) {
+                            session.terminal.onOutput?.call(
+                              '${action.command}\n',
+                            );
+                          }
+                        },
+                        onLongPress: (action) =>
+                            _showQuickActionForm(context, action),
+                      ),
 
-                  const SizedBox(height: 8),
-                  const Divider(color: Color(0xFF30363D), height: 1),
-
-                  // QUICK ACTIONS section
-                  _SectionHeader(
-                    label: 'QUICK ACTIONS',
-                    onAdd: () => _showQuickActionForm(context, null),
-                  ),
-                  if (shortcuts.quickActions.isEmpty)
-                    const _EmptyHint(text: 'No quick actions yet')
-                  else
-                    _QuickActionsRow(
-                      actions: shortcuts.quickActions,
-                      onTap: (action) {
-                        final session = tabsState.activeTab?.session;
-                        if (session != null && session.isConnected) {
-                          session.terminal.onOutput?.call(
-                            '${action.command}\n',
-                          );
-                        }
-                      },
-                      onLongPress: (action) =>
-                          _showQuickActionForm(context, action),
-                    ),
-
-                  const SizedBox(height: 8),
-                ],
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

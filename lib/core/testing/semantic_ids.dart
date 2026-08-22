@@ -54,6 +54,19 @@ class HomeSemantics {
   static const newSessionButton = 'helm.home.new_session_button';
 }
 
+/// Identifiers on `ShortcutsDrawer`.
+class ShortcutsSemantics {
+  const ShortcutsSemantics._();
+
+  /// The drawer root. Assertions must use this rather than the section
+  /// header text: the hamburger's tooltip is "Projects", which Flutter
+  /// publishes as a content-description, and Maestro matches text
+  /// case-insensitively against the full string. A text assertion for
+  /// "PROJECTS" therefore also matches the button on Home and can never
+  /// report the drawer as closed.
+  static const drawer = 'helm.shortcuts.drawer';
+}
+
 /// Identifiers on `HelmTerminalView`.
 class TerminalSemantics {
   const TerminalSemantics._();

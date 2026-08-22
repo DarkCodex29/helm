@@ -171,8 +171,14 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                               ),
                             ),
                             const SizedBox(height: 24),
+                            // `container` is required here. Without it the
+                            // identifier is absorbed by the overlay's own
+                            // tappable node, which also swallows the two
+                            // status Texts, leaving the real button as an
+                            // unnamed sibling.
                             Semantics(
                               identifier: TerminalSemantics.reconnectButton,
+                              container: true,
                               child: ElevatedButton.icon(
                                 onPressed: () => widget.session.reconnect(),
                                 icon: const Icon(Icons.refresh, size: 16),
