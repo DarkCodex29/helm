@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Helm is an SSH client: every session opens a TCP socket to a remote
+         host, so this permission is required in every build type. It is also
+         declared in the debug manifest for the Flutter tool's own tooling
+         channel, but that declaration does not reach release or profile
+         builds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="helm"
         android:name="${applicationName}"
