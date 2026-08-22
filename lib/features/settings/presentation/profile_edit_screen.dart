@@ -126,7 +126,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
             _buildTextField(
               controller: _nameCtrl,
               label: 'Name',
-              hint: 'Mac Studio',
+              hint: 'Production Server',
               prefixIcon: Icons.label_outline,
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Name is required' : null,

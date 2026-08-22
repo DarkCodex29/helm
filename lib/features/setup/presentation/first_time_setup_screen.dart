@@ -25,7 +25,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
 
   final _hostController = TextEditingController();
   final _usernameController = TextEditingController();
-  final _profileNameController = TextEditingController(text: 'My Mac');
+  final _profileNameController = TextEditingController(text: 'My Server');
   final _portController = TextEditingController(text: '22');
 
   bool _isSaving = false;
@@ -92,7 +92,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
       await repo.create(
         ConnectionProfile(
           id: '',
-          name: name.isEmpty ? 'My Mac' : name,
+          name: name.isEmpty ? 'My Server' : name,
           host: host,
           port: port,
           username: username,
@@ -121,9 +121,9 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
                 step: 1,
                 title: 'SSH Key',
                 subtitle:
-                    'Helm uses a passwordless Ed25519 key to connect to your Mac. '
-                    'Copy the public key below and add it to your Mac\'s '
-                    '~/.ssh/authorized_keys file.',
+                    'Helm uses a passwordless Ed25519 key to connect to your '
+                    'server. Copy the public key below and add it to the '
+                    'host\'s ~/.ssh/authorized_keys file.',
               ),
               const SizedBox(height: 16),
               if (_generatingKey)
@@ -157,7 +157,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
               _StepHeader(
                 step: 2,
                 title: 'Connection Details',
-                subtitle: 'Enter the details to connect to your Mac.',
+                subtitle: 'Enter the details to connect to your server.',
               ),
               const SizedBox(height: 16),
               Semantics(
@@ -166,7 +166,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
                   controller: _profileNameController,
                   decoration: const InputDecoration(
                     labelText: 'Profile Name',
-                    hintText: 'e.g. Mac Studio',
+                    hintText: 'e.g. Production Server',
                     prefixIcon: Icon(Icons.label_outline, size: 18),
                   ),
                 ),

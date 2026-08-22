@@ -284,7 +284,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Connect to your Mac to start a terminal session',
+              'Connect to your server to start a terminal session',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: const Color(0xFF8B949E),
               ),
