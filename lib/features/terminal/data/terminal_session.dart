@@ -210,6 +210,10 @@ class TerminalSession {
   final HostRunnerFactory _hostRunnerFactory;
   final HostAdvisor _advisor = const HostAdvisor();
 
+  /// True once [dispose] has run. Guards the fire-and-forget advisory
+  /// collect, whose host round-trips can outlive the session.
+  bool _disposed = false;
+
   SSHClient? _client;
   SSHSession? _session;
   HostCommandRunner? _hostRunner;
@@ -446,6 +450,9 @@ class TerminalSession {
 
   Future<void> dispose() async {
     _log.i('Disposing session for ${profile.name}');
+    // Set BEFORE awaiting anything: an advisory collect that completes
+    // during this teardown must already see the session as gone.
+    _disposed = true;
     await _stdoutSub?.cancel();
     await _stderrSub?.cancel();
     _stdoutSub = null;
@@ -491,8 +498,20 @@ class TerminalSession {
 
     _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');
 
-    // Disclose a substitution before the attach output starts arriving, so
-    // it is not buried under the multiplexer's own first screen.
+    // Publish the probe-derived findings immediately.
+    //
+    // These cost nothing — the selection already carries everything they
+    // need — so unlike the HostDiagnostics-backed ones they do not wait
+    // for a failure. They must not: a substitution on a session that
+    // connects FINE is exactly the case the user would otherwise never
+    // learn about.
+    advisoriesNotifier.value = advisoriesForSelection(selection);
+
+    // Also written to the terminal, which is where it belongs when the
+    // attach itself fails and nothing takes the screen over. Verified on a
+    // real host that this is NOT sufficient on its own: tmux clears the
+    // screen when it attaches, erasing this line before it can be read.
+    // The notifier above is what survives that.
     final notice = multiplexerSelectionNotice(selection);
     if (notice != null) {
       _log.w(notice);
@@ -553,6 +572,13 @@ class TerminalSession {
       _advisor
           .collect(selection: _multiplexerSelection, runner: _hostRunner)
           .then((advisories) {
+            // Collecting takes host round-trips, and the session can be
+            // torn down during them — closing a tab disposes it while this
+            // is still in flight. Writing to a disposed ValueNotifier
+            // throws, so disposal is checked here rather than assumed
+            // impossible. Observed on a real device before this guard
+            // existed.
+            if (_disposed) return;
             // A reconnect may have completed while the host was being
             // asked. Publishing then would attach a dead session's
             // explanation to a live one.

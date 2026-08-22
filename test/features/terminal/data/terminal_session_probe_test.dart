@@ -1,3 +1,4 @@
+import 'dart:async';
 // Tests for the host probe TerminalSession runs while establishing a
 // session, and for the multiplexer it picks from the result.
 //
@@ -338,6 +339,48 @@ void main() {
     });
   });
 
+  group('TerminalSession — advisories survive the multiplexer redraw', () {
+    // The connect-time terminal notice is written into the same buffer the
+    // multiplexer is about to take over. Verified on a real host: tmux
+    // clears the screen on attach, so the notice is gone before the user
+    // can read it. The finding therefore has to live somewhere the attach
+    // cannot erase — published here, rendered by the UI.
+    test('publishes a substitution as soon as the probe resolves', () async {
+      final result = await _connect(
+        profile: _profile(multiplexer: 'zellij'),
+        runner: _probeRunner(_realHostProbeOutput),
+      );
+
+      expect(
+        result.session.advisoriesNotifier.value.map((a) => a.id),
+        contains(HostAdvisoryId.multiplexerSubstituted),
+      );
+    });
+
+    test('publishes an off-PATH finding for the selected multiplexer', () async {
+      final result = await _connect(
+        profile: _profile(multiplexer: 'herdr'),
+        runner: _probeRunner(_realHostProbeOutput),
+      );
+
+      expect(
+        result.session.advisoriesNotifier.value.map((a) => a.id),
+        contains(HostAdvisoryId.multiplexerOffPath),
+      );
+    });
+
+    test('costs no host round-trips beyond the probe itself', () async {
+      // Diagnostics are NOT run here: a healthy connect must not pay for
+      // four extra commands. FakeHostCommandRunner throws for any
+      // unregistered command, so a diagnostic slipping in fails loudly.
+      final runner = _probeRunner(_realHostProbeOutput);
+
+      await _connect(profile: _profile(multiplexer: 'zellij'), runner: runner);
+
+      expect(runner.runCalls, isEmpty);
+    });
+  });
+
   group('TerminalSession — advisories reach the failure path', () {
     test('a healthy connect surfaces nothing', () async {
       final result = await _connect(
@@ -460,6 +503,46 @@ void main() {
     });
   });
 
+  group('TerminalSession — advisory collection outlives nothing', () {
+    test('does not publish after dispose', () async {
+      // Observed on a real device: closing a tab disposes the session
+      // while the advisory collect is still awaiting host round-trips.
+      // The late .then() then wrote to a disposed ValueNotifier and threw
+      // "used after being disposed" into the zone.
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final attachSession = FakeSSHSession();
+      final runner = _SlowDiagnosticsRunner(_realHostProbeOutput);
+
+      final session = TerminalSession(
+        profile: _profile(multiplexer: 'zellij'),
+        sshService: service,
+        tmuxSessionName: 'helm-0',
+        terminal: RecordingTerminal(),
+        hostRunnerFactory: (_) => runner,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+
+      final errors = <Object>[];
+      await runZonedGuarded(() async {
+        await session.connect('key');
+        // Kicks off _publishAdvisories, which is deliberately not awaited.
+        await attachSession.endWithExitCode(1);
+        // Dispose lands while the collect is still blocked on the host.
+        await session.dispose();
+        runner.release();
+        await Future.delayed(const Duration(milliseconds: 60));
+      }, (error, _) => errors.add(error));
+
+      expect(errors, isEmpty);
+    });
+  });
+
   group('TerminalSession — host state is bound to the live connection', () {
     test('exposes a runner while connected', () async {
       final result = await _connect(runner: _probeRunner(_realHostProbeOutput));
@@ -526,4 +609,27 @@ class _StubAdapter implements MultiplexerAdapter {
 
   @override
   String attachCommand(String sessionName) => 'stub-attach $sessionName';
+}
+
+/// Answers the probe immediately but BLOCKS every diagnostic command until
+/// [release] is called, so a test can dispose the session at a precisely
+/// chosen point while HostAdvisor.collect is still awaiting the host.
+class _SlowDiagnosticsRunner implements HostCommandRunner {
+  _SlowDiagnosticsRunner(this._probeStdout);
+
+  final String _probeStdout;
+  final _gate = Completer<void>();
+
+  /// Lets the stalled diagnostic commands finish.
+  void release() => _gate.complete();
+
+  @override
+  Future<HostCommandResult> run(String command, {Duration? timeout}) async {
+    await _gate.future;
+    return const HostCommandResult(exitCode: 1);
+  }
+
+  @override
+  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async =>
+      HostCommandResult(stdout: _probeStdout, exitCode: 0);
 }

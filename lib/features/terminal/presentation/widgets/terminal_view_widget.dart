@@ -95,6 +95,34 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
             );
           },
         ),
+        // Host findings on a session that is otherwise working.
+        //
+        // Pinned to the top rather than shown in the failure overlay
+        // below, because the overlay only exists while disconnected. A
+        // substitution on a session that connects fine would otherwise
+        // never be seen: it is written to the terminal too, but the
+        // multiplexer clears the screen as it attaches — verified against
+        // a real tmux host.
+        ValueListenableBuilder<ConnectionStatus>(
+          valueListenable: widget.session.statusNotifier,
+          builder: (context, status, _) {
+            if (status != ConnectionStatus.connected) {
+              return const SizedBox.shrink();
+            }
+            return ValueListenableBuilder<List<HostAdvisory>>(
+              valueListenable: widget.session.advisoriesNotifier,
+              builder: (context, advisories, _) {
+                if (advisories.isEmpty) return const SizedBox.shrink();
+                return Positioned(
+                  top: 8,
+                  left: 0,
+                  right: 0,
+                  child: HostAdvisoryCard(advisories: advisories),
+                );
+              },
+            );
+          },
+        ),
         ValueListenableBuilder(
           valueListenable: widget.session.statusNotifier,
           builder: (context, status, _) {
