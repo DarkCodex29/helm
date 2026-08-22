@@ -1,0 +1,83 @@
+# Proves a brand new install can generate an SSH key, render the whole
+# setup form, accept a profile, and land on Home.
+#
+# Every element is addressed by the identifiers declared in
+# lib/core/testing/semantic_ids.dart. No screen coordinates.
+appId: com.darkcodex.helm
+tags:
+  - smoke
+  - regression
+env:
+  HELM_HOST: "127.0.0.1"
+  HELM_PORT: "22"
+  HELM_USERNAME: "invalid-user"
+  HELM_PROFILE_NAME: "E2E Unreachable Host"
+---
+- launchApp:
+    clearState: true
+
+# ── Step 1: the SSH key section ─────────────────────────────────────────
+- assertVisible: "Setup"
+- assertVisible: "SSH Key"
+
+# The key is generated asynchronously in initState, so wait for it rather
+# than asserting immediately.
+- extendedWaitUntil:
+    visible:
+      id: "helm.setup.public_key_text"
+    timeout: 20000
+
+# The generated key must actually be an ed25519 public key, not an empty
+# placeholder box.
+- assertVisible: "ssh-ed25519 .*"
+- assertVisible:
+    id: "helm.setup.copy_public_key_button"
+
+# ── Step 2: the connection form ─────────────────────────────────────────
+- assertVisible: "Connection Details"
+- assertVisible:
+    id: "helm.setup.profile_name_field"
+- assertVisible:
+    id: "helm.setup.host_field"
+- assertVisible:
+    id: "helm.setup.port_field"
+- assertVisible:
+    id: "helm.setup.username_field"
+- assertVisible:
+    id: "helm.setup.save_button"
+
+# ── Fill it in and continue ─────────────────────────────────────────────
+# Pre-filled with "My Mac"; inputText appends, so clear it first.
+- tapOn:
+    id: "helm.setup.profile_name_field"
+- eraseText
+- inputText: "${HELM_PROFILE_NAME}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.host_field"
+- inputText: "${HELM_HOST}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.port_field"
+- eraseText
+- inputText: "${HELM_PORT}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.username_field"
+- inputText: "${HELM_USERNAME}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.save_button"
+
+# ── We are on Home with a persisted profile ─────────────────────────────
+- extendedWaitUntil:
+    visible: "No active sessions"
+    timeout: 15000
+- assertVisible:
+    id: "helm.home.drawer_button"
+- assertVisible:
+    id: "helm.home.new_session_button"

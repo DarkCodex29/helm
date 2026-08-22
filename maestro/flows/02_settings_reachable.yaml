@@ -1,0 +1,60 @@
+# Regression guard: Settings must be reachable from Home at all times.
+#
+# Before the fix, the only navigation to /settings lived inside a
+# `if (profiles.isEmpty)` branch in _showNewTabDialog. Setup always
+# creates a profile, so that branch never fired and Settings was
+# unreachable from the UI. This flow fails on that build and passes once
+# the AppBar carries a persistent settings action.
+appId: com.darkcodex.helm
+tags:
+  - smoke
+  - regression
+env:
+  HELM_HOST: "127.0.0.1"
+  HELM_PORT: "22"
+  HELM_USERNAME: "invalid-user"
+  HELM_PROFILE_NAME: "E2E Unreachable Host"
+---
+- runFlow:
+    file: ../subflows/reach_home.yaml
+    env:
+      HELM_HOST: "${HELM_HOST}"
+      HELM_PORT: "${HELM_PORT}"
+      HELM_USERNAME: "${HELM_USERNAME}"
+      HELM_PROFILE_NAME: "${HELM_PROFILE_NAME}"
+
+# A profile exists, which is exactly the state that used to hide every
+# route into Settings.
+- assertVisible:
+    id: "helm.home.settings_button"
+
+- tapOn:
+    id: "helm.home.settings_button"
+
+# ── The Settings screen renders ─────────────────────────────────────────
+# Do not assert the bare text "Settings" here: the AppBar button's
+# tooltip is also "Settings", so that assertion passes on Home and would
+# hide a broken navigation. Anchor on something only this screen has.
+- extendedWaitUntil:
+    visible:
+      id: "helm.settings.add_profile_button"
+    timeout: 10000
+- assertVisible: "CONNECTION PROFILES"
+- assertVisible: "SSH PUBLIC KEY"
+
+# The profile saved during setup is listed here, which also proves the
+# setup form persisted what was typed rather than its placeholder text.
+#
+# ListTile merges its title and subtitle into ONE accessibility node, so
+# this element reads "<name>\n<user>@<host>:<port>". Maestro matches text
+# as a full-string regex, so the title alone never matches: (?s) turns on
+# DOTALL so `.*` can cross the embedded newline.
+- assertVisible: "(?s)${HELM_PROFILE_NAME}.*invalid-user@${HELM_HOST}:${HELM_PORT}"
+
+# ── Back returns to Home, it does not leave the app ─────────────────────
+- back
+- extendedWaitUntil:
+    visible: "No active sessions"
+    timeout: 10000
+- assertVisible:
+    id: "helm.home.settings_button"

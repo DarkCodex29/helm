@@ -1,0 +1,66 @@
+# Regression guard: Android back must close the shortcuts drawer, not
+# kill the app.
+#
+# HomeScreen is the only route on the stack, so an unhandled back pops
+# the app off the task. Before the fix that is exactly what happened with
+# the drawer open, which was reproduced twice on a real emulator. The
+# assertions after `back` fail on that build because no Helm element is
+# on screen any more.
+appId: com.darkcodex.helm
+tags:
+  - smoke
+  - regression
+env:
+  HELM_HOST: "127.0.0.1"
+  HELM_PORT: "22"
+  HELM_USERNAME: "invalid-user"
+  HELM_PROFILE_NAME: "E2E Unreachable Host"
+---
+- runFlow:
+    file: ../subflows/reach_home.yaml
+    env:
+      HELM_HOST: "${HELM_HOST}"
+      HELM_PORT: "${HELM_PORT}"
+      HELM_USERNAME: "${HELM_USERNAME}"
+      HELM_PROFILE_NAME: "${HELM_PROFILE_NAME}"
+
+# ── Open the drawer ─────────────────────────────────────────────────────
+- tapOn:
+    id: "helm.home.drawer_button"
+
+# Assert on the drawer's own identifier, never on its section headers.
+# The hamburger's tooltip is "Projects", which Flutter publishes as a
+# content-description, and Maestro matches text case-insensitively
+# against the full string -- so a "PROJECTS" text assertion also matches
+# the button on Home and could never report the drawer as closed.
+- extendedWaitUntil:
+    visible:
+      id: "helm.shortcuts.drawer"
+    timeout: 10000
+- assertVisible: "QUICK ACTIONS"
+
+# ── Back closes the drawer ──────────────────────────────────────────────
+- back
+
+- extendedWaitUntil:
+    notVisible:
+      id: "helm.shortcuts.drawer"
+    timeout: 10000
+- assertNotVisible: "QUICK ACTIONS"
+
+# ── ...and the app is still in the foreground on Home ───────────────────
+# If back had propagated to the activity, Helm would be gone and none of
+# these could resolve.
+- assertVisible: "No active sessions"
+- assertVisible:
+    id: "helm.home.drawer_button"
+- assertVisible:
+    id: "helm.home.settings_button"
+
+# The drawer still works afterwards: closing it did not break the button.
+- tapOn:
+    id: "helm.home.drawer_button"
+- extendedWaitUntil:
+    visible:
+      id: "helm.shortcuts.drawer"
+    timeout: 10000

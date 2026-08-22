@@ -1,0 +1,54 @@
+# Shared precondition: take a freshly cleared app from first launch to
+# the Home screen with exactly one saved connection profile.
+#
+# This lives outside `maestro/flows/` on purpose. Everything under that
+# directory is executed by `maestro test maestro/flows`, and this file is
+# a building block rather than a test, so running it on its own would
+# assert nothing.
+#
+# Callers pass HELM_HOST / HELM_PORT / HELM_USERNAME / HELM_PROFILE_NAME
+# through `runFlow.env`. Defaults are deliberately unusable so a flow
+# that forgets to pass them cannot reach a real machine.
+appId: com.darkcodex.helm
+---
+- launchApp:
+    clearState: true
+
+# Key generation is asynchronous and gates the Save button, so wait for
+# the key itself rather than for the screen.
+- extendedWaitUntil:
+    visible:
+      id: "helm.setup.public_key_text"
+    timeout: 20000
+
+# The profile name field ships pre-filled with "My Mac", and inputText
+# appends rather than replaces, so it has to be cleared first. Same for
+# the port field below, which defaults to "22".
+- tapOn:
+    id: "helm.setup.profile_name_field"
+- eraseText
+- inputText: "${HELM_PROFILE_NAME}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.host_field"
+- inputText: "${HELM_HOST}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.port_field"
+- eraseText
+- inputText: "${HELM_PORT}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.username_field"
+- inputText: "${HELM_USERNAME}"
+- hideKeyboard
+
+- tapOn:
+    id: "helm.setup.save_button"
+
+- extendedWaitUntil:
+    visible: "No active sessions"
+    timeout: 15000

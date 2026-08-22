@@ -1,0 +1,21 @@
+# Maestro workspace configuration.
+#
+# `flows` deliberately points only at `flows/`, so `maestro/subflows/` is
+# never picked up as a test. Files in there are shared preconditions and
+# assert nothing on their own.
+#
+# Run the suite with either of:
+#   maestro test maestro/flows
+#   maestro test maestro/
+flows:
+  - "flows/*.yaml"
+
+executionOrder:
+  # The flows are numbered so a failure report reads in the same order as
+  # the user journey they cover.
+  continueOnFailure: true
+  flowsOrder:
+    - 01_first_launch_setup
+    - 02_settings_reachable
+    - 03_drawer_back_navigation
+    - 04_connection_failure_ux

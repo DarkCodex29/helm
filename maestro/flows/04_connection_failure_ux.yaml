@@ -1,0 +1,61 @@
+# Proves a failing connection degrades into a visible, recoverable
+# surface instead of a crash or a blank terminal.
+#
+# The default host/username are deliberately unusable, so this exercises
+# the failure path without depending on any real machine. The emulator
+# runs no sshd on 127.0.0.1:22, so the connection is refused.
+appId: com.darkcodex.helm
+tags:
+  - regression
+  - connection
+env:
+  HELM_HOST: "127.0.0.1"
+  HELM_PORT: "22"
+  HELM_USERNAME: "invalid-user"
+  HELM_PROFILE_NAME: "E2E Unreachable Host"
+---
+- runFlow:
+    file: ../subflows/reach_home.yaml
+    env:
+      HELM_HOST: "${HELM_HOST}"
+      HELM_PORT: "${HELM_PORT}"
+      HELM_USERNAME: "${HELM_USERNAME}"
+      HELM_PROFILE_NAME: "${HELM_PROFILE_NAME}"
+
+# Exactly one profile is saved, so this opens a session directly rather
+# than showing the profile picker.
+- tapOn:
+    id: "helm.home.new_session_button"
+
+# ── The failure surface appears ─────────────────────────────────────────
+# The overlay covers the terminal for every non-connected state, so it is
+# the single stable anchor whether the attempt is still in flight or has
+# already failed.
+- extendedWaitUntil:
+    visible:
+      id: "helm.terminal.connection_status_overlay"
+    timeout: 30000
+
+# Once the attempt settles, the overlay must offer a way out rather than
+# spinning forever.
+- extendedWaitUntil:
+    visible:
+      id: "helm.terminal.reconnect_button"
+    timeout: 60000
+- assertVisible: "Connection lost"
+- assertVisible: "Tap to reconnect"
+
+# ── Retrying is safe: it must not crash the app ─────────────────────────
+- tapOn:
+    id: "helm.terminal.reconnect_button"
+
+- extendedWaitUntil:
+    visible:
+      id: "helm.terminal.connection_status_overlay"
+    timeout: 30000
+
+# The app is still alive and still navigable after a failed retry.
+- assertVisible:
+    id: "helm.home.drawer_button"
+- assertVisible:
+    id: "helm.home.settings_button"
