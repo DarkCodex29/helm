@@ -67,17 +67,50 @@ class SshHostCommandRunner implements HostCommandRunner {
   }) async {
     final stdoutBytes = <int>[];
     final stderrBytes = <int>[];
-    final stdoutSub = channel.stdout.listen(stdoutBytes.addAll);
-    final stderrSub = channel.stderr.listen(stderrBytes.addAll);
+    final stdoutDone = Completer<void>();
+    final stderrDone = Completer<void>();
+
+    final stdoutSub = channel.stdout.listen(
+      stdoutBytes.addAll,
+      onDone: () => _completeOnce(stdoutDone),
+      onError: (_) => _completeOnce(stdoutDone),
+      cancelOnError: true,
+    );
+    final stderrSub = channel.stderr.listen(
+      stderrBytes.addAll,
+      onDone: () => _completeOnce(stderrDone),
+      onError: (_) => _completeOnce(stderrDone),
+      cancelOnError: true,
+    );
 
     var timedOut = false;
     try {
+      // Wait for the OUTPUT STREAMS to close, not just for the channel.
+      //
+      // dartssh2 2.16.0 documents the difference on SSHSession.done
+      // (ssh_session.dart:31-33): "This Future completes when the channel
+      // is closed. More data may still be available on the stdout and
+      // stderr streams at this time." The stdout/stderr controllers are
+      // closed separately, in _handleChannelDataDone.
+      //
+      // Awaiting only `done` and then cancelling the subscriptions
+      // therefore discards whatever was still buffered. Measured against a
+      // real host: a 699-byte probe report came back as 687 bytes, losing
+      // exactly the trailing `end` record — the one that tells the parser
+      // the report is complete — so every probe parsed as truncated.
+      final drained = Future.wait([
+        channel.done,
+        stdoutDone.future,
+        stderrDone.future,
+      ]);
       if (timeout != null) {
-        await channel.done.timeout(timeout);
+        await drained.timeout(timeout);
       } else {
-        await channel.done;
+        await drained;
       }
     } on TimeoutException {
+      // Keeps whatever arrived before the deadline, and still reports the
+      // result as timed out so no caller reads a partial body as complete.
       timedOut = true;
     } finally {
       await stdoutSub.cancel();
@@ -90,6 +123,13 @@ class SshHostCommandRunner implements HostCommandRunner {
       exitCode: timedOut ? null : channel.exitCode,
       timedOut: timedOut,
     );
+  }
+
+  /// A stream can signal completion through either [onDone] or [onError];
+  /// both paths mean "nothing more is coming", and completing an already
+  /// completed [Completer] throws.
+  static void _completeOnce(Completer<void> completer) {
+    if (!completer.isCompleted) completer.complete();
   }
 }
 
