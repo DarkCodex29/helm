@@ -95,8 +95,23 @@ class KnownHostsService {
 
   // ── Public API ─────────────────────────────────────────────────────────
 
-  /// Renders [hostKeyBytes] as an OpenSSH-style fingerprint:
-  /// `SHA256:<base64 without padding>`.
+  /// Renders [hostKeyBytes] as `SHA256:<base64 without padding>`.
+  ///
+  /// NOT interchangeable with an OpenSSH fingerprint, despite the shape.
+  /// Its only caller is [verifyHostKey], which is fed dartssh2's
+  /// `onVerifyHostKey` digest — and in dartssh2 2.16.0 that argument is
+  /// already an MD5 digest of the host key, not the raw key bytes (see
+  /// the callback comment in `ssh_service.dart`). What this returns is
+  /// therefore `SHA256(MD5(host key))`, which can never equal the value
+  /// `ssh-keygen -lf` prints for the same key.
+  ///
+  /// That is sound for the one job it has — comparing one connection's
+  /// host key against the next one's, where both sides go through this
+  /// same function — and unsound for anything a user is asked to verify
+  /// externally. `SSHService.describeError` says so in the mismatch copy
+  /// rather than sending the user to run a comparison that cannot match.
+  /// Aligning this with OpenSSH means re-pinning every stored host and
+  /// belongs to its own change.
   static String computeFingerprint(Uint8List hostKeyBytes) {
     final digest = sha256.convert(hostKeyBytes);
     final encoded = base64.encode(digest.bytes).replaceAll(RegExp(r'=+$'), '');

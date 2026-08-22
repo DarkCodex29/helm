@@ -54,6 +54,35 @@ void main() {
         expect(message.toLowerCase(), contains('rebuilt'));
       });
 
+      // The displayed value is SHA256(MD5(host key)): dartssh2 2.16.0
+      // hands onVerifyHostKey an MD5 digest rather than the raw key (see
+      // ssh_service.dart's callback comment), and KnownHostsService then
+      // SHA-256s that digest. It therefore cannot equal what
+      // `ssh-keygen -lf` prints, whatever the SHA256: prefix suggests.
+      //
+      // Changing the algorithm is a trust-store migration and belongs to
+      // its own change. What must not survive until then is copy that
+      // sends the user to run a comparison that can never match.
+      test(
+        'does not instruct the user to compare this value on the server',
+        () {
+          expect(
+            message.toLowerCase(),
+            isNot(contains('confirm the new fingerprint directly on the '
+                'server')),
+          );
+        },
+      );
+
+      test('discloses that these are not ssh-keygen fingerprints', () {
+        expect(message, contains('ssh-keygen'));
+        expect(message.toLowerCase(), contains('will not match'));
+      });
+
+      test('still offers a verification route the user can actually take', () {
+        expect(message.toLowerCase(), contains('trust'));
+      });
+
       test('is not misreported as an authentication failure', () {
         expect(message, isNot('Authentication failed'));
       });

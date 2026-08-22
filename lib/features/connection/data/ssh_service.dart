@@ -196,9 +196,14 @@ class SSHService {
           'and continuing would expose this session.\r\n'
           'Expected: ${error.expectedFingerprint}\r\n'
           'Received: ${error.receivedFingerprint}\r\n'
-          'If the server was legitimately rebuilt or re-keyed, confirm the new '
-          'fingerprint directly on the server, then forget the pinned key for '
-          'this host and reconnect to trust it again.';
+          'These two values are only meaningful against each other: they are '
+          "Helm's own digest of the host key, not the fingerprint OpenSSH "
+          'publishes, and they will not match what ssh-keygen prints on the '
+          'server.\r\n'
+          'If the server was legitimately rebuilt or re-keyed, confirm that '
+          'through a channel you already trust — not by comparing the values '
+          'above — then forget the pinned key for this host and reconnect to '
+          'trust it again.';
     }
     if (error is SSHAuthError) return 'Authentication failed';
     if (error is SSHChannelRequestError &&
