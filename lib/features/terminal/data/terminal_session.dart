@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
+import 'package:helm/core/host/host_advisor.dart';
+import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_factory.dart';
@@ -206,6 +208,7 @@ class TerminalSession {
 
   final HostProber _hostProber;
   final HostRunnerFactory _hostRunnerFactory;
+  final HostAdvisor _advisor = const HostAdvisor();
 
   SSHClient? _client;
   SSHSession? _session;
@@ -241,6 +244,19 @@ class TerminalSession {
     ConnectionStatus.disconnected,
   );
 
+  /// Host findings worth showing the user, collected when this session
+  /// fails or ends.
+  ///
+  /// Empty while a session is healthy: the probe-derived findings are
+  /// gathered on connect but the diagnostic ones cost host round-trips, so
+  /// both are only published on the failure path — which is also the only
+  /// place the UI renders them. A substitution the user needs to know
+  /// about immediately is written into the terminal at connect time
+  /// instead; see [_resolveMultiplexer].
+  final ValueNotifier<List<HostAdvisory>> advisoriesNotifier = ValueNotifier(
+    const [],
+  );
+
   ConnectionStatus get status => statusNotifier.value;
 
   bool get isConnected => statusNotifier.value == ConnectionStatus.connected;
@@ -253,6 +269,10 @@ class TerminalSession {
     }
 
     statusNotifier.value = ConnectionStatus.connecting;
+    // Findings from the previous attempt describe a host state nobody has
+    // re-verified. Clearing them here means the surface never shows a
+    // stale explanation next to a fresh failure.
+    advisoriesNotifier.value = const [];
     _log.i('Connecting session for ${profile.name}');
 
     try {
@@ -369,6 +389,7 @@ class TerminalSession {
       terminal.write(
         '\r\n[Helm] Connection failed: ${SSHService.describeError(e)}\r\n',
       );
+      _publishAdvisories();
       rethrow;
     }
   }
@@ -444,6 +465,7 @@ class TerminalSession {
     _multiplexerSelection = null;
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
+    advisoriesNotifier.dispose();
   }
 
   /// Probes the host and swaps in the adapter the result selects.
@@ -509,6 +531,35 @@ class TerminalSession {
     if (statusNotifier.value == ConnectionStatus.disconnected) return;
     statusNotifier.value = ConnectionStatus.disconnected;
     terminal.write(_disconnectMessageFor(outcome));
+    _publishAdvisories();
+  }
+
+  /// Collects host findings and publishes them for the failure surface.
+  ///
+  /// Deliberately NOT awaited by its callers. [_handleDisconnect] runs
+  /// from a stream callback and must update the terminal and status
+  /// immediately; making the user wait on up to four host round-trips
+  /// before seeing "Disconnected" would be a regression, and those
+  /// round-trips are talking to a connection that may already be dead.
+  ///
+  /// [HostAdvisor.collect] never throws, so this cannot produce an
+  /// unhandled async error.
+  void _publishAdvisories() {
+    // `_hostRunner` is deliberately still set here: `_handleDisconnect`
+    // does not clear it, so a session that dropped while the transport is
+    // still answering can be asked WHY. A runner bound to a dead client
+    // simply yields no diagnostic findings.
+    unawaited(
+      _advisor
+          .collect(selection: _multiplexerSelection, runner: _hostRunner)
+          .then((advisories) {
+            // A reconnect may have completed while the host was being
+            // asked. Publishing then would attach a dead session's
+            // explanation to a live one.
+            if (statusNotifier.value == ConnectionStatus.connected) return;
+            advisoriesNotifier.value = advisories;
+          }),
+    );
   }
 }
 

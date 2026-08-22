@@ -76,6 +76,11 @@ class TerminalSemantics {
   static const connectionStatusOverlay =
       'helm.terminal.connection_status_overlay';
   static const reconnectButton = 'helm.terminal.reconnect_button';
+
+  /// The host-findings card inside that overlay. Present only when the
+  /// probe or the host diagnostics actually found something, so its
+  /// absence on a healthy host is itself the correct assertion.
+  static const hostAdvisory = 'helm.terminal.host_advisory';
 }
 
 /// Identifiers on `SettingsScreen`.

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
+import 'package:helm/features/terminal/presentation/widgets/host_advisory_card.dart';
 import 'package:xterm/xterm.dart';
 
 class HelmTerminalView extends StatefulWidget {
@@ -195,6 +197,27 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                   ),
                                 ),
                               ),
+                            ),
+                            // What the host probe and diagnostics found,
+                            // rendered here rather than on a surface of
+                            // its own: these findings exist to explain
+                            // the failure the user is already looking at.
+                            // Absent entirely when there is nothing to
+                            // report, which is the healthy case.
+                            ValueListenableBuilder<List<HostAdvisory>>(
+                              valueListenable:
+                                  widget.session.advisoriesNotifier,
+                              builder: (context, advisories, _) {
+                                if (advisories.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 24),
+                                  child: HostAdvisoryCard(
+                                    advisories: advisories,
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ],

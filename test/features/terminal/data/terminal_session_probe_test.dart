@@ -13,6 +13,7 @@
 //    path works.
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
@@ -334,6 +335,128 @@ void main() {
         result.session.hostReport!.status,
         HostReportStatus.truncated,
       );
+    });
+  });
+
+  group('TerminalSession — advisories reach the failure path', () {
+    test('a healthy connect surfaces nothing', () async {
+      final result = await _connect(
+        profile: _profile(multiplexer: 'tmux'),
+        runner: _probeRunner(_realHostProbeOutput),
+      );
+
+      expect(result.session.advisoriesNotifier.value, isEmpty);
+    });
+
+    test('a substitution is published when the session drops', () async {
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final attachSession = FakeSSHSession();
+      // Registered so the diagnostics pass finds a clean host; the
+      // substitution must still come through.
+      final runner = _probeRunner(_realHostProbeOutput);
+      runner.whenRun(
+        'command -v tailscale >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 1),
+      );
+      runner.whenRun(
+        'command -v loginctl >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        r'loginctl show-user $(id -un) --property=Linger',
+        const HostCommandResult(stdout: 'Linger=yes', exitCode: 0),
+      );
+
+      final session = TerminalSession(
+        profile: _profile(multiplexer: 'zellij'),
+        sshService: service,
+        tmuxSessionName: 'helm-0',
+        terminal: RecordingTerminal(),
+        hostRunnerFactory: (_) => runner,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
+
+      await attachSession.endWithExitCode(1);
+      // The collect is kicked off without blocking the disconnect path.
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        session.advisoriesNotifier.value.map((a) => a.id),
+        contains(HostAdvisoryId.multiplexerSubstituted),
+      );
+    });
+
+    test('host diagnostics reach the user when the session drops', () async {
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final attachSession = FakeSSHSession();
+      final runner = _probeRunner(_realHostProbeOutput);
+      runner.whenRun(
+        'command -v tailscale >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 1),
+      );
+      runner.whenRun(
+        'command -v loginctl >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        r'loginctl show-user $(id -un) --property=Linger',
+        const HostCommandResult(stdout: 'Linger=no', exitCode: 0),
+      );
+      runner.whenRun(
+        "grep -E '^[[:space:]]*KillUserProcesses[[:space:]]*=' "
+        '/etc/systemd/logind.conf',
+        const HostCommandResult(stdout: 'KillUserProcesses=yes', exitCode: 0),
+      );
+
+      final session = TerminalSession(
+        profile: _profile(multiplexer: 'tmux'),
+        sshService: service,
+        tmuxSessionName: 'helm-0',
+        terminal: RecordingTerminal(),
+        hostRunnerFactory: (_) => runner,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
+
+      await attachSession.endWithExitCode(1);
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        session.advisoriesNotifier.value.map((a) => a.id),
+        contains(HostAdvisoryId.sessionsMayDieOnLogout),
+      );
+    });
+
+    test('a failed connect publishes without needing a live host', () async {
+      final service = FakeSSHService();
+      service.queueConnectError(StateError('refused'));
+      final session = TerminalSession(
+        profile: _profile(),
+        sshService: service,
+        tmuxSessionName: 'helm-0',
+        terminal: RecordingTerminal(),
+        hostRunnerFactory: (_) => FakeHostCommandRunner(),
+      );
+
+      await expectLater(session.connect('key'), throwsA(isA<StateError>()));
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      // Nothing to report — there was never a host to ask — but the
+      // collect must not have thrown either.
+      expect(session.advisoriesNotifier.value, isEmpty);
     });
   });
 
