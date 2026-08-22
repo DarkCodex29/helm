@@ -16,11 +16,19 @@ class BiometricService {
 
   /// Returns true if the device supports biometric authentication
   /// and has at least one biometric enrolled.
+  ///
+  /// Enrollment is read from [LocalAuthentication.getAvailableBiometrics], not
+  /// from `canCheckBiometrics`. The latter answers "is biometric hardware
+  /// present", and `local_auth_darwin` returns true from it even for
+  /// `LAError.biometryNotEnrolled`. Gating on it would report a device with an
+  /// unenrolled Face ID sensor as available, and — because [authenticate] is
+  /// allowed to fall back to the device passcode — strand the user behind a
+  /// modal they may have no way to satisfy.
   Future<bool> isAvailable() async {
     try {
-      final canCheck = await _auth.canCheckBiometrics;
       final isDeviceSupported = await _auth.isDeviceSupported();
-      return canCheck && isDeviceSupported;
+      final enrolled = await _auth.getAvailableBiometrics();
+      return isDeviceSupported && enrolled.isNotEmpty;
     } catch (e) {
       _log.e('isAvailable() error', e);
       return false;
