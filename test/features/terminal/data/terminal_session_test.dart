@@ -15,12 +15,14 @@ import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:xterm/xterm.dart';
 
+import '../../../helpers/fake_host_command_runner.dart';
 import '../../../helpers/fake_ssh_service.dart';
 import '../../../helpers/fake_ssh_session.dart';
 
@@ -51,6 +53,17 @@ const _testProfile = ConnectionProfile(
 /// Channel name dartssh2's SSHClient talks over via [FakeSSHSocket] --
 /// never real, just used to build a genuine, otherwise-inert [SSHClient].
 SSHClient _buildFakeClient() => SSHClient(FakeSSHSocket(), username: 'tester');
+
+/// Host runner these tests hand TerminalSession so its connect-time probe
+/// never reaches the inert [FakeSSHSocket] client above.
+///
+/// [FakeHostCommandRunner] throws for any script it was not given a result
+/// for, which `HostProber` absorbs into an explicitly unknown report. That
+/// resolves to the profile's multiplexer under a bare binary name -- the
+/// exact attach command this file characterized before the probe existed,
+/// so every expectation below still describes the same behavior. The probe
+/// itself is covered in terminal_session_probe_test.dart.
+HostCommandRunner _unprobeableHost(SSHClient _) => FakeHostCommandRunner();
 
 /// The exact channel `flutter_secure_storage`'s platform-interface package
 /// invokes (see flutter_secure_storage_platform_interface's
@@ -188,6 +201,7 @@ void main() {
           sshService: service,
           tmuxSessionName: 'mysession',
           terminal: terminal,
+          hostRunnerFactory: _unprobeableHost,
           attachOpener: (client, command, pty) async {
             openedCommands.add(command);
             openedPtyConfigs.add(pty);
@@ -515,6 +529,7 @@ void main() {
             sshService: service,
             tmuxSessionName: 'mysession',
             terminal: terminal,
+            hostRunnerFactory: _unprobeableHost,
             attachOpener: (client, command, pty) async => attachSession,
           );
           await session.connect('key');
@@ -554,6 +569,7 @@ void main() {
             sshService: service,
             tmuxSessionName: 'mysession',
             terminal: terminal,
+            hostRunnerFactory: _unprobeableHost,
             attachOpener: (client, command, pty) async => attachSession,
           );
           await session.connect('key');
@@ -588,6 +604,7 @@ void main() {
             sshService: service,
             tmuxSessionName: 'mysession',
             terminal: terminal,
+            hostRunnerFactory: _unprobeableHost,
             attachOpener: (client, command, pty) async => attachSession,
           );
           await session.connect('key');
@@ -631,6 +648,7 @@ void main() {
             sshService: service,
             tmuxSessionName: 'mysession',
             terminal: terminal,
+            hostRunnerFactory: _unprobeableHost,
             attachOpener: (client, command, pty) async => attachSession,
           );
           await session.connect('key');
@@ -659,6 +677,7 @@ void main() {
             sshService: service,
             tmuxSessionName: 'mysession',
             terminal: terminal,
+            hostRunnerFactory: _unprobeableHost,
             attachOpener: (c, command, pty) async => attachSession,
           );
           await session.connect('key');

@@ -5,6 +5,12 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
 import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/host/multiplexer_factory.dart';
+import 'package:helm/core/host/multiplexer_selection.dart';
+import 'package:helm/core/host/probe/host_prober.dart';
+import 'package:helm/core/host/probe/host_report.dart';
+import 'package:helm/core/host/session_reference.dart';
+import 'package:helm/core/host/ssh_host_command_runner.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -36,29 +42,46 @@ Future<SSHSession> _defaultAttachOpener(
   SSHPtyConfig pty,
 ) => client.execute(command, pty: pty);
 
-/// Backs the default [MultiplexerAdapter] injected into [TerminalSession].
+/// Builds the [HostCommandRunner] used to probe and diagnose the host,
+/// bound to an already-connected [SSHClient].
 ///
-/// [TmuxAdapter.attachCommand] is a pure function (design.md AD-3) and
-/// never calls into its [HostCommandRunner], so this stub is never invoked
-/// in practice. It exists solely to satisfy [TmuxAdapter]'s constructor:
-/// [TerminalSession] has no [HostCommandRunner] of its own yet (that
-/// arrives once a persisted multiplexer choice lands — a later slice), so
-/// there is no real runner available to hand the default adapter here. Any
-/// other [TmuxAdapter] method reaching this stub would be a genuine bug in
-/// this wiring, so it throws loudly rather than returning an empty result.
-class _UnusedHostCommandRunner implements HostCommandRunner {
+/// Defaults to [SshHostCommandRunner], which opens a NEW CHANNEL on the
+/// existing client — never a second SSH connection. Tests inject a scripted
+/// runner to avoid a live transport, mirroring [AttachSessionOpener].
+typedef HostRunnerFactory = HostCommandRunner Function(SSHClient client);
+
+HostCommandRunner _defaultHostRunnerFactory(SSHClient client) =>
+    SshHostCommandRunner(client);
+
+/// Fallback [MultiplexerAdapter] for the window before the probe has run.
+///
+/// Replaces the former `_UnusedHostCommandRunner` stub, which existed only
+/// because [TerminalSession] had no [HostCommandRunner] at construction
+/// time and [TmuxAdapter.attachCommand] is pure (design.md AD-3), so the
+/// runner it was handed could never legitimately be called. That hole is
+/// closed now: the real adapter is built during [TerminalSession.connect]
+/// from a runner bound to the live client, so this fallback is only ever
+/// read if something asks for the adapter before a connection exists.
+///
+/// It keeps the stub's fail-loudly discipline for exactly that reason —
+/// reaching a host command through it would mean the probe wiring was
+/// bypassed, which is a bug worth surfacing rather than papering over with
+/// an empty result.
+class _UnconnectedHostCommandRunner implements HostCommandRunner {
   @override
   Future<HostCommandResult> run(String command, {Duration? timeout}) =>
       throw UnsupportedError(
-        "TerminalSession's default MultiplexerAdapter is only used for "
-        'attachCommand(), which never calls HostCommandRunner.run().',
+        'TerminalSession has no host connection yet: the real '
+        'MultiplexerAdapter is built during connect(), once a runner is '
+        'bound to the live SSHClient.',
       );
 
   @override
   Future<HostCommandResult> runScript(String script, {Duration? timeout}) =>
       throw UnsupportedError(
-        "TerminalSession's default MultiplexerAdapter is only used for "
-        'attachCommand(), which never calls HostCommandRunner.runScript().',
+        'TerminalSession has no host connection yet: the real '
+        'MultiplexerAdapter is built during connect(), once a runner is '
+        'bound to the live SSHClient.',
       );
 }
 
@@ -149,9 +172,14 @@ class TerminalSession {
     Terminal? terminal,
     MultiplexerAdapter? muxAdapter,
     AttachSessionOpener? attachOpener,
+    HostProber hostProber = const HostProber(),
+    HostRunnerFactory? hostRunnerFactory,
   }) : _sshService = sshService,
-       _muxAdapter = muxAdapter ?? TmuxAdapter(_UnusedHostCommandRunner()),
+       _muxAdapterOverride = muxAdapter,
+       _muxAdapter = muxAdapter ?? TmuxAdapter(_UnconnectedHostCommandRunner()),
        _attachOpener = attachOpener ?? _defaultAttachOpener,
+       _hostProber = hostProber,
+       _hostRunnerFactory = hostRunnerFactory ?? _defaultHostRunnerFactory,
        terminal = terminal ?? Terminal(maxLines: 5000);
 
   static final _log = HelmLogger('TerminalSession');
@@ -162,17 +190,46 @@ class TerminalSession {
 
   final SSHService _sshService;
 
-  /// Resolves the command that attaches to [tmuxSessionName] on the
-  /// active multiplexer. Defaults to a tmux-backed adapter — see
-  /// [_UnusedHostCommandRunner] for why no real [HostCommandRunner] is
-  /// wired in yet.
-  final MultiplexerAdapter _muxAdapter;
+  /// A caller-supplied adapter, when one was given. Non-null means the
+  /// caller already knows which multiplexer it wants, so [connect] skips
+  /// the probe entirely rather than second-guessing an explicit choice.
+  final MultiplexerAdapter? _muxAdapterOverride;
+
+  /// Resolves the command that attaches to [tmuxSessionName] on the active
+  /// multiplexer. Reassigned during [connect] to the adapter the probe
+  /// selected — see [_UnconnectedHostCommandRunner] for what the initial
+  /// value is and why it fails loudly if used.
+  MultiplexerAdapter _muxAdapter;
 
   /// Opens the exec+pty session used to attach. See [AttachSessionOpener].
   final AttachSessionOpener _attachOpener;
 
+  final HostProber _hostProber;
+  final HostRunnerFactory _hostRunnerFactory;
+
   SSHClient? _client;
   SSHSession? _session;
+  HostCommandRunner? _hostRunner;
+  HostReport? _hostReport;
+  MultiplexerSelection? _multiplexerSelection;
+
+  /// What the host probe reported during the last [connect], or null when
+  /// no probe has run — either because nothing is connected yet, or because
+  /// this session attaches no multiplexer and had nothing to select.
+  ///
+  /// A non-null report whose [HostReport.status] is not
+  /// [HostReportStatus.ok] means the probe could not tell us what is on
+  /// this host. It never means the host is empty.
+  HostReport? get hostReport => _hostReport;
+
+  /// Which multiplexer was selected and why, or null when no probe has run.
+  MultiplexerSelection? get multiplexerSelection => _multiplexerSelection;
+
+  /// Runs commands over the live connection, or null when not connected.
+  ///
+  /// Exposed so the diagnostics surface can ask the host follow-up
+  /// questions on the SAME connection instead of opening its own.
+  HostCommandRunner? get hostRunner => _hostRunner;
 
   /// Exposes the active [SSHClient] for one-shot command execution.
   /// Returns null if not connected.
@@ -207,9 +264,38 @@ class TerminalSession {
       );
 
       _client = result.client;
+      _hostRunner = _hostRunnerFactory(result.client);
 
       final sessionRef = tmuxSessionName;
       if (sessionRef != null) {
+        // Probe HERE — after the connection exists, before the attach
+        // command is built.
+        //
+        // Why this call site and not a provider or a standalone service:
+        // the probe's only consumer is the attach command built four
+        // statements below, and its only input is the SSHClient this
+        // method just obtained. A provider would have to own the client's
+        // lifecycle to run it, duplicating what this class already does;
+        // a service would still have to be called from exactly here.
+        // Placing it anywhere else would move the data further from the
+        // single decision it exists to inform.
+        //
+        // Why connect-time and not behind "Test Connection": the attach
+        // command is WRONG without it. The probe resolves the absolute
+        // path of the chosen multiplexer, and on the verified real host
+        // herdr lives at ~/.local/bin/herdr, which a non-interactive SSH
+        // shell's inherited PATH cannot find — attaching by bare name
+        // fails outright. This is not diagnostic colour; it is the input
+        // that makes attaching work. Its cost is one extra exec channel
+        // running a handful of `command -v` calls, bounded by
+        // kHostProbeTimeout, on a connection that is already open.
+        //
+        // Skipped entirely when the caller supplied its own adapter: an
+        // explicit choice needs no evidence to second-guess it.
+        if (_muxAdapterOverride == null) {
+          await _resolveMultiplexer();
+        }
+
         // Attach without a stdin race (session-attach spec): the attach
         // command is sent as part of the same exec request that allocates
         // the pseudo-terminal, never written into an already-open shell's
@@ -305,6 +391,13 @@ class TerminalSession {
     final oldClient = _client;
     _client = null;
     _session = null;
+    // Every one of these is bound to the client being torn down. A runner
+    // left pointing at a dead client would hand the diagnostics surface a
+    // transport that can only fail, and a stale report would describe a
+    // host state nobody re-verified. connect() repopulates all three.
+    _hostRunner = null;
+    _hostReport = null;
+    _multiplexerSelection = null;
     if (oldClient != null) {
       await _sshService.disconnect(oldClient);
     }
@@ -344,8 +437,45 @@ class TerminalSession {
 
     _client = null;
     _session = null;
+    // See reconnect(): host state never outlives the connection it
+    // describes.
+    _hostRunner = null;
+    _hostReport = null;
+    _multiplexerSelection = null;
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
+  }
+
+  /// Probes the host and swaps in the adapter the result selects.
+  ///
+  /// Never throws: [HostProber.probe] absorbs every probe failure into an
+  /// explicitly unknown report, and an unknown report resolves to the
+  /// multiplexer the profile asked for under a bare binary name — which is
+  /// byte-for-byte what this class did before the probe existed. A host
+  /// that cannot be probed is therefore never worse off than before.
+  Future<void> _resolveMultiplexer() async {
+    final runner = _hostRunner;
+    if (runner == null) return;
+
+    final report = await _hostProber.probe(runner);
+    _hostReport = report;
+
+    final selection = resolveMultiplexer(
+      requested: decodeMultiplexer(profile.multiplexer),
+      report: report,
+    );
+    _multiplexerSelection = selection;
+    _muxAdapter = buildMultiplexerAdapter(selection, runner);
+
+    _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');
+
+    // Disclose a substitution before the attach output starts arriving, so
+    // it is not buried under the multiplexer's own first screen.
+    final notice = multiplexerSelectionNotice(selection);
+    if (notice != null) {
+      _log.w(notice);
+      terminal.write('\r\n[Helm] $notice\r\n');
+    }
   }
 
   void _bridgeIO(SSHSession session) {

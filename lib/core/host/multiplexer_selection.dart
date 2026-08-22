@@ -193,6 +193,35 @@ MultiplexerSelection resolveMultiplexer({
   );
 }
 
+/// One line telling the user what this selection did differently from what
+/// they asked for, or null when nothing was overridden.
+///
+/// Deliberately narrow: this reports a CHANGED ACTION, not a host health
+/// finding. A multiplexer that is installed but off the inherited PATH is
+/// still exactly what the user chose and still attaches correctly, so it
+/// produces nothing here — that belongs in the diagnostics surface, which
+/// explains host problems rather than announcing decisions.
+///
+/// [MultiplexerUnverified] is also silent on purpose. The probe failing is
+/// not news about the user's multiplexer, and saying anything about it
+/// would train the user to ignore a line that usually means nothing.
+///
+/// Pure and Flutter-free so the wording is unit-testable without a widget.
+String? multiplexerSelectionNotice(MultiplexerSelection selection) {
+  return switch (selection) {
+    MultiplexerVerified() => null,
+    MultiplexerUnverified() => null,
+    MultiplexerSubstituted(:final requested, :final id, :final available) =>
+      '${requested.name} is not installed on this host — '
+          'attaching with ${id.name} instead. '
+          'Available: ${available.map((m) => m.name).join(', ')}.',
+    MultiplexerNoneFound(:final id) =>
+      'No supported multiplexer was found on this host '
+          '(looked for ${_hostDefaultPreference.map((m) => m.name).join(', ')}). '
+          'Attaching with ${id.name} anyway.',
+  };
+}
+
 /// Every multiplexer [report] positively found, keyed by id in
 /// [_hostDefaultPreference] order so callers can read `.keys.first` as
 /// "the best available on this host".
