@@ -11,11 +11,49 @@ class AuthScreen extends ConsumerStatefulWidget {
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> {
+  /// Latches the automatic prompt to the first locked resolution per mount.
+  ///
+  /// [AuthNotifier.authenticate] emits `AsyncLoading` and then, on failure,
+  /// `AsyncData(locked)` again — so a listener that reacted to every locked
+  /// emission would prompt forever. Latching breaks that cycle; the manual
+  /// retry button calls [_authenticate] directly and is unaffected.
+  bool _promptedOnce = false;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _authenticate();
+    // Prompting unconditionally from here races the notifier, which has not
+    // yet resolved whether biometrics exist. When they do not, the native
+    // dialog falls back to the device passcode and wins the race against the
+    // router's `unavailable` redirect, leaving no way into the app.
+    //
+    // `listenManual` is the right tool: unlike `ref.listen` it is valid
+    // outside `build`, it auto-disposes with this State, and
+    // `fireImmediately` also covers a mount onto an already-resolved
+    // notifier (the router reads it first, and `lock()` can re-emit while
+    // this screen is unmounted).
+    ref.listenManual<AsyncValue<AuthState>>(
+      authProvider,
+      _onAuthStateChanged,
+      fireImmediately: true,
+    );
+  }
+
+  void _onAuthStateChanged(
+    AsyncValue<AuthState>? previous,
+    AsyncValue<AuthState> next,
+  ) {
+    if (_promptedOnce) return;
+    if (next.valueOrNull != AuthState.locked) return;
+    _promptedOnce = true;
+    // Latch synchronously, prompt asynchronously. When `fireImmediately`
+    // delivers an already-resolved notifier this runs inside `initState`, and
+    // `authenticate()` emits `AsyncLoading` — Riverpod rejects that as
+    // "modify a provider while the widget tree was building". A microtask
+    // drains once the synchronous build scope unwinds, which is the smallest
+    // deferral that clears it.
+    Future.microtask(() {
+      if (mounted) _authenticate();
     });
   }
 
