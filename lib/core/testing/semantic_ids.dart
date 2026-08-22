@@ -43,6 +43,10 @@ class HomeSemantics {
   /// The hamburger that opens the shortcuts drawer.
   static const drawerButton = 'helm.home.drawer_button';
 
+  /// The AppBar action that opens Settings. This is the only persistent
+  /// route to `/settings`, so the E2E suite guards it.
+  static const settingsButton = 'helm.home.settings_button';
+
   /// The AppBar `+` action, only present while there are no tabs.
   static const appBarNewSessionButton = 'helm.home.app_bar_new_session_button';
 

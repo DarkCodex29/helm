@@ -25,6 +25,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late final AnimationController _kbAnimController;
   late final Animation<double> _kbAnimation;
 
+  /// Owns the [Scaffold] so the back handler can close the drawer.
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// Mirrors the drawer's open state, kept in sync by
+  /// [Scaffold.onDrawerChanged]. It drives [PopScope.canPop]: an open
+  /// drawer is a dismissible layer, so Android back has to close it
+  /// rather than pop this route, which is the whole app.
+  bool _isDrawerOpen = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,82 +93,107 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _kbAnimController.reverse();
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF272822),
-      drawer: const ShortcutsDrawer(),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        elevation: 0,
-        titleSpacing: 0,
-        leading: Builder(
-          builder: (ctx) => Semantics(
-            identifier: HomeSemantics.drawerButton,
-            child: IconButton(
-              icon: Icon(
-                Icons.menu,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+    return PopScope(
+      // HomeScreen is the only route on the stack, so an unhandled back
+      // closes the app. While the drawer is open that is wrong: back
+      // should dismiss the drawer and leave the app in the foreground.
+      canPop: !_isDrawerOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _scaffoldKey.currentState?.closeDrawer();
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
+        onDrawerChanged: (isOpen) {
+          if (mounted) setState(() => _isDrawerOpen = isOpen);
+        },
+        backgroundColor: const Color(0xFF272822),
+        drawer: const ShortcutsDrawer(),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF161B22),
+          elevation: 0,
+          titleSpacing: 0,
+          leading: Builder(
+            builder: (ctx) => Semantics(
+              identifier: HomeSemantics.drawerButton,
+              child: IconButton(
+                icon: Icon(
+                  Icons.menu,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                ),
+                tooltip: 'Projects',
+                onPressed: () => Scaffold.of(ctx).openDrawer(),
               ),
-              tooltip: 'Projects',
-              onPressed: () => Scaffold.of(ctx).openDrawer(),
             ),
           ),
-        ),
-        title: tabsState.hasTabs
-            ? TerminalTabBar(
-                tabs: tabsState.tabs,
-                activeIndex: tabsState.activeIndex,
-                onTabTap: (index) =>
-                    ref.read(tabsProvider.notifier).setActiveTab(index),
-                onTabClose: (id) =>
-                    ref.read(tabsProvider.notifier).removeTab(id),
-                onAddTab: () => _showNewTabDialog(context),
-              )
-            : Text(
-                'Helm',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
+          title: tabsState.hasTabs
+              ? TerminalTabBar(
+                  tabs: tabsState.tabs,
+                  activeIndex: tabsState.activeIndex,
+                  onTabTap: (index) =>
+                      ref.read(tabsProvider.notifier).setActiveTab(index),
+                  onTabClose: (id) =>
+                      ref.read(tabsProvider.notifier).removeTab(id),
+                  onAddTab: () => _showNewTabDialog(context),
+                )
+              : Text(
+                  'Helm',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                  ),
+                ),
+          actions: [
+            if (!tabsState.hasTabs)
+              Semantics(
+                identifier: HomeSemantics.appBarNewSessionButton,
+                child: IconButton(
+                  icon: const Icon(Icons.add),
+                  tooltip: 'New terminal',
+                  onPressed: () => _showNewTabDialog(context),
                 ),
               ),
-        actions: [
-          if (!tabsState.hasTabs)
             Semantics(
-              identifier: HomeSemantics.appBarNewSessionButton,
+              identifier: HomeSemantics.settingsButton,
               child: IconButton(
-                icon: const Icon(Icons.add),
-                tooltip: 'New terminal',
-                onPressed: () => _showNewTabDialog(context),
+                icon: Icon(
+                  Icons.settings,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                ),
+                tooltip: 'Settings',
+                onPressed: () => context.push('/settings'),
               ),
             ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (_pendingRecovery != null)
-            SessionRecoveryBanner(
-              snapshots: _pendingRecovery!,
-              onRecover: () async {
-                final snapshots = _pendingRecovery!;
-                try {
-                  await ref
-                      .read(tabsProvider.notifier)
-                      .recoverSession(snapshots);
-                } finally {
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_pendingRecovery != null)
+              SessionRecoveryBanner(
+                snapshots: _pendingRecovery!,
+                onRecover: () async {
+                  final snapshots = _pendingRecovery!;
+                  try {
+                    await ref
+                        .read(tabsProvider.notifier)
+                        .recoverSession(snapshots);
+                  } finally {
+                    if (mounted) setState(() => _pendingRecovery = null);
+                  }
+                },
+                onDiscard: () async {
+                  await ref.read(sessionSnapshotRepoProvider).markClean();
                   if (mounted) setState(() => _pendingRecovery = null);
-                }
-              },
-              onDiscard: () async {
-                await ref.read(sessionSnapshotRepoProvider).markClean();
-                if (mounted) setState(() => _pendingRecovery = null);
-              },
+                },
+              ),
+            Expanded(
+              child: tabsState.hasTabs
+                  ? _buildTerminalArea(tabsState)
+                  : _buildEmptyState(context),
             ),
-          Expanded(
-            child: tabsState.hasTabs
-                ? _buildTerminalArea(tabsState)
-                : _buildEmptyState(context),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
