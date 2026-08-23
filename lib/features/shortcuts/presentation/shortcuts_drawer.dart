@@ -1,18 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/host/agent_snapshot.dart';
+import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/shortcuts/domain/quick_action.dart';
 import 'package:helm/features/shortcuts/presentation/shortcut_form_sheet.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_provider.dart';
+import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
+import 'package:helm/features/terminal/presentation/widgets/agent_state_chip.dart';
 
-/// Sidebar drawer that shows project shortcuts and quick actions.
-class ShortcutsDrawer extends ConsumerWidget {
+/// Sidebar drawer that shows agent state, project shortcuts and quick
+/// actions.
+///
+/// Stateful only so the agent list can be refreshed the moment the drawer
+/// opens. `Scaffold`'s `DrawerController` does not build its child while
+/// the drawer is closed, so [State.initState] here IS "the drawer was
+/// opened" — no separate open callback is needed.
+class ShortcutsDrawer extends ConsumerStatefulWidget {
   const ShortcutsDrawer({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ShortcutsDrawer> createState() => _ShortcutsDrawerState();
+}
+
+class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
+  @override
+  void initState() {
+    super.initState();
+    // The session already polls on its own, so the list is at worst
+    // kAgentPollInterval stale — but "at worst 10 seconds stale" is
+    // exactly wrong at the instant somebody opens the drawer to look. One
+    // extra query, in-flight-guarded by the session so it cannot double up
+    // on a poll already in progress.
+    //
+    // After the frame, not during it: refreshAgents can publish
+    // synchronously on its unsupported-multiplexer path, and that would
+    // notify listeners mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(tabsProvider).activeTab?.session.refreshAgents();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final shortcuts = ref.watch(shortcutsProvider);
     final tabsState = ref.watch(tabsProvider);
     final activeTab = tabsState.activeTab;
@@ -37,6 +70,14 @@ class ShortcutsDrawer extends ConsumerWidget {
                 child: ListView(
                   padding: EdgeInsets.zero,
                   children: [
+                    // AGENTS section — first, because an agent waiting on a
+                    // human outranks anything else in this drawer.
+                    const _SectionHeader(label: 'AGENTS'),
+                    _AgentsSection(session: activeTab?.session),
+
+                    const SizedBox(height: 8),
+                    const Divider(color: Color(0xFF30363D), height: 1),
+
                     // PROJECTS section
                     _SectionHeader(
                       label: 'PROJECTS',
@@ -167,9 +208,12 @@ class _DrawerHeader extends StatelessWidget {
 // ── Section Header ──────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.label, required this.onAdd});
+  const _SectionHeader({required this.label, this.onAdd});
   final String label;
-  final VoidCallback onAdd;
+
+  /// Null for sections whose contents are reported by the host rather than
+  /// authored by the user — AGENTS has nothing to add.
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -187,15 +231,94 @@ class _SectionHeader extends StatelessWidget {
               letterSpacing: 1.0,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.add, size: 16, color: Color(0xFFB1BAC4)),
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            padding: EdgeInsets.zero,
-            onPressed: onAdd,
-            tooltip: 'Add',
-          ),
+          if (onAdd != null)
+            IconButton(
+              icon: const Icon(Icons.add, size: 16, color: Color(0xFFB1BAC4)),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: EdgeInsets.zero,
+              onPressed: onAdd,
+              tooltip: 'Add',
+            ),
         ],
       ),
+    );
+  }
+}
+
+// ── Agents section ─────────────────────────────────────────────────────────
+
+/// Renders what the active session knows about its AI agents.
+///
+/// UNVERIFIED SPIKE: no test covers this widget.
+///
+/// Every branch below exists to keep four different things apart that a
+/// naive implementation would render identically as "an empty list":
+///
+///  * no session at all,
+///  * a multiplexer that cannot report agent state (tmux, zellij),
+///  * an agent server we failed to reach,
+///  * a live server that genuinely has zero agents.
+///
+/// Only the last one is allowed to say "no agents". The other three say, in
+/// their own words, that helm does not know — which is the entire reason
+/// [AgentSnapshot] is a sealed type instead of a nullable list.
+class _AgentsSection extends StatelessWidget {
+  const _AgentsSection({required this.session});
+
+  final TerminalSession? session;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeSession = session;
+
+    return Semantics(
+      identifier: ShortcutsSemantics.agentsSection,
+      container: true,
+      explicitChildNodes: true,
+      child: activeSession == null
+          ? const _EmptyHint(text: 'No active session')
+          : ValueListenableBuilder<AgentSnapshot>(
+              valueListenable: activeSession.agentsNotifier,
+              builder: (context, snapshot, _) => _buildSnapshot(snapshot),
+            ),
+    );
+  }
+
+  Widget _buildSnapshot(AgentSnapshot snapshot) {
+    return switch (snapshot) {
+      AgentsNotProbed() => const _EmptyHint(
+        text: 'Not connected — agent state unknown',
+      ),
+      // Names the multiplexer instead of saying "unsupported": the user
+      // chose it, and the actionable fact is that THIS one cannot answer,
+      // not that helm failed.
+      AgentsUnsupported(:final muxId) => _EmptyHint(
+        text: '${muxId.name} does not track agent state',
+      ),
+      // Never "no agents". herdr is the only multiplexer that advertises
+      // agent state, so naming it here is accurate rather than a guess.
+      AgentsUnreachable() => const _EmptyHint(
+        text: "Could not reach herdr's agent server — agent state unknown",
+      ),
+      AgentsKnown(:final agents) when agents.isEmpty => const _EmptyHint(
+        text: 'No agents running right now',
+      ),
+      AgentsKnown(:final agents) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final agent in _byUrgency(agents))
+            AgentRow(key: ValueKey(agent.target), agent: agent),
+        ],
+      ),
+    };
+  }
+
+  /// Most urgent first, so the agent waiting on a human is the one the eye
+  /// lands on. Ties keep the host's own order, which is stable across
+  /// polls; sorting a copy leaves the snapshot's list untouched.
+  List<AgentStatus> _byUrgency(List<AgentStatus> agents) {
+    return [...agents]..sort(
+      (a, b) => agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state)),
     );
   }
 }

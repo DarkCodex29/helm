@@ -65,6 +65,12 @@ class ShortcutsSemantics {
   /// "PROJECTS" therefore also matches the button on Home and can never
   /// report the drawer as closed.
   static const drawer = 'helm.shortcuts.drawer';
+
+  /// The AGENTS section body. Wraps the agent list AND every one of its
+  /// "nothing to show" states, so an E2E flow can assert on the honest
+  /// explanation (unsupported / unreachable / genuinely none) rather than
+  /// on the absence of rows, which all three would otherwise look like.
+  static const agentsSection = 'helm.shortcuts.agents_section';
 }
 
 /// Identifiers on `HelmTerminalView`.
