@@ -153,9 +153,14 @@ final class AttachExitUnknown extends AttachExitOutcome {
   const AttachExitUnknown();
 }
 
-/// How often a connected session re-asks the host which agents are running.
+/// How long a session waits before RETRYING agent tracking when it cannot
+/// currently be event-driven.
 ///
-/// The cadence itself is covered in
+/// This is a fallback cadence, not the main mechanism: see
+/// [TerminalSession._trackAgents]. It is reached when the active
+/// multiplexer does not advertise [MuxCapability.agentWait], when there is
+/// no agent to target a wait at yet, or when a wait broke. The cadence
+/// itself is covered in
 /// `test/features/terminal/data/terminal_session_agents_test.dart`,
 /// against a virtual clock.
 ///
@@ -167,6 +172,23 @@ final class AttachExitUnknown extends AttachExitOutcome {
 /// exists for. Ten seconds is one short-lived channel per tab per ten
 /// seconds, on a connection that is already open.
 const kAgentPollInterval = Duration(seconds: 10);
+
+/// How long each `agent wait` is armed on the HOST before it gives up and
+/// is re-armed.
+///
+/// Spent by the multiplexer, not by this side: it is handed to
+/// [AgentAwareMultiplexer.waitForAgent], whose contract is that the
+/// implementation bounds the wait remotely. herdr's `--timeout` makes the
+/// remote process EXIT, which closes its channel; a deadline applied here
+/// would only stop listening and leave the channel held. See
+/// [kAgentListTimeout] for the incident that distinction comes from.
+///
+/// A timeout is not a failure — the loop re-arms — so this value trades
+/// only re-arm frequency against how long a silently wedged wait can sit
+/// unnoticed. Five minutes is 12 short command invocations an hour instead
+/// of the 360 the poll made, while still bounding a stuck window to
+/// something a user could sit through at most once.
+const kAgentWaitWindow = Duration(minutes: 5);
 
 /// Ceiling on a single agent query before it is treated as unreachable.
 ///
@@ -365,13 +387,31 @@ class TerminalSession {
         const AgentsNotProbed(),
         onObservedChanged: (observed) {
           _agentsObserved = observed;
-          _syncAgentPolling();
+          _syncAgentTracking();
         },
       );
 
-  /// Drives the periodic agent refresh. Non-null only while polling is
-  /// actually warranted — see [_syncAgentPolling].
-  Timer? _agentPollTimer;
+  /// Pending re-entry into [_trackAgents] when tracking could not be
+  /// event-driven this cycle. Non-null only while a retry is genuinely
+  /// owed — see [_scheduleAgentRetry].
+  Timer? _agentRetryTimer;
+
+  /// Invalidates in-flight tracking work. Bumped every time tracking
+  /// disarms, so a wait or a retry that was already scheduled can tell
+  /// that the session it belonged to has moved on.
+  ///
+  /// A held `agent wait` can outlive a disconnect, a dispose, or the last
+  /// observer leaving, and it answers into whatever is left. Checking a
+  /// generation counter is what makes that answer inert instead of
+  /// resurrecting a loop nobody wants — the failure the first version of
+  /// this code hit as "A Timer is still pending even after the widget tree
+  /// was disposed".
+  int _agentTrackingEpoch = 0;
+
+  /// True while a tracking cycle is either running or has a retry pending,
+  /// so arming twice cannot produce two loops — and therefore cannot
+  /// produce two held channels.
+  bool _agentTrackingActive = false;
 
   /// True once this session is attached to a multiplexer and connected,
   /// i.e. asking about agents is meaningful at all.
@@ -509,7 +549,7 @@ class TerminalSession {
       // multiplexer this session never selected.
       if (sessionRef != null) {
         _agentTrackingEnabled = true;
-        _syncAgentPolling();
+        _syncAgentTracking();
       }
 
       result.client.done
@@ -707,71 +747,205 @@ class TerminalSession {
 
   // ── Agent state ────────────────────────────────────────────────────────
 
-  /// Arms or disarms the periodic agent refresh so that it runs when — and
-  /// only when — it is both meaningful and wanted.
+  /// Arms or disarms agent tracking so that it runs when — and only when —
+  /// it is both meaningful and wanted.
   ///
-  /// WHY A POLL AT ALL, and why this session owns it:
-  ///
-  /// The adapter cannot push. `HerdrAdapter.waitForAgent` reads like a
-  /// subscription but is documented as single-shot (see its body): it is
-  /// `listAgents` plus a filter, so it buys nothing here. herdr's socket
-  /// may well support a real subscription, but that protocol is unverified
-  /// and explicitly out of scope — this file does not get to invent a wire
-  /// contract it has never observed.
-  ///
-  /// Refresh-on-demand alone is not enough either. The tab badge is the
-  /// whole point: a user must learn that an agent needs them WITHOUT
-  /// opening anything. A snapshot taken once at connect time would be
-  /// stale within seconds, because agent state is the one host fact that
-  /// changes constantly by design.
-  ///
-  /// The session owns the timer — not a provider — for the same reason the
-  /// probe does (see [connect]): the only usable [HostCommandRunner] is the
-  /// one bound to the [SSHClient] this class created, and it reuses that
-  /// client's channels instead of opening a second connection.
+  /// WHY THIS SESSION OWNS IT, for the same reason the probe does (see
+  /// [connect]): the only usable [HostCommandRunner] is the one bound to
+  /// the [SSHClient] this class created, and it reuses that client's
+  /// channels instead of opening a second connection.
   ///
   /// WHY IT IS GATED ON AN OBSERVER, not merely on being connected:
   ///
-  /// "Do not hammer the host" is not satisfied by a slow interval alone. A
-  /// timer armed by [connect] would keep querying forever for a session
-  /// whose agent state nothing renders, and would outlive any caller that
-  /// builds a session without tearing it down — which is precisely how the
-  /// first version of this poll leaked a pending timer past the end of a
-  /// widget test. Gating on [_agentsObserved] makes that leak structurally
-  /// impossible rather than a discipline every future caller has to
-  /// remember, and it drops host traffic to exactly zero when no widget is
-  /// listening.
+  /// "Do not hammer the host" is not satisfied by a slow cadence alone,
+  /// and it is satisfied even less by an event-driven wait — a wait is a
+  /// HELD channel, so an unobserved session would sit on one indefinitely
+  /// to produce a value nothing renders. A tracker armed by [connect]
+  /// would also outlive any caller that builds a session without tearing
+  /// it down, which is precisely how the first version of this code leaked
+  /// a pending timer past the end of a widget test. Gating on
+  /// [_agentsObserved] makes both leaks structurally impossible rather
+  /// than a discipline every future caller has to remember, and it drops
+  /// host traffic to exactly zero when no widget is listening.
   ///
   /// Both conditions matter: [_agentTrackingEnabled] means asking is
   /// MEANINGFUL (connected, and attached to a multiplexer), while
   /// [_agentsObserved] means the answer is WANTED.
-  void _syncAgentPolling() {
-    final shouldPoll = _agentTrackingEnabled && _agentsObserved && !_disposed;
+  void _syncAgentTracking() {
+    final shouldTrack = _agentTrackingEnabled && _agentsObserved && !_disposed;
 
-    if (!shouldPoll) {
-      _agentPollTimer?.cancel();
-      _agentPollTimer = null;
+    if (!shouldTrack) {
+      // Strand whatever is in flight BEFORE clearing the timer: a wait
+      // already held on the host cannot be cancelled from here, so the
+      // only way to stop it re-arming is to make its answer inert.
+      _agentTrackingEpoch++;
+      _agentRetryTimer?.cancel();
+      _agentRetryTimer = null;
+      _agentTrackingActive = false;
       return;
     }
-    if (_agentPollTimer != null) return;
+    if (_agentTrackingActive) return;
+    _agentTrackingActive = true;
 
-    _agentPollTimer = Timer.periodic(
-      kAgentPollInterval,
-      (_) => unawaited(refreshAgents()),
-    );
-    // Do not make the user wait a whole interval for the first reading.
-    //
     // Deferred by a microtask because the observed-transition that gets
     // here fires from a listener's `initState`, i.e. mid-build.
     // [refreshAgents] can publish synchronously on its unsupported-
     // multiplexer path, and notifying a [ValueListenableBuilder] during
     // build would mark a widget dirty while it is being built.
-    scheduleMicrotask(() => unawaited(refreshAgents()));
+    final epoch = _agentTrackingEpoch;
+    scheduleMicrotask(() => unawaited(_trackAgents(epoch)));
+  }
+
+  /// Keeps [agentsNotifier] current by asking the host to TELL US when an
+  /// agent moves, rather than interrogating it on a clock.
+  ///
+  /// WHY THIS REPLACED A 10-SECOND POLL:
+  ///
+  /// The tab badge is the whole point — a user must learn that an agent
+  /// needs them without opening anything — and a poll put up to a full
+  /// interval between the agent blocking and the badge saying so. herdr's
+  /// `agent wait` is MEASURED to be event-driven (55ms of host-side
+  /// reaction), so the interval is now paid only when there is nothing to
+  /// watch. The previous version of this comment claimed a real wait would
+  /// need "an unverified CLI subcommand or an unverified polling
+  /// protocol"; the subcommand is verified, and this is it.
+  ///
+  /// THE CHANNEL BUDGET, which is the constraint that shapes everything
+  /// here:
+  ///
+  /// A blocking wait is a HELD SSH exec channel, and OpenSSH's default
+  /// `MaxSessions` is 10. Commit 773888f is the record of what channel
+  /// accumulation costs — a connection with no channel left for a
+  /// reconnect to attach through, i.e. losing the terminal in order to
+  /// refresh a badge. Exactly ONE channel is held, and that is structural
+  /// rather than guarded:
+  ///
+  /// * this is a single sequential loop — the list and the wait are
+  ///   awaited one after the other, never concurrently;
+  /// * [_agentTrackingActive] admits only one loop per session;
+  /// * the wait is bounded ON THE HOST (see [kAgentWaitWindow]), so it is
+  ///   always awaited to completion and never abandoned. Abandonment is
+  ///   what turns "one held channel" into "one per window".
+  ///
+  /// WHEN IT CANNOT BE EVENT-DRIVEN it degrades to [kAgentPollInterval]
+  /// rather than to silence, in three cases: an adapter with no
+  /// [MuxCapability.agentWait] (whose wait may answer instantly, making a
+  /// re-arm loop a spin), no agent to target yet (so an agent that starts
+  /// LATER is still discovered), and a wait that broke (retried on a
+  /// delay, never immediately).
+  Future<void> _trackAgents(int epoch) async {
+    while (!_agentTrackingStale(epoch)) {
+      await refreshAgents();
+      if (_agentTrackingStale(epoch)) return;
+
+      final plan = _planAgentWait();
+      if (plan == null) {
+        _scheduleAgentRetry(epoch);
+        return;
+      }
+
+      MuxAgentWaitResult result;
+      try {
+        result = await plan.api.waitForAgent(
+          plan.target,
+          until: plan.until,
+          timeout: kAgentWaitWindow,
+        );
+      } catch (e) {
+        // An adapter is not supposed to throw here, but a throw must not
+        // become an unhandled async error and must not be read as "no
+        // agents" — it is one more way of not knowing.
+        _log.w('Agent wait threw for ${profile.name}: $e');
+        result = const MuxAgentWaitFailed(null);
+      }
+      if (_agentTrackingStale(epoch)) return;
+
+      if (result is MuxAgentWaitFailed) {
+        _log.w('Agent wait failed for ${profile.name}: ${result.code}');
+        // Ask the LIST what is true before degrading: a wait can fail for
+        // reasons the list can still answer around — a watched pane that
+        // closed, say — and `refreshAgents` publishes the honest
+        // [AgentsUnreachable] when the list cannot answer either. Then
+        // wait out the interval rather than re-arming into the same
+        // failure.
+        await refreshAgents();
+        if (_agentTrackingStale(epoch)) return;
+        _scheduleAgentRetry(epoch);
+        return;
+      }
+      // Matched or timed out: either way the next cycle re-reads the list,
+      // which is the authority, and re-arms from what it finds.
+    }
+  }
+
+  /// True once the work started for [epoch] no longer belongs to anything.
+  ///
+  /// Checked after EVERY await in [_trackAgents], because each one is a
+  /// point where a tab can be closed or a connection dropped underneath it.
+  bool _agentTrackingStale(int epoch) =>
+      _disposed ||
+      epoch != _agentTrackingEpoch ||
+      statusNotifier.value != ConnectionStatus.connected;
+
+  void _scheduleAgentRetry(int epoch) {
+    _agentRetryTimer?.cancel();
+    _agentRetryTimer = Timer(kAgentPollInterval, () {
+      if (_agentTrackingStale(epoch)) return;
+      unawaited(_trackAgents(epoch));
+    });
+  }
+
+  /// Decides which agent to watch and for which states, or null when this
+  /// cycle cannot be event-driven at all.
+  ///
+  /// [until] is the COMPLEMENT of the watched agent's current state, and
+  /// that is not a refinement — it is what stops the loop spinning.
+  /// MEASURED against herdr 0.8.0: a wait armed with the state an agent is
+  /// ALREADY in returns immediately (0.115s, i.e. process startup). Arming
+  /// "any state" would therefore re-arm as fast as the transport allows,
+  /// forever, on a host the user is also working on.
+  ///
+  /// The watched agent is the one DRIVING THE BADGE (most urgent, ties
+  /// broken by target so the choice is stable across cycles), because that
+  /// is the claim currently on screen and therefore the claim most costly
+  /// to leave stale.
+  ///
+  /// KNOWN LIMIT, stated rather than hidden: `agent wait` takes ONE target,
+  /// and the channel budget allows one wait, so a second agent escalating
+  /// while the badge agent holds still is not noticed until the badge agent
+  /// moves or the wait window expires. Watching every agent would need
+  /// either one channel per agent or herdr's `events.subscribe`, which has
+  /// no CLI wrapper and is out of scope here.
+  ({AgentAwareMultiplexer api, String target, Set<AgentState> until})?
+  _planAgentWait() {
+    if (!_muxAdapter.capabilities.contains(MuxCapability.agentWait)) {
+      return null;
+    }
+    final support = AgentSupport.resolve(_muxAdapter);
+    if (support is! AgentSupportAvailable) return null;
+
+    final snapshot = agentsNotifier.value;
+    if (snapshot is! AgentsKnown || snapshot.agents.isEmpty) return null;
+
+    final watched = snapshot.agents.reduce((a, b) {
+      final byUrgency =
+          agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state));
+      if (byUrgency != 0) return byUrgency > 0 ? b : a;
+      return b.target.compareTo(a.target) < 0 ? b : a;
+    });
+
+    return (
+      api: support.agents,
+      target: watched.target,
+      until: AgentState.values
+          .where((state) => state != watched.state)
+          .toSet(),
+    );
   }
 
   void _stopAgentTracking() {
     _agentTrackingEnabled = false;
-    _syncAgentPolling();
+    _syncAgentTracking();
   }
 
   /// Asks the host once for the current agent list and publishes the

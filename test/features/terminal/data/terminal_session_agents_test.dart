@@ -28,6 +28,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../../helpers/fake_agent_adapter.dart';
 import '../../../helpers/fake_host_command_runner.dart';
+import '../../../helpers/fake_waiting_agent_adapter.dart';
 import '../../../helpers/fake_ssh_service.dart';
 import '../../../helpers/fake_ssh_session.dart';
 
@@ -582,5 +583,424 @@ void main() {
 
       await session.dispose();
     });
+  });
+
+  // ── Event-driven tracking ────────────────────────────────────────────
+  //
+  // An adapter that advertises MuxCapability.agentWait can be ASKED to tell
+  // us when an agent moves, instead of being interrogated every ten
+  // seconds. The badge then changes in tens of milliseconds rather than in
+  // up to a full interval — measured at 55ms of host-side reaction against
+  // a real herdr 0.8.0.
+  //
+  // The danger this trades for is worse than a stale badge, so most of what
+  // follows is aimed at it rather than at the happy path: a wait is a HELD
+  // SSH exec channel. OpenSSH's default MaxSessions is 10, and commit
+  // 773888f is the record of what channel accumulation costs a user — a
+  // connection with no channel left for a reconnect to attach through, i.e.
+  // losing the terminal in order to refresh a badge.
+  group('event-driven agent tracking — exactly one held channel', () {
+    /// An observed session, with the observer removed for the caller by
+    /// [stop]. Removing it INSIDE the test body is mandatory: the widget
+    /// binding's pending-timer invariant runs before `addTearDown`
+    /// callbacks, which is the trap the first version of this poll hit.
+    Future<({TerminalSession session, void Function() stop})> observed(
+      FakeWaitingAgentAdapter adapter,
+    ) async {
+      final session = await _connectedSession(adapter: adapter);
+      void listener() {}
+      session.agentsNotifier.addListener(listener);
+      await pumpEventQueue();
+      return (
+        session: session,
+        stop: () => session.agentsNotifier.removeListener(listener),
+      );
+    }
+
+    const blocked = (
+      target: 'w1:p1',
+      label: 'claude',
+      state: AgentState.blocked,
+    );
+    const working = (
+      target: 'w1:p1',
+      label: 'claude',
+      state: AgentState.working,
+    );
+
+    test(
+      'holds exactly ONE wait, and never arms a second while the first is '
+      'outstanding — a wait is a held channel, and MaxSessions is 10',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+
+        expect(adapter.waits, hasLength(1));
+        expect(adapter.isWaiting, isTrue);
+
+        // Drive several full cycles. Each answered wait must be replaced,
+        // never accompanied.
+        for (var i = 0; i < 5; i++) {
+          adapter.completeWait(const MuxAgentWaitMatched(working));
+          await pumpEventQueue();
+        }
+
+        expect(adapter.waits.length, 6, reason: 'one re-arm per answer');
+        expect(
+          adapter.maxConcurrentWaits,
+          1,
+          reason: 'two open waits means two held channels',
+        );
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'arms the COMPLEMENT of the current state, never the state the agent '
+      'is already in — herdr answers that instantly, so it would spin',
+      () async {
+        // MEASURED on a real host: against an agent already `blocked`,
+        // `agent wait --until blocked` returned in 0.115s with a success
+        // envelope — process startup, no waiting at all. A loop that armed
+        // the current state would therefore re-arm as fast as the transport
+        // allows, forever, on a session the user is also working on.
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+
+        final armed = adapter.waits.single;
+        expect(armed.target, 'w1:p1');
+        expect(
+          armed.until,
+          isNot(contains(AgentState.blocked)),
+          reason: 'the current state would match immediately',
+        );
+        expect(armed.until, {
+          AgentState.idle,
+          AgentState.working,
+          AgentState.done,
+          AgentState.unknown,
+        });
+        expect(armed.timeout, kAgentWaitWindow);
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'watches the agent that DRIVES THE BADGE, so the claim on screen is '
+      'the claim being verified',
+      () async {
+        const idle = (
+          target: 'w1:p2',
+          label: 'codex',
+          state: AgentState.idle,
+        );
+        final adapter = FakeWaitingAgentAdapter()
+          // Deliberately listed with the urgent one LAST, so host order
+          // cannot be mistaken for urgency.
+          ..agentList = const MuxAgentsAvailable([idle, blocked]);
+        final harness = await observed(adapter);
+
+        expect(adapter.waits.single.target, 'w1:p1');
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'a state change publishes the new snapshot without waiting out an '
+      'interval — this is the whole point of the wait',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([working]);
+        final harness = await observed(adapter);
+
+        expect(
+          (harness.session.agentsNotifier.value as AgentsKnown).agents.single
+              .state,
+          AgentState.working,
+        );
+
+        // The host says the agent moved. Nothing else advances: no timer
+        // fires, no clock is elapsed.
+        adapter.agentList = const MuxAgentsAvailable([blocked]);
+        adapter.completeWait(const MuxAgentWaitMatched(blocked));
+        await pumpEventQueue();
+
+        expect(
+          (harness.session.agentsNotifier.value as AgentsKnown).agents.single
+              .state,
+          AgentState.blocked,
+          reason: 'the badge must follow the host, not the clock',
+        );
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'a timed-out wait simply re-arms and keeps the last known state — a '
+      'window in which nothing changed is not a failure',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+
+        adapter.completeWait(const MuxAgentWaitTimedOut());
+        await pumpEventQueue();
+
+        expect(adapter.waits, hasLength(2), reason: 're-armed');
+        expect(harness.session.agentsNotifier.value, isA<AgentsKnown>());
+        expect(
+          harness.session.agentsNotifier.value,
+          isNot(isA<AgentsUnreachable>()),
+          reason: 'nothing changed is not "we could not find out"',
+        );
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'a FAILED wait degrades to a bounded retry, never to a hot re-arm '
+      'and never to an empty agent list',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+
+        // The pane vanished, the socket died, herdr answered in a shape we
+        // do not recognize — all of them mean "we cannot find out", and
+        // none of them may be answered by immediately asking again.
+        adapter.agentList = const MuxAgentServerNotRunning();
+        adapter.completeWait(const MuxAgentWaitFailed('agent_not_found'));
+        await pumpEventQueue();
+
+        expect(
+          adapter.waits,
+          hasLength(1),
+          reason: 'a broken wait must not be retried without a delay',
+        );
+        expect(harness.session.agentsNotifier.value, isA<AgentsUnreachable>());
+        expect(
+          harness.session.agentsNotifier.value,
+          isNot(isA<AgentsKnown>()),
+          reason: 'the one variant a reader may treat as authoritative',
+        );
+
+        harness.stop();
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'an adapter that does NOT advertise agentWait is never asked to '
+      'wait — it would answer instantly and the loop would spin',
+      () async {
+        // FakeAgentAdapter's waitForAgent throws precisely so this cannot
+        // pass by accident: the capability gate is the only thing keeping
+        // the loop off it.
+        final adapter = FakeAgentAdapter()
+          ..whenAgents(const MuxAgentsAvailable([_blockedAgent]));
+        final session = await _connectedSession(adapter: adapter);
+
+        void listener() {}
+        FakeAsync().run((async) {
+          session.agentsNotifier.addListener(listener);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 1);
+
+          // Still polling, exactly as before, and still not waiting.
+          async.elapse(kAgentPollInterval * 3);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 4);
+
+          session.agentsNotifier.removeListener(listener);
+        });
+
+        expect(session.agentsNotifier.value, isA<AgentsKnown>());
+        await session.dispose();
+      },
+    );
+
+    test(
+      'with no agents to watch it falls back to asking again later, so an '
+      'agent that STARTS later is still noticed',
+      () async {
+        // `agent wait` takes one agent target, so an empty session gives it
+        // nothing to arm. Losing discovery entirely would be a regression
+        // against the poll this replaces.
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([]);
+        final session = await _connectedSession(adapter: adapter);
+
+        void listener() {}
+        FakeAsync().run((async) {
+          session.agentsNotifier.addListener(listener);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 1);
+          expect(adapter.waits, isEmpty, reason: 'nothing to target');
+
+          async.elapse(kAgentPollInterval);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 2);
+
+          // An agent appears. The very next cycle switches to watching it.
+          adapter.agentList = const MuxAgentsAvailable([blocked]);
+          async.elapse(kAgentPollInterval);
+          async.flushMicrotasks();
+          expect(adapter.waits, hasLength(1));
+          expect(adapter.waits.single.target, 'w1:p1');
+
+          session.agentsNotifier.removeListener(listener);
+        });
+
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await session.dispose();
+      },
+    );
+
+    test(
+      'nothing observing means no list AND no held channel, however long '
+      'the session stays connected',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final session = await _connectedSession(adapter: adapter);
+
+        await pumpEventQueue();
+        FakeAsync().run((async) {
+          async.elapse(kAgentWaitWindow * 3);
+          async.flushMicrotasks();
+        });
+
+        expect(adapter.listAgentsCalls, 0);
+        expect(adapter.waits, isEmpty);
+
+        await session.dispose();
+      },
+    );
+
+    test(
+      'the last observer leaving releases the held channel and arms no '
+      'replacement',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+        expect(adapter.waits, hasLength(1));
+
+        harness.stop();
+        await pumpEventQueue();
+
+        // The wait that was already in flight answers after the observer
+        // left. It must not start another one.
+        adapter.completeWait(const MuxAgentWaitMatched(working));
+        await pumpEventQueue();
+
+        expect(adapter.waits, hasLength(1));
+
+        await harness.session.dispose();
+      },
+    );
+
+    test(
+      'losing the connection stops the loop, and a wait answering after the '
+      'drop neither re-arms nor republishes',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final service = FakeSSHService();
+        service.queueConnectSuccess(
+          SSHConnectionResult(
+            client: _buildFakeClient(),
+            session: FakeSSHSession(),
+          ),
+        );
+        final attach = FakeSSHSession();
+        final session = TerminalSession(
+          profile: _profile(),
+          sshService: service,
+          tmuxSessionName: 'helm-0',
+          terminal: _SilentTerminal(),
+          muxAdapter: adapter,
+          hostRunnerFactory: (_) => FakeHostCommandRunner(),
+          attachOpener: (client, command, pty) async => attach,
+        );
+        await session.connect('key');
+        void listener() {}
+        session.agentsNotifier.addListener(listener);
+        await pumpEventQueue();
+        expect(adapter.waits, hasLength(1));
+
+        await attach.endWithExitCode(0);
+        await pumpEventQueue();
+        expect(session.status, ConnectionStatus.disconnected);
+        expect(session.agentsNotifier.value, isA<AgentsNotProbed>());
+
+        adapter.completeWait(const MuxAgentWaitMatched(blocked));
+        await pumpEventQueue();
+
+        expect(adapter.waits, hasLength(1), reason: 'no resurrection');
+        expect(
+          session.agentsNotifier.value,
+          isA<AgentsNotProbed>(),
+          reason: 'a dead host must not be described as alive',
+        );
+
+        session.agentsNotifier.removeListener(listener);
+        await session.dispose();
+      },
+    );
+
+    test(
+      'dispose leaves no pending timer, and a wait answering afterwards '
+      'never touches the disposed notifier',
+      () async {
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final harness = await observed(adapter);
+
+        harness.stop();
+        await harness.session.dispose();
+
+        // The held wait answers into a session that no longer exists.
+        adapter.completeWait(const MuxAgentWaitMatched(working));
+        await pumpEventQueue();
+
+        expect(adapter.waits, hasLength(1));
+        // ValueNotifier assigns `_value` BEFORE asserting on disposal, so
+        // an unguarded write stays observable even though the assertion is
+        // swallowed. A snapshot that never moved is proof none was tried.
+        expect(harness.session.agentsNotifier.value, isA<AgentsKnown>());
+
+        FakeAsync().run((async) {
+          async.elapse(kAgentWaitWindow * 3);
+          async.flushMicrotasks();
+        });
+        expect(adapter.waits, hasLength(1));
+      },
+    );
   });
 }
