@@ -258,6 +258,35 @@ void main() {
         expect(() => adapter.listAgents(), throwsStateError);
       },
     );
+
+    test(
+      'stderr that is not the JSON error envelope at all is surfaced, not '
+      'guessed at — a malformed failure must never be read as a '
+      'recognized code',
+      () async {
+        // e.g. the binary died before it could write its envelope, or a
+        // shell wrapper wrote its own message. There is no `error.code`
+        // to parse, so `server_not_running` must NOT be inferred.
+        runner.whenRun(
+          _agentListCommand,
+          const HostCommandResult(
+            stderr: 'herdr: command terminated by signal 9',
+            exitCode: 137,
+          ),
+        );
+
+        await expectLater(
+          adapter.listAgents(),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('no machine-readable error.code'),
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('agents capability', () {
