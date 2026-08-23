@@ -172,14 +172,40 @@ const kAgentPollInterval = Duration(seconds: 10);
 /// [SshHostCommandRunner] applies none by default, so a wedged host would
 /// otherwise leave the poll waiting forever on a Future that never
 /// completes — freezing the UI on stale agent state that looks current.
-/// The timeout is applied at the CALL SITE rather than by widening the
-/// adapter's signature: the adapter is covered by tests, this poll is not,
-/// and a spike must not reshape a verified contract.
 ///
-/// Honest limit: this abandons the Future, it does not cancel the remote
-/// command. The underlying channel drains on its own. That is acceptable
-/// here because the alternative is a permanently frozen badge, but it is a
-/// real leak worth closing if this poll ever graduates out of spike status.
+/// WHAT THIS DOES NOT DO, precisely.
+///
+/// `Future.timeout` abandons the Future; it does not cancel the remote
+/// command. Nothing in the path can, today, and the reason is a specific
+/// missing capability rather than a general difficulty:
+/// [SshHostCommandRunner] reaches the transport through its own
+/// `SshCommandChannel` interface, and that interface exposes only `stdin`,
+/// `stdout`, `stderr`, `exitCode` and `done` — there is no `close`. The
+/// real dartssh2 [SSHSession] behind it does have `close()`, so
+/// cancellation is genuinely reachable, but only by widening
+/// `SshCommandChannel`, its production adapter and every test fake that
+/// implements it, then threading a deadline down through
+/// `HostCommandRunner.run` and `AgentAwareMultiplexer.listAgents` — a
+/// change across the multiplexer-abstraction and host-command-port
+/// contracts, well outside the surface this timeout belongs to.
+///
+/// THE ACTUAL CEILING ON LEAKED INVOCATIONS: exactly one per session.
+///
+/// That is enforced, not hoped for. [TerminalSession._agentPollInFlight]
+/// is released by the query's own completion rather than by this timeout
+/// firing (see [TerminalSession.refreshAgents]), so a poll whose answer
+/// never arrives blocks every later poll on that session instead of
+/// stacking beside it. Without that, an 8-second ceiling against a
+/// 10-second cadence adds one abandoned exec channel every interval —
+/// six a minute, unbounded — and OpenSSH's default `MaxSessions` of 10
+/// would starve the connection within two minutes, at which point even a
+/// reconnect could not open the channel it needs to attach. Losing the
+/// terminal because the badge could not be refreshed is a far worse
+/// failure than a stale badge.
+///
+/// The single abandoned channel is reclaimed when the host finally
+/// answers, or when the transport is torn down by `dispose`/`reconnect`,
+/// whichever comes first.
 const kAgentListTimeout = Duration(seconds: 8);
 
 /// [ValueNotifier] that reports when it goes from unobserved to observed
@@ -771,8 +797,29 @@ class TerminalSession {
     final agentApi = (support as AgentSupportAvailable).agents;
 
     _agentPollInFlight = true;
+    final query = agentApi.listAgents();
+    // Release the guard when the QUERY settles, not when this call stops
+    // waiting for it.
+    //
+    // This is what bounds the timeout's leak. `.timeout` below abandons
+    // the Future without closing the remote channel (see
+    // [kAgentListTimeout]); releasing the guard on that abandonment would
+    // let the next poll open a SECOND channel on top of the one nobody
+    // closed, and an 8s ceiling against a 10s cadence adds one abandoned
+    // invocation every interval, without limit. Holding the guard until
+    // the host actually answers caps that at exactly one.
+    //
+    // The error is swallowed HERE and handled on the awaited branch
+    // below: both branches observe the same Future, and an unobserved
+    // rejection on this one would surface as an unhandled async error.
+    unawaited(
+      query
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() => _agentPollInFlight = false),
+    );
+
     try {
-      final result = await agentApi.listAgents().timeout(kAgentListTimeout);
+      final result = await query.timeout(kAgentListTimeout);
       // The session can be torn down during the round-trip — closing a tab
       // disposes it while this is still in flight. Writing to a disposed
       // ValueNotifier throws; the previous unit hit exactly that with the
@@ -789,8 +836,6 @@ class TerminalSession {
       if (_disposed) return;
       if (statusNotifier.value != ConnectionStatus.connected) return;
       agentsNotifier.value = const AgentsUnreachable();
-    } finally {
-      _agentPollInFlight = false;
     }
   }
 

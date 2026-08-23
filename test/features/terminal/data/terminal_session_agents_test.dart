@@ -251,6 +251,54 @@ void main() {
         await session.dispose();
       },
     );
+
+    test(
+      'a query ABANDONED at the timeout still holds the in-flight guard, '
+      'so a wedged host leaks at most ONE remote invocation, not one per '
+      'poll until the SSH channel limit is hit',
+      () async {
+        final adapter = FakeAgentAdapter()..whenHangs();
+        final session = await _connectedSession(adapter: adapter);
+
+        FakeAsync().run((async) {
+          unawaited(session.refreshAgents());
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 1);
+
+          // The call site gives up here. The REMOTE command does not: the
+          // channel is still open and still buffering.
+          async.elapse(kAgentListTimeout + const Duration(seconds: 1));
+          async.flushMicrotasks();
+          expect(session.agentsNotifier.value, isA<AgentsUnreachable>());
+
+          // The next poll comes round. It must NOT open a second channel
+          // on top of the one nobody closed — an 8s ceiling against a 10s
+          // cadence would otherwise add one abandoned invocation every
+          // interval, and OpenSSH's default MaxSessions of 10 would then
+          // starve the connection of the channels a reconnect needs.
+          unawaited(session.refreshAgents());
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 1);
+        });
+
+        // Resuming is asserted OUTSIDE the virtual clock on purpose: the
+        // gate's Completer was created in the root zone, so completing it
+        // schedules a real microtask that `flushMicrotasks` cannot drive.
+        adapter.release();
+        await pumpEventQueue();
+
+        adapter.whenAgents(const MuxAgentsAvailable([]));
+        await session.refreshAgents();
+
+        expect(
+          adapter.listAgentsCalls,
+          2,
+          reason: 'the guard must lift once the host finally answers',
+        );
+
+        await session.dispose();
+      },
+    );
   });
 
   group('agent polling lifecycle — demand-gated, never orphaned', () {
