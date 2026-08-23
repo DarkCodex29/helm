@@ -228,15 +228,35 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
 
   /// Parses one herdr `AgentInfo` JSON object into an [AgentStatus].
   ///
-  /// `terminal_id` and `agent_status` are schema-required. `name`/`title`
-  /// are schema-optional, so [label] falls back through name → title →
-  /// terminal_id rather than assuming either exists.
+  /// [AgentStatus.target] carries `pane_id`, NOT `terminal_id`, because
+  /// `target` is named after the one operation that consumes it —
+  /// [waitForAgent] — and MEASURED against a real herdr 0.8.0 host, that
+  /// operation accepts only the pane id:
+  ///
+  /// ```text
+  /// agent wait w1:p1               → blocks, then returns the agent
+  /// agent wait term_659ab3dc3a8541 → {"error":{"code":"agent_not_found",
+  ///                                  "message":"agent target ... not
+  ///                                  found"}}
+  /// ```
+  ///
+  /// A field named `target` holding an identifier the only target-taking
+  /// method rejects is a lie encoded in the type, so the pane id wins the
+  /// name. Nothing else needed the terminal id: its only other uses were
+  /// this label fallback and a widget key, and a pane id is equally
+  /// unique and stable for both.
+  ///
+  /// `pane_id`, `terminal_id` and `agent_status` are all schema-required
+  /// (protocol 19). `name`/`title` are schema-optional, so [label] falls
+  /// back through name → title → terminal_id rather than assuming either
+  /// exists — the fallback deliberately keeps the terminal id so the text
+  /// a user reads is unchanged by this fix.
   AgentStatus _parseAgentInfo(Map<String, dynamic> json) {
     final terminalId = json['terminal_id'] as String;
     final label =
         (json['name'] as String?) ?? (json['title'] as String?) ?? terminalId;
     return (
-      target: terminalId,
+      target: json['pane_id'] as String,
       label: label,
       state: _parseAgentState(json['agent_status'] as String),
     );

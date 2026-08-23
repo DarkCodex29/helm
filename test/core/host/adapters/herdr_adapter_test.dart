@@ -126,10 +126,51 @@ void main() {
 
       expect(result, isA<MuxAgentsAvailable>());
       expect((result as MuxAgentsAvailable).agents, [
-        (target: 't1', label: 'claude', state: AgentState.working),
-        (target: 't2', label: 't2', state: AgentState.done),
+        // `target` is the PANE id — see the dedicated regression test
+        // below. `label` still falls back to the TERMINAL id when neither
+        // `name` nor `title` is present, so the text a user reads is
+        // unchanged by that fix.
+        (target: 'p1', label: 'claude', state: AgentState.working),
+        (target: 'p2', label: 't2', state: AgentState.done),
       ]);
     });
+
+    test(
+      'reports the PANE id as the target, never the terminal id — the '
+      'pane id is the only identifier herdr agent wait accepts',
+      () async {
+        // MEASURED against herdr 0.8.0, both spellings, same agent:
+        //   agent wait w1:p1                 → blocks, then returns the agent
+        //   agent wait term_659ab3dc3a8541   → {"error":{"code":
+        //                                       "agent_not_found", ...}}
+        // A target carrying the terminal id is therefore not a target at
+        // all: every wait built from it fails with agent_not_found. This
+        // pins the identifier at the parse, which is where the defect was.
+        runner.whenRun(
+          _agentListCommand,
+          HostCommandResult(
+            stdout: _agentListSuccess([
+              {
+                'terminal_id': 'term_659ab3dc3a8541',
+                'agent_status': 'blocked',
+                'workspace_id': 'w1',
+                'tab_id': 'w1:t1',
+                'pane_id': 'w1:p1',
+                'focused': true,
+                'revision': 1,
+              },
+            ]),
+            exitCode: 0,
+          ),
+        );
+
+        final result = await adapter.listAgents();
+
+        final agent = (result as MuxAgentsAvailable).agents.single;
+        expect(agent.target, 'w1:p1');
+        expect(agent.target, isNot('term_659ab3dc3a8541'));
+      },
+    );
 
     test('maps every confirmed agent_status string to AgentState', () async {
       const cases = {
@@ -337,11 +378,11 @@ void main() {
       );
 
       final status = await adapter.waitForAgent(
-        't1',
+        'p1',
         until: {AgentState.blocked, AgentState.done},
       );
 
-      expect(status, (target: 't1', label: 't1', state: AgentState.blocked));
+      expect(status, (target: 'p1', label: 't1', state: AgentState.blocked));
     });
 
     test(
@@ -747,7 +788,7 @@ void main() {
         final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
 
         final status = await scoped.waitForAgent(
-          't1',
+          'p1',
           until: const {AgentState.blocked},
         );
 
