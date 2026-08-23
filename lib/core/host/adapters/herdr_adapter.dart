@@ -29,7 +29,9 @@ import 'package:helm/core/host/shell_quote.dart';
 /// for exactly which facts are CONFIRMED versus this adapter's own
 /// disclosed assumptions.
 class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
-  HerdrAdapter(this._runner, {String absPath = 'herdr'}) : _absPath = absPath;
+  HerdrAdapter(this._runner, {String absPath = 'herdr', String? sessionRef})
+    : _absPath = absPath,
+      _sessionRef = sessionRef;
 
   final HostCommandRunner _runner;
 
@@ -37,6 +39,27 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   /// name when no probe-resolved path was supplied. See AD-3: commands
   /// that reach a remote shell use the resolved path, not a bare name.
   final String _absPath;
+
+  /// The herdr session whose socket socket-backed commands must target, or
+  /// null to let herdr pick its default session.
+  ///
+  /// MEASURED against a real herdr 0.8.0 host, not assumed: each herdr
+  /// session owns its OWN api socket
+  /// (`~/.config/herdr/sessions/<name>/herdr.sock` versus the default
+  /// session's `~/.config/herdr/herdr.sock`), and `agent list` answers only
+  /// for the socket it connects to. A bare `herdr agent list` issued while
+  /// attached to session `helm-0` was observed returning `agents: []` at
+  /// the same instant `herdr --session helm-0 agent list` returned a
+  /// working agent — a confident, WRONG "no agents are running".
+  ///
+  /// That is precisely the failure [MuxAgentsAvailable] versus
+  /// [MuxAgentServerNotRunning] exists to prevent, arriving through the
+  /// command instead of through the parse, so it is closed here: an adapter
+  /// built for a session reports THAT session's agents.
+  ///
+  /// Null keeps the pre-existing command byte-for-byte, so a caller that
+  /// never had a session to scope to is no worse off than before.
+  final String? _sessionRef;
 
   @override
   MultiplexerId get id => MultiplexerId.herdr;
@@ -173,9 +196,19 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
 
   // ── Private ────────────────────────────────────────────────────────────
 
-  String get _agentListCommand => '$_absPath agent list';
+  /// `--session` is a GLOBAL option and MUST precede the subcommand —
+  /// verified against the real binary, where `herdr --session helm-0 agent
+  /// list` succeeds and the trailing-flag spellings are rejected outright.
+  String get _agentListCommand => '$_absPath${_sessionScope}agent list';
 
+  /// Deliberately NOT scoped. `session list --json` enumerates every herdr
+  /// session by reading the config directory (see [listSessions]); pinning
+  /// it to one session would be asking a global question through a local
+  /// lens.
   String get _sessionListCommand => '$_absPath session list --json';
+
+  String get _sessionScope =>
+      _sessionRef == null ? ' ' : ' --session ${shellQuote(_sessionRef)} ';
 
   /// Extracts `error.code` from herdr's socket-backed error envelope
   /// (`{id, error: {code, message}}` — CONFIRMED, `code` always present

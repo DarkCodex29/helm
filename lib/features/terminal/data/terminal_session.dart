@@ -603,7 +603,15 @@ class TerminalSession {
       report: report,
     );
     _multiplexerSelection = selection;
-    _muxAdapter = buildMultiplexerAdapter(selection, runner);
+    // The session ref is what makes herdr's agent queries answer for the
+    // session this class is actually attaching to. Measured on a real host:
+    // without it, `agent list` answers for herdr's DEFAULT session and
+    // reports zero agents while the attached session has one running.
+    _muxAdapter = buildMultiplexerAdapter(
+      selection,
+      runner,
+      sessionRef: tmuxSessionName,
+    );
 
     _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');
 

@@ -20,10 +20,16 @@ import 'package:helm/core/host/multiplexer_selection.dart';
 /// is non-null the resolved path is used instead, and that is what makes a
 /// binary installed off the inherited PATH (the verified
 /// `~/.local/bin/herdr` case) attachable at all.
+/// [sessionRef] is the multiplexer session the caller is attaching to, when
+/// it has one. Only herdr uses it, and only to scope its socket-backed
+/// agent queries — see [HerdrAdapter]'s `_sessionRef`, which documents the
+/// measured reason a bare `agent list` answers for the WRONG session. tmux
+/// and zellij take their session per-command, so they ignore it.
 MultiplexerAdapter buildMultiplexerAdapter(
   MultiplexerSelection selection,
-  HostCommandRunner runner,
-) {
+  HostCommandRunner runner, {
+  String? sessionRef,
+}) {
   // Every MultiplexerId's `.name` is exactly the bare binary name, and
   // exactly each adapter's own `absPath` default — so this fallback
   // reproduces the pre-probe default rather than inventing a new one.
@@ -32,6 +38,10 @@ MultiplexerAdapter buildMultiplexerAdapter(
   return switch (selection.id) {
     MultiplexerId.tmux => TmuxAdapter(runner, absPath: absPath),
     MultiplexerId.zellij => ZellijAdapter(runner, absPath: absPath),
-    MultiplexerId.herdr => HerdrAdapter(runner, absPath: absPath),
+    MultiplexerId.herdr => HerdrAdapter(
+      runner,
+      absPath: absPath,
+      sessionRef: sessionRef,
+    ),
   };
 }
