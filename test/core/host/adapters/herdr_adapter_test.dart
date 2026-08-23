@@ -582,4 +582,220 @@ void main() {
       );
     });
   });
+
+  // ── Session scoping ──────────────────────────────────────────────────────
+  //
+  // These assert on the EMITTED COMMAND STRING, not on the parse of a
+  // canned stdout, because that is where the defect actually lived.
+  //
+  // MEASURED on a real herdr 0.8.0 host: every herdr session owns its own
+  // api socket (`~/.config/herdr/sessions/<name>/herdr.sock` versus the
+  // default session's `~/.config/herdr/herdr.sock`), and `agent list`
+  // answers only for the socket it connects to. A bare `herdr agent list`
+  // issued while attached to session `helm-0` returned `agents: []` at the
+  // same instant `herdr --session helm-0 agent list` returned a BLOCKED
+  // agent — a confident, wrong "no agents are running" about the one state
+  // this whole feature exists to surface.
+  //
+  // No canned-stdout test could catch that: both spellings parse
+  // identically, and the wrong one simply asks the wrong socket. The only
+  // thing that separates them is the command string, so that is what these
+  // pin. `--session` is a GLOBAL option and MUST precede the subcommand —
+  // verified against the real binary, which rejects the trailing-flag
+  // spellings outright.
+  group('session scoping', () {
+    /// A runner that answers BOTH the scoped and the unscoped spelling of
+    /// `agent list` with the same empty result.
+    ///
+    /// Registering both matters: [FakeHostCommandRunner] throws for an
+    /// unregistered command, so a runner that only knew the correct
+    /// spelling would fail a regression with a `StateError` from the
+    /// harness rather than with the assertion that names the defect. These
+    /// tests must fail on "the emitted command was wrong", not on "the
+    /// fake had nothing canned".
+    FakeHostCommandRunner ambidextrousRunner() {
+      final local = FakeHostCommandRunner();
+      for (final command in const [
+        _agentListCommand,
+        "herdr --session 'helm-0' agent list",
+      ]) {
+        local.whenRun(
+          command,
+          HostCommandResult(stdout: _agentListSuccess(const []), exitCode: 0),
+        );
+      }
+      return local;
+    }
+
+    test(
+      'an adapter built for a session scopes agent list to that session',
+      () async {
+        final scopedRunner = ambidextrousRunner();
+        final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+        await scoped.listAgents();
+
+        expect(scopedRunner.runCalls, ["herdr --session 'helm-0' agent list"]);
+      },
+    );
+
+    test(
+      'an adapter built without a session emits no --session flag at all',
+      () async {
+        runner.whenRun(
+          _agentListCommand,
+          HostCommandResult(stdout: _agentListSuccess(const []), exitCode: 0),
+        );
+
+        await adapter.listAgents();
+
+        expect(runner.runCalls, ['herdr agent list']);
+        expect(runner.runCalls.single, isNot(contains('--session')));
+      },
+    );
+
+    test('the --session flag precedes the subcommand, never trails it', () async {
+      final scopedRunner = ambidextrousRunner();
+      final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+      await scoped.listAgents();
+
+      final emitted = scopedRunner.runCalls.single;
+      expect(emitted, contains('--session'));
+      expect(
+        emitted.indexOf('--session'),
+        lessThan(emitted.indexOf('agent list')),
+      );
+    });
+
+    test('scopes with the resolved absolute path, not a bare name', () async {
+      const absPath = '/home/deployer/.local/bin/herdr';
+      final scopedRunner = FakeHostCommandRunner();
+      scopedRunner.whenRun(
+        "$absPath --session 'helm-0' agent list",
+        HostCommandResult(stdout: _agentListSuccess(const []), exitCode: 0),
+      );
+      final scoped = HerdrAdapter(
+        scopedRunner,
+        absPath: absPath,
+        sessionRef: 'helm-0',
+      );
+
+      await scoped.listAgents();
+
+      expect(scopedRunner.runCalls, [
+        "$absPath --session 'helm-0' agent list",
+      ]);
+    });
+
+    test(
+      'waitForAgent asks the scoped socket too — it is listAgents plus a '
+      'filter, so an unscoped query here would answer for another session',
+      () async {
+        // Reproduces the exact measured lie: the UNSCOPED spelling answers
+        // for herdr's default session and reports zero agents, while the
+        // scoped one reports the blocked agent that is really there. A
+        // regression therefore surfaces as "no agent found", which is what
+        // the user saw on the device.
+        final scopedRunner = ambidextrousRunner();
+        scopedRunner.whenRun(
+          "herdr --session 'helm-0' agent list",
+          HostCommandResult(
+            stdout: _agentListSuccess([
+              {
+                'terminal_id': 't1',
+                'agent_status': 'blocked',
+                'workspace_id': 'w1',
+                'tab_id': 'tab1',
+                'pane_id': 'p1',
+                'focused': true,
+                'revision': 1,
+              },
+            ]),
+            exitCode: 0,
+          ),
+        );
+        final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+        final status = await scoped.waitForAgent(
+          't1',
+          until: const {AgentState.blocked},
+        );
+
+        expect(scopedRunner.runCalls, ["herdr --session 'helm-0' agent list"]);
+        expect(status?.state, AgentState.blocked);
+      },
+    );
+
+    test(
+      'session list stays UNSCOPED even on a scoped adapter — enumerating '
+      'every session is a global question',
+      () async {
+        final scopedRunner = FakeHostCommandRunner();
+        scopedRunner.whenRun(
+          _sessionListCommand,
+          const HostCommandResult(stdout: _sessionListEmpty, exitCode: 0),
+        );
+        final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+        await scoped.listSessions();
+
+        expect(scopedRunner.runCalls, ['herdr session list --json']);
+      },
+    );
+
+    test('detect stays UNSCOPED even on a scoped adapter', () async {
+      final scopedRunner = FakeHostCommandRunner();
+      scopedRunner.whenRun(
+        _detectCommand,
+        const HostCommandResult(stdout: 'herdr 0.8.0', exitCode: 0),
+      );
+      final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+      await scoped.detect();
+
+      expect(scopedRunner.runCalls, [_detectCommand]);
+    });
+
+    test(
+      'attachCommand is unaffected by the session scope — it names its '
+      'target session as a positional argument already',
+      () {
+        final scoped = HerdrAdapter(runner, sessionRef: 'helm-0');
+
+        expect(scoped.attachCommand('work'), "herdr session attach 'work'");
+      },
+    );
+
+    group('shell-quotes the session name', () {
+      // Session refs reach a remote login shell, and unlike the positional
+      // name in `attachCommand` this one rides a GLOBAL flag. An unquoted
+      // ref with a separator would not merely pick the wrong session — it
+      // would run a second command.
+      for (final name in const [
+        'x; rm -rf ~',
+        r'$(id)',
+        "O'Brien",
+        '-rf',
+        'has space',
+      ]) {
+        test(name, () async {
+          final expected = 'herdr --session ${shellQuote(name)} agent list';
+          final scopedRunner = FakeHostCommandRunner();
+          scopedRunner.whenRun(
+            expected,
+            HostCommandResult(
+              stdout: _agentListSuccess(const []),
+              exitCode: 0,
+            ),
+          );
+          final scoped = HerdrAdapter(scopedRunner, sessionRef: name);
+
+          await scoped.listAgents();
+
+          expect(scopedRunner.runCalls, [expected]);
+        });
+      }
+    });
+  });
 }

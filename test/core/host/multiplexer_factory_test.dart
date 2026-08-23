@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/adapters/herdr_adapter.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
 import 'package:helm/core/host/adapters/zellij_adapter.dart';
+import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_factory.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
@@ -119,5 +120,75 @@ void main() {
 
       expect(adapter.attachCommand('helm-0'), startsWith('zellij '));
     });
+  });
+
+  group('buildMultiplexerAdapter — the session ref reaches the socket', () {
+    // The factory is the ONLY place a session ref becomes an agent-scoped
+    // adapter. Dropping the argument here would restore the measured
+    // failure — `agent list` answering for herdr's DEFAULT session and
+    // reporting zero agents while the attached session has a BLOCKED one —
+    // and every assertion in herdr_adapter_test.dart would still pass,
+    // because that file constructs its adapters directly. So the wiring is
+    // pinned here, on the emitted command.
+    const herdrSelection = MultiplexerVerified(
+      id: MultiplexerId.herdr,
+      absPath: '/home/deployer/.local/bin/herdr',
+      onInheritedPath: false,
+    );
+
+    test('a herdr adapter built with a session ref scopes agent list', () async {
+      final runner = FakeHostCommandRunner();
+      runner.whenRun(
+        "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
+        const HostCommandResult(
+          stdout: '{"id":"x","result":{"type":"agent_list","agents":[]}}',
+          exitCode: 0,
+        ),
+      );
+
+      final adapter = buildMultiplexerAdapter(
+        herdrSelection,
+        runner,
+        sessionRef: 'helm-0',
+      );
+      await (adapter.agents!).listAgents();
+
+      expect(runner.runCalls, [
+        "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
+      ]);
+    });
+
+    test('a herdr adapter built without one emits no --session flag', () async {
+      final runner = FakeHostCommandRunner();
+      runner.whenRun(
+        '/home/deployer/.local/bin/herdr agent list',
+        const HostCommandResult(
+          stdout: '{"id":"x","result":{"type":"agent_list","agents":[]}}',
+          exitCode: 0,
+        ),
+      );
+
+      final adapter = buildMultiplexerAdapter(herdrSelection, runner);
+      await (adapter.agents!).listAgents();
+
+      expect(runner.runCalls.single, isNot(contains('--session')));
+    });
+
+    test(
+      'a session ref is harmless for multiplexers that cannot use it — '
+      'tmux and zellij take no such flag and must not grow one',
+      () {
+        for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
+          final adapter = buildMultiplexerAdapter(
+            MultiplexerUnverified(id: id),
+            FakeHostCommandRunner(),
+            sessionRef: 'helm-0',
+          );
+
+          expect(adapter.attachCommand('helm-0'), isNot(contains('--session')));
+          expect(adapter.agents, isNull);
+        }
+      },
+    );
   });
 }
