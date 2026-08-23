@@ -325,14 +325,24 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   /// unique and stable for both.
   ///
   /// `pane_id`, `terminal_id` and `agent_status` are all schema-required
-  /// (protocol 19). `name`/`title` are schema-optional, so [label] falls
-  /// back through name → title → terminal_id rather than assuming either
-  /// exists — the fallback deliberately keeps the terminal id so the text
-  /// a user reads is unchanged by this fix.
+  /// (protocol 19). `name`, `title` and `agent` are all schema-optional, so
+  /// [label] falls back through name → title → agent → terminal_id rather
+  /// than assuming any of them exists.
+  ///
+  /// `agent` earns its place in that chain from a MEASURED fact, not from
+  /// the schema: a real `agent list` against herdr 0.8.0 carries NEITHER
+  /// `name` NOR `title`, but it does carry `agent` ("claude"). A chain
+  /// that stopped at `title` therefore fell through to the terminal id on
+  /// every real agent, and the user read `term_659ab3dc3a8541` where the
+  /// host knew the answer was `claude`. `terminal_id` stays as the last
+  /// resort because it is the only one of the four the schema guarantees.
   AgentStatus _parseAgentInfo(Map<String, dynamic> json) {
     final terminalId = json['terminal_id'] as String;
     final label =
-        (json['name'] as String?) ?? (json['title'] as String?) ?? terminalId;
+        (json['name'] as String?) ??
+        (json['title'] as String?) ??
+        (json['agent'] as String?) ??
+        terminalId;
     return (
       target: json['pane_id'] as String,
       label: label,

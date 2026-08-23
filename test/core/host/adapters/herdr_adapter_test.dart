@@ -70,9 +70,10 @@ const _agentListNoServer =
 
 /// One `AgentInfo`, captured VERBATIM from a live `herdr --session helm-0
 /// agent list` on a real host — including the fields helm does not read.
-/// Note what is ABSENT: neither `name` nor `title` is present, so `label`
-/// falls back to `terminal_id`, and `agent` ("claude") is a field this
-/// adapter does not currently read.
+/// Note what is ABSENT: neither `name` nor `title` is present. `agent`
+/// ("claude") is what a real host actually offers as a readable name, and
+/// it is what `label` resolves to here — see the `reads the agent field`
+/// test for why the chain must not stop before it.
 const _blockedAgentInfo = {
   'agent': 'claude',
   'agent_status': 'blocked',
@@ -170,9 +171,9 @@ void main() {
       expect(result, isA<MuxAgentsAvailable>());
       expect((result as MuxAgentsAvailable).agents, [
         // `target` is the PANE id — see the dedicated regression test
-        // below. `label` still falls back to the TERMINAL id when neither
-        // `name` nor `title` is present, so the text a user reads is
-        // unchanged by that fix.
+        // below. The second agent carries no `name`, `title` or `agent`,
+        // so its `label` falls all the way through to the TERMINAL id,
+        // which is the only one of the four the schema guarantees.
         (target: 'p1', label: 'claude', state: AgentState.working),
         (target: 'p2', label: 't2', state: AgentState.done),
       ]);
@@ -274,7 +275,7 @@ void main() {
     });
 
     test(
-      'falls back to terminal_id when neither name nor title is present',
+      'falls back to terminal_id when name, title and agent are all absent',
       () async {
         runner.whenRun(
           _agentListCommand,
@@ -299,6 +300,64 @@ void main() {
         expect((result as MuxAgentsAvailable).agents.single.label, 't1');
       },
     );
+
+    test(
+      'reads the agent field when neither name nor title is present — a '
+      'real herdr agent carries neither, so without it every agent in the '
+      'app reads as an opaque terminal id',
+      () async {
+        // The payload below is the VERBATIM live capture (see
+        // [_blockedAgentInfo]): `name` and `title` are genuinely absent
+        // from a real `agent list`, while `agent` carries "claude". A
+        // fallback chain that stops before `agent` therefore never
+        // produces a readable label on any real host.
+        runner.whenRun(
+          _agentListCommand,
+          HostCommandResult(
+            stdout: _agentListSuccess([_blockedAgentInfo]),
+            exitCode: 0,
+          ),
+        );
+
+        final result = await adapter.listAgents();
+
+        final agent = (result as MuxAgentsAvailable).agents.single;
+        expect(agent.label, 'claude');
+        expect(agent.label, isNot('term_659ab3dc3a8541'));
+      },
+    );
+
+    test('name still wins over agent', () async {
+      runner.whenRun(
+        _agentListCommand,
+        HostCommandResult(
+          stdout: _agentListSuccess([
+            {..._blockedAgentInfo, 'name': 'my-name', 'title': 'my-title'},
+          ]),
+          exitCode: 0,
+        ),
+      );
+
+      final result = await adapter.listAgents();
+
+      expect((result as MuxAgentsAvailable).agents.single.label, 'my-name');
+    });
+
+    test('title still wins over agent', () async {
+      runner.whenRun(
+        _agentListCommand,
+        HostCommandResult(
+          stdout: _agentListSuccess([
+            {..._blockedAgentInfo, 'title': 'my-title'},
+          ]),
+          exitCode: 0,
+        ),
+      );
+
+      final result = await adapter.listAgents();
+
+      expect((result as MuxAgentsAvailable).agents.single.label, 'my-title');
+    });
 
     test('reports a genuinely empty list when the server IS running', () async {
       runner.whenRun(
@@ -543,7 +602,7 @@ void main() {
       expect(result, isA<MuxAgentWaitMatched>());
       expect((result as MuxAgentWaitMatched).agent, (
         target: 'w1:p1',
-        label: 'term_659ab3dc3a8541',
+        label: 'claude',
         state: AgentState.blocked,
       ));
     });
