@@ -9,6 +9,7 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
+import 'package:helm/features/terminal/domain/auto_connect_decision.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:uuid/uuid.dart';
 
@@ -114,6 +115,51 @@ class TabsNotifier extends Notifier<TabsState> {
 
   Future<List<ConnectionProfile>> loadProfiles() async {
     return ref.read(connectionProfileRepositoryProvider).getAll();
+  }
+
+  /// Honors the profile editor's "Opens automatically on launch" promise.
+  ///
+  /// Opens at most ONE session, for the profile the user explicitly marked
+  /// default, and only when [decideAutoConnect] says so — see that
+  /// function for every rule and the reasoning behind each.
+  ///
+  /// [recoveryPending] must be the ALREADY-RESOLVED answer to "is a crash
+  /// snapshot waiting on the user", not a future to be awaited here. The
+  /// caller reads it first and hands it in, so auto-connect can never race
+  /// the recovery offer it is supposed to defer to.
+  ///
+  /// DEGRADES QUIETLY, BY CONSTRUCTION. Nothing below can throw at the
+  /// caller: [addTab] adds its tab to state BEFORE dialing and swallows a
+  /// failed connect, so an unreachable host, a refused auth or a missing
+  /// key leaves Home rendered and usable with the failure shown inside the
+  /// tab — the terminal carries `[Helm] Connection failed: …`, the tab's
+  /// status dot goes red, and any host advisories publish as usual. No
+  /// modal, no blocking spinner: the tab exists from the first frame, in
+  /// `connecting`, and the connect attempt is bounded by the SSH client's
+  /// own 15-second socket timeout rather than hanging forever.
+  ///
+  /// Returns the decision so a caller can log or surface which rule
+  /// applied; every [AutoConnectSkip] is a normal outcome, never an error.
+  Future<AutoConnectDecision> autoConnectDefault({
+    required bool recoveryPending,
+  }) async {
+    final profiles = await ref.read(connectionProfileRepositoryProvider).getAll();
+
+    final decision = decideAutoConnect(
+      profiles: profiles,
+      openProfileIds: state.tabs.map((t) => t.profile.id).toList(),
+      recoveryPending: recoveryPending,
+    );
+
+    switch (decision) {
+      case AutoConnectStart(:final profile):
+        _log.i('Auto-connecting default profile: ${profile.name}');
+        await addTab(profile);
+      case AutoConnectSkip(:final reason):
+        _log.i('Auto-connect skipped: ${reason.name}');
+    }
+
+    return decision;
   }
 
   /// Persiste el snapshot de la sesión actual al storage.

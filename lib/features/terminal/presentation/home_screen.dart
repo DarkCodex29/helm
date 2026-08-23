@@ -52,9 +52,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final repo = ref.read(sessionSnapshotRepoProvider);
       final pending = await repo.getPendingRecovery();
-      if (pending != null && pending.isNotEmpty && mounted) {
+      final recoveryPending = pending != null && pending.isNotEmpty;
+
+      if (recoveryPending && mounted) {
         setState(() => _pendingRecovery = pending);
       }
+
+      // Auto-connect runs AFTER the recovery question has been answered,
+      // in the same callback, and is handed that answer. Two sessions on
+      // one profile is the failure this ordering exists to prevent: the
+      // two paths must never race, and a recovery offer that is merely
+      // "still loading" must never read as "no recovery pending". See
+      // [decideAutoConnect].
+      //
+      // Not awaited-on for anything the UI depends on, and it cannot
+      // throw here — see [TabsNotifier.autoConnectDefault] for why an
+      // unreachable host degrades into a tab rather than an exception.
+      if (!mounted) return;
+      await ref
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: recoveryPending);
     });
   }
 
