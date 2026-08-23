@@ -57,6 +57,14 @@ Future<TerminalSession> _connectedSession({String? multiplexer}) async {
     attachOpener: (client, command, pty) async => FakeSSHSession(),
   );
   await session.connect('key');
+  // A connected session owns resources with a lifetime — two
+  // ValueNotifiers and, since agent tracking exists, a periodic timer that
+  // re-asks the host which agents are running. This fixture connects a
+  // REAL TerminalSession, so it has to tear one down like production does;
+  // leaving it alive leaks past the test and the binding rightly asserts
+  // on the pending timer. Registered here rather than in each test so no
+  // future case can forget it.
+  addTearDown(session.dispose);
   return session;
 }
 

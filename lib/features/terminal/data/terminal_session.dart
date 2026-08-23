@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
+import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/host_advisor.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/host/host_command_runner.dart';
@@ -152,6 +153,67 @@ final class AttachExitUnknown extends AttachExitOutcome {
   const AttachExitUnknown();
 }
 
+/// How often a connected session re-asks the host which agents are running.
+///
+/// UNVERIFIED SPIKE: no test covers this cadence.
+///
+/// Chosen against the two failure modes at the extremes. Sub-second polling
+/// opens one exec channel per second PER OPEN TAB against a host the user
+/// is also working on — the "do not hammer the host" constraint. A minute
+/// makes the blocked → "Needs you" transition arrive long after the agent
+/// started waiting, which is the single interaction this whole feature
+/// exists for. Ten seconds is one short-lived channel per tab per ten
+/// seconds, on a connection that is already open.
+const kAgentPollInterval = Duration(seconds: 10);
+
+/// Ceiling on a single agent query before it is treated as unreachable.
+///
+/// `HerdrAdapter.listAgents` takes no timeout parameter and
+/// [SshHostCommandRunner] applies none by default, so a wedged host would
+/// otherwise leave the poll waiting forever on a Future that never
+/// completes — freezing the UI on stale agent state that looks current.
+/// The timeout is applied at the CALL SITE rather than by widening the
+/// adapter's signature: the adapter is covered by tests, this poll is not,
+/// and a spike must not reshape a verified contract.
+///
+/// Honest limit: this abandons the Future, it does not cancel the remote
+/// command. The underlying channel drains on its own. That is acceptable
+/// here because the alternative is a permanently frozen badge, but it is a
+/// real leak worth closing if this poll ever graduates out of spike status.
+const kAgentListTimeout = Duration(seconds: 8);
+
+/// [ValueNotifier] that reports when it goes from unobserved to observed
+/// and back, so its owner can start and stop the work that produces its
+/// value.
+///
+/// UNVERIFIED SPIKE: no test covers this class.
+///
+/// Exists so agent polling is driven by demand rather than by the mere
+/// existence of a connection: a session no widget is rendering must not
+/// keep asking the host questions nobody reads. See
+/// [TerminalSession._syncAgentPolling].
+class _ObservableValueNotifier<T> extends ValueNotifier<T> {
+  _ObservableValueNotifier(super.value, {required this.onObservedChanged});
+
+  /// Called with true on the first listener and false when the last one
+  /// leaves. Never called from [dispose], which clears listeners without
+  /// routing through [removeListener].
+  final void Function(bool observed) onObservedChanged;
+
+  @override
+  void addListener(VoidCallback listener) {
+    final wasObserved = hasListeners;
+    super.addListener(listener);
+    if (!wasObserved && hasListeners) onObservedChanged(true);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (!hasListeners) onObservedChanged(false);
+  }
+}
+
 /// Classifies [session]'s ending per [AttachExitOutcome]'s doc comment.
 /// Call only after [session]'s [SSHSession.done] has completed.
 AttachExitOutcome _classifyAttachExit(SSHSession session) {
@@ -260,6 +322,40 @@ class TerminalSession {
   final ValueNotifier<List<HostAdvisory>> advisoriesNotifier = ValueNotifier(
     const [],
   );
+
+  /// What this session last learned about the AI agents inside the
+  /// multiplexer session it is attached to.
+  ///
+  /// UNVERIFIED SPIKE: no test covers this notifier or its lifecycle.
+  ///
+  /// Unlike [advisoriesNotifier], this is published while the session is
+  /// HEALTHY — agent state is only useful live. It starts, and returns to,
+  /// [AgentsNotProbed]: before the first poll answers, helm genuinely does
+  /// not know, and saying so is cheaper than being wrong.
+  late final ValueNotifier<AgentSnapshot> agentsNotifier =
+      _ObservableValueNotifier<AgentSnapshot>(
+        const AgentsNotProbed(),
+        onObservedChanged: (observed) {
+          _agentsObserved = observed;
+          _syncAgentPolling();
+        },
+      );
+
+  /// Drives the periodic agent refresh. Non-null only while polling is
+  /// actually warranted — see [_syncAgentPolling].
+  Timer? _agentPollTimer;
+
+  /// True once this session is attached to a multiplexer and connected,
+  /// i.e. asking about agents is meaningful at all.
+  bool _agentTrackingEnabled = false;
+
+  /// True while at least one widget listens to [agentsNotifier].
+  bool _agentsObserved = false;
+
+  /// Guards against overlapping queries when one round-trip outlives
+  /// [kAgentPollInterval] — a slow host must not accumulate a backlog of
+  /// in-flight channels.
+  bool _agentPollInFlight = false;
 
   ConnectionStatus get status => statusNotifier.value;
 
@@ -378,6 +474,16 @@ class TerminalSession {
       statusNotifier.value = ConnectionStatus.connected;
       _log.i('Session connected: ${profile.name}');
 
+      // Only a session that actually attached a multiplexer has agents to
+      // ask about. On the `sessionRef == null` path `_muxAdapter` is still
+      // the unconnected tmux fallback, and reporting that as
+      // "tmux does not track agents" would be a fabricated answer about a
+      // multiplexer this session never selected.
+      if (sessionRef != null) {
+        _agentTrackingEnabled = true;
+        _syncAgentPolling();
+      }
+
       result.client.done
           .then((_) {
             _log.w('SSH client closed for ${profile.name}');
@@ -450,9 +556,11 @@ class TerminalSession {
 
   Future<void> dispose() async {
     _log.i('Disposing session for ${profile.name}');
-    // Set BEFORE awaiting anything: an advisory collect that completes
-    // during this teardown must already see the session as gone.
+    // Set BEFORE awaiting anything: an advisory collect or an agent poll
+    // that completes during this teardown must already see the session as
+    // gone. Both write to a ValueNotifier this method is about to dispose.
     _disposed = true;
+    _stopAgentTracking();
     await _stdoutSub?.cancel();
     await _stderrSub?.cancel();
     _stdoutSub = null;
@@ -473,6 +581,7 @@ class TerminalSession {
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
     advisoriesNotifier.dispose();
+    agentsNotifier.dispose();
   }
 
   /// Probes the host and swaps in the adapter the result selects.
@@ -549,8 +658,132 @@ class TerminalSession {
   ]) {
     if (statusNotifier.value == ConnectionStatus.disconnected) return;
     statusNotifier.value = ConnectionStatus.disconnected;
+    _stopAgentTracking();
+    // Agent state describes a host we can no longer ask. Leaving the last
+    // reading on screen would keep asserting "Working" about an agent
+    // nobody is watching any more, so it reverts to "we do not know"
+    // rather than to an empty list. Reached only past the guard above, so
+    // it can never write to a notifier `dispose` already tore down.
+    agentsNotifier.value = const AgentsNotProbed();
     terminal.write(_disconnectMessageFor(outcome));
     _publishAdvisories();
+  }
+
+  // ── Agent state ────────────────────────────────────────────────────────
+
+  /// Arms or disarms the periodic agent refresh so that it runs when — and
+  /// only when — it is both meaningful and wanted.
+  ///
+  /// UNVERIFIED SPIKE: no test covers this method.
+  ///
+  /// WHY A POLL AT ALL, and why this session owns it:
+  ///
+  /// The adapter cannot push. `HerdrAdapter.waitForAgent` reads like a
+  /// subscription but is documented as single-shot (see its body): it is
+  /// `listAgents` plus a filter, so it buys nothing here. herdr's socket
+  /// may well support a real subscription, but that protocol is unverified
+  /// and explicitly out of scope — this file does not get to invent a wire
+  /// contract it has never observed.
+  ///
+  /// Refresh-on-demand alone is not enough either. The tab badge is the
+  /// whole point: a user must learn that an agent needs them WITHOUT
+  /// opening anything. A snapshot taken once at connect time would be
+  /// stale within seconds, because agent state is the one host fact that
+  /// changes constantly by design.
+  ///
+  /// The session owns the timer — not a provider — for the same reason the
+  /// probe does (see [connect]): the only usable [HostCommandRunner] is the
+  /// one bound to the [SSHClient] this class created, and it reuses that
+  /// client's channels instead of opening a second connection.
+  ///
+  /// WHY IT IS GATED ON AN OBSERVER, not merely on being connected:
+  ///
+  /// "Do not hammer the host" is not satisfied by a slow interval alone. A
+  /// timer armed by [connect] would keep querying forever for a session
+  /// whose agent state nothing renders, and would outlive any caller that
+  /// builds a session without tearing it down — which is precisely how the
+  /// first version of this poll leaked a pending timer past the end of a
+  /// widget test. Gating on [_agentsObserved] makes that leak structurally
+  /// impossible rather than a discipline every future caller has to
+  /// remember, and it drops host traffic to exactly zero when no widget is
+  /// listening.
+  ///
+  /// Both conditions matter: [_agentTrackingEnabled] means asking is
+  /// MEANINGFUL (connected, and attached to a multiplexer), while
+  /// [_agentsObserved] means the answer is WANTED.
+  void _syncAgentPolling() {
+    final shouldPoll = _agentTrackingEnabled && _agentsObserved && !_disposed;
+
+    if (!shouldPoll) {
+      _agentPollTimer?.cancel();
+      _agentPollTimer = null;
+      return;
+    }
+    if (_agentPollTimer != null) return;
+
+    _agentPollTimer = Timer.periodic(
+      kAgentPollInterval,
+      (_) => unawaited(refreshAgents()),
+    );
+    // Do not make the user wait a whole interval for the first reading.
+    //
+    // Deferred by a microtask because the observed-transition that gets
+    // here fires from a listener's `initState`, i.e. mid-build.
+    // [refreshAgents] can publish synchronously on its unsupported-
+    // multiplexer path, and notifying a [ValueListenableBuilder] during
+    // build would mark a widget dirty while it is being built.
+    scheduleMicrotask(() => unawaited(refreshAgents()));
+  }
+
+  void _stopAgentTracking() {
+    _agentTrackingEnabled = false;
+    _syncAgentPolling();
+  }
+
+  /// Asks the host once for the current agent list and publishes the
+  /// result on [agentsNotifier].
+  ///
+  /// UNVERIFIED SPIKE: no test covers this method.
+  ///
+  /// Never throws and never rejects: every failure — an unsupported
+  /// multiplexer, a dead agent server, a timeout, or the [StateError]
+  /// `listAgents` raises for an unrecognized herdr error envelope —
+  /// degrades to a variant that says we could not find out. It never
+  /// degrades to [AgentsKnown] with an empty list, which would read as
+  /// "no agents are running".
+  Future<void> refreshAgents() async {
+    if (_disposed || _agentPollInFlight) return;
+    if (statusNotifier.value != ConnectionStatus.connected) return;
+
+    final support = AgentSupport.resolve(_muxAdapter);
+    if (support is AgentSupportUnsupported) {
+      agentsNotifier.value = AgentsUnsupported(support.muxId);
+      return;
+    }
+    final agentApi = (support as AgentSupportAvailable).agents;
+
+    _agentPollInFlight = true;
+    try {
+      final result = await agentApi.listAgents().timeout(kAgentListTimeout);
+      // The session can be torn down during the round-trip — closing a tab
+      // disposes it while this is still in flight. Writing to a disposed
+      // ValueNotifier throws; the previous unit hit exactly that with the
+      // advisory collect, so disposal is checked rather than assumed
+      // impossible.
+      if (_disposed) return;
+      if (statusNotifier.value != ConnectionStatus.connected) return;
+      agentsNotifier.value = switch (result) {
+        MuxAgentsAvailable(:final agents) => AgentsKnown(agents),
+        MuxAgentServerNotRunning() => const AgentsUnreachable(),
+      };
+    } catch (e) {
+      _log.w('Agent refresh failed for ${profile.name}: $e');
+      if (_disposed) return;
+      if (statusNotifier.value != ConnectionStatus.connected) return;
+      agentsNotifier.value = const AgentsUnreachable();
+    } finally {
+      _agentPollInFlight = false;
+    }
   }
 
   /// Collects host findings and publishes them for the failure surface.
