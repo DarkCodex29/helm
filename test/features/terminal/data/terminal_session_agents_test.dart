@@ -926,6 +926,90 @@ void main() {
     );
 
     test(
+      're-arming while a previous wait is STILL HELD joins it instead of '
+      'opening a second channel — a wait cannot be cancelled from here',
+      () async {
+        // Found by mutation-testing the one-loop guard, and it is not
+        // hypothetical: opening and closing the drawer is exactly this
+        // sequence. Nothing on this side can cancel a wait already blocked
+        // on the host, so it stays held until herdr's own window expires —
+        // up to kAgentWaitWindow. Arming a fresh one per toggle would add a
+        // held channel per toggle; measured at 6 concurrent for 6 toggles
+        // before the join existed, and MaxSessions of 10 is four further
+        // on. Same failure as 773888f, different trigger.
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final session = await _connectedSession(adapter: adapter);
+
+        void listener() {}
+        for (var i = 0; i < 6; i++) {
+          session.agentsNotifier.addListener(listener);
+          await pumpEventQueue();
+          session.agentsNotifier.removeListener(listener);
+          await pumpEventQueue();
+        }
+
+        expect(
+          adapter.maxConcurrentWaits,
+          1,
+          reason: 'every toggle beyond the first must reuse the held wait',
+        );
+        expect(adapter.waits, hasLength(1));
+
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await session.dispose();
+      },
+    );
+
+    test(
+      'a wait that keeps failing while the LIST still answers is retried on '
+      'the interval, never re-armed on the spot',
+      () async {
+        // The narrow, dangerous case: herdr's socket is alive enough to
+        // enumerate agents but the wait itself keeps breaking — a pane that
+        // went away, a herdr-side fault. Re-arming straight from the
+        // failure would then spin against a live host as fast as the
+        // transport allows. The previous version of the failure test could
+        // not see this, because it broke the list too, which happened to
+        // stop the loop for an unrelated reason.
+        final adapter = FakeWaitingAgentAdapter()
+          ..agentList = const MuxAgentsAvailable([blocked]);
+        final session = await _connectedSession(adapter: adapter);
+
+        void listener() {}
+        FakeAsync().run((async) {
+          session.agentsNotifier.addListener(listener);
+          async.flushMicrotasks();
+          expect(adapter.waits, hasLength(1));
+
+          adapter.completeWait(const MuxAgentWaitFailed('agent_not_found'));
+          async.flushMicrotasks();
+
+          expect(
+            adapter.waits,
+            hasLength(1),
+            reason: 'the list still answers, so nothing stops a spin but '
+                'the deliberate delay',
+          );
+          // And the list is still the authority, so the snapshot stays
+          // truthful rather than degrading to a lie in either direction.
+          expect(session.agentsNotifier.value, isA<AgentsKnown>());
+
+          async.elapse(kAgentPollInterval);
+          async.flushMicrotasks();
+          expect(adapter.waits, hasLength(2), reason: 'retried, not spun');
+
+          session.agentsNotifier.removeListener(listener);
+        });
+
+        adapter.drainWaits();
+        await pumpEventQueue();
+        await session.dispose();
+      },
+    );
+
+    test(
       'losing the connection stops the loop, and a wait answering after the '
       'drop neither re-arms nor republishes',
       () async {

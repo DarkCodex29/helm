@@ -409,9 +409,21 @@ class TerminalSession {
   int _agentTrackingEpoch = 0;
 
   /// True while a tracking cycle is either running or has a retry pending,
-  /// so arming twice cannot produce two loops — and therefore cannot
-  /// produce two held channels.
+  /// so arming twice cannot produce two loops.
+  ///
+  /// Defensive only: no reachable path arms twice while already armed
+  /// today, because every entry point either transitions through a disarm
+  /// first or is guarded elsewhere ([connect] refuses to run while already
+  /// connected, and the observer callback fires only on transitions).
+  /// Removing it therefore fails no test — verified by mutation — so it is
+  /// kept as a cheap invariant for future callers, NOT presented as the
+  /// thing that bounds the channel count. [_armOrJoinAgentWait] is what
+  /// bounds that.
   bool _agentTrackingActive = false;
+
+  /// The `agent wait` currently held open on the host, or null when none
+  /// is. See [_armOrJoinAgentWait] — this is the single-channel budget.
+  Future<MuxAgentWaitResult>? _agentWaitInFlight;
 
   /// True once this session is attached to a multiplexer and connected,
   /// i.e. asking about agents is meaningful at all.
@@ -846,11 +858,7 @@ class TerminalSession {
 
       MuxAgentWaitResult result;
       try {
-        result = await plan.api.waitForAgent(
-          plan.target,
-          until: plan.until,
-          timeout: kAgentWaitWindow,
-        );
+        result = await _armOrJoinAgentWait(plan);
       } catch (e) {
         // An adapter is not supposed to throw here, but a throw must not
         // become an unhandled async error and must not be read as "no
@@ -876,6 +884,55 @@ class TerminalSession {
       // Matched or timed out: either way the next cycle re-reads the list,
       // which is the authority, and re-arms from what it finds.
     }
+  }
+
+  /// Returns the wait already held on the host, or arms a new one when
+  /// none is.
+  ///
+  /// THE ONE CHANNEL IS ENFORCED HERE, and it has to be, because the epoch
+  /// in [_agentTrackingStale] cannot do it. Disarming makes a held wait's
+  /// ANSWER inert; it does not close the wait's channel, and nothing on
+  /// this side can — herdr is blocked on it until its own `--timeout`
+  /// expires, up to [kAgentWaitWindow]. So a loop that armed unconditionally
+  /// would add a held channel every time tracking re-armed, and re-arming
+  /// is not rare: opening and closing the drawer does it. Measured before
+  /// this guard existed, six toggles held six channels at once — the
+  /// 773888f failure with a different trigger, and OpenSSH's default
+  /// `MaxSessions` of 10 is four toggles further on.
+  ///
+  /// Released by the wait's own completion rather than by whoever stopped
+  /// waiting for it — the same discipline [kAgentListTimeout] describes for
+  /// the list, and for the same reason: releasing on abandonment is what
+  /// turns one held channel into one per attempt.
+  ///
+  /// A joining cycle may be watching for something slightly different from
+  /// what the held wait was armed for — a different target, or a different
+  /// complement. That is deliberate and it is never a lie: whatever the
+  /// held wait reports, the joining cycle re-reads the list, which is the
+  /// authority, and re-plans from what it finds. The cost is at most one
+  /// window of reduced precision; the alternative costs the user their
+  /// terminal.
+  Future<MuxAgentWaitResult> _armOrJoinAgentWait(
+    ({AgentAwareMultiplexer api, String target, Set<AgentState> until}) plan,
+  ) {
+    final held = _agentWaitInFlight;
+    if (held != null) return held;
+
+    final armed = plan.api.waitForAgent(
+      plan.target,
+      until: plan.until,
+      timeout: kAgentWaitWindow,
+    );
+    _agentWaitInFlight = armed;
+    // The error is swallowed HERE and handled by the awaiting cycle: both
+    // observe the same future, and an unobserved rejection on this one
+    // would surface as an unhandled async error.
+    unawaited(
+      armed.then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
+        if (_agentWaitInFlight == armed) _agentWaitInFlight = null;
+      }),
+    );
+    return armed;
   }
 
   /// True once the work started for [epoch] no longer belongs to anything.
