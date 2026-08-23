@@ -11,10 +11,11 @@ class _FakeAgentAwareMultiplexer implements AgentAwareMultiplexer {
   Future<MuxAgentsResult> listAgents() async => const MuxAgentsAvailable([]);
 
   @override
-  Future<AgentStatus?> waitForAgent(
+  Future<MuxAgentWaitResult> waitForAgent(
     String target, {
     required Set<AgentState> until,
-  }) async => null;
+    required Duration timeout,
+  }) async => const MuxAgentWaitTimedOut();
 }
 
 class _FakeAgentCapableAdapter implements MultiplexerAdapter {

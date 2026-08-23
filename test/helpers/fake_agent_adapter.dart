@@ -83,11 +83,19 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
     return result;
   }
 
+  /// Deliberately loud. This fake does NOT advertise
+  /// [MuxCapability.agentWait], so nothing is entitled to loop on its
+  /// wait — a consumer that does anyway would spin against a real adapter,
+  /// and must fail here instead of silently working.
   @override
-  Future<AgentStatus?> waitForAgent(
+  Future<MuxAgentWaitResult> waitForAgent(
     String target, {
     required Set<AgentState> until,
-  }) async => null;
+    required Duration timeout,
+  }) async => throw StateError(
+    'FakeAgentAdapter: waitForAgent() called on an adapter that does not '
+    'advertise MuxCapability.agentWait',
+  );
 
   @override
   Future<MuxDetection> detect() async =>

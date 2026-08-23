@@ -12,12 +12,20 @@ enum MultiplexerId { herdr, tmux, zellij }
 enum MuxCapability {
   agentState,
 
-  /// Declared for a future adapter that implements a genuine blocking
-  /// wait (e.g. via `herdr agent wait`). No adapter currently advertises
-  /// this: `HerdrAdapter.waitForAgent` is a single-shot check against the
-  /// agent's current state, not a real wait, so it does not advertise
-  /// this capability — advertising a capability a method does not back
-  /// would be dishonest. See design.md AD-2 and the apply report's D4.
+  /// The adapter's [AgentAwareMultiplexer.waitForAgent] genuinely blocks
+  /// until the agent changes state, rather than answering about its
+  /// current state and returning.
+  ///
+  /// Advertised by `HerdrAdapter`, backed by `herdr agent wait` —
+  /// MEASURED as event-driven against a real herdr 0.8.0 host, not
+  /// assumed: with the wait armed, flipping the host state after 5s of
+  /// sleep returned the call at 5.055s, a 55ms reaction.
+  ///
+  /// This one is load-bearing rather than merely descriptive. A caller
+  /// that loops "wait, then re-arm" against an adapter whose wait does
+  /// NOT block would spin as fast as the transport allows, so
+  /// `TerminalSession` checks this capability before entering that loop.
+  /// See design.md AD-2.
   agentWait,
   structuredOutput,
   sessionWorkingDirectory,
@@ -130,6 +138,50 @@ final class MuxAgentServerNotRunning extends MuxAgentsResult {
   const MuxAgentServerNotRunning();
 }
 
+/// Result of [AgentAwareMultiplexer.waitForAgent].
+///
+/// THREE variants because a nullable [AgentStatus] cannot keep the two
+/// no-match cases apart, and they demand opposite reactions: a wait that
+/// simply ran out of time means "nothing changed, ask again", while a wait
+/// that broke means "we could not find out". Collapsing them into `null`
+/// would let a caller re-arm forever against a host that can no longer
+/// answer, publishing a stale agent state the whole time — the same class
+/// of lie [MuxAgentsResult] exists to prevent for the LIST, applied here
+/// to the WAIT.
+sealed class MuxAgentWaitResult {
+  const MuxAgentWaitResult();
+}
+
+/// The agent reached one of the requested states. [agent] is its state as
+/// of the moment the wait returned.
+final class MuxAgentWaitMatched extends MuxAgentWaitResult {
+  const MuxAgentWaitMatched(this.agent);
+
+  final AgentStatus agent;
+}
+
+/// The wait ran its full duration without the agent entering any requested
+/// state. NOT an error: the agent is simply still where it was, and a
+/// caller may re-arm immediately.
+final class MuxAgentWaitTimedOut extends MuxAgentWaitResult {
+  const MuxAgentWaitTimedOut();
+}
+
+/// The wait could not be performed or did not survive: the agent-tracking
+/// server was unreachable, the target no longer exists, the transport gave
+/// up, or the multiplexer answered in a shape this adapter does not
+/// recognize.
+///
+/// MUST NOT be treated as [MuxAgentWaitTimedOut]. [code] carries the
+/// multiplexer's machine-readable error code when it gave one, and is null
+/// when it did not — an unrecognized failure is reported as unrecognized,
+/// never mapped onto a known code.
+final class MuxAgentWaitFailed extends MuxAgentWaitResult {
+  const MuxAgentWaitFailed(this.code);
+
+  final String? code;
+}
+
 /// Execution surface for adapters that advertise [MuxCapability.agentState].
 ///
 /// Reachable only through [MultiplexerAdapter.agents]: there is no
@@ -139,15 +191,32 @@ final class MuxAgentServerNotRunning extends MuxAgentsResult {
 abstract interface class AgentAwareMultiplexer {
   Future<MuxAgentsResult> listAgents();
 
-  /// No [Duration] timeout parameter: an implementation that does not
-  /// genuinely poll or block must not accept an argument it silently
-  /// discards. An adapter that implements a real blocking wait should
-  /// advertise [MuxCapability.agentWait] and may add its own
-  /// timeout-shaped parameter on its own concrete method if needed; the
-  /// shared interface does not promise one. See the apply report's D4.
-  Future<AgentStatus?> waitForAgent(
+  /// Blocks until [target]'s agent enters one of [until], or until
+  /// [timeout] elapses.
+  ///
+  /// [timeout] is REQUIRED, and the reason is not style. The implementation
+  /// is expected to bound the wait ON THE HOST — `herdr agent wait` takes
+  /// its own `--timeout` and exits — because a deadline applied on this
+  /// side would only stop LISTENING: `Future.timeout` abandons the future
+  /// without closing the remote channel, and a caller that re-armed after
+  /// each abandonment would stack one held channel per attempt until
+  /// OpenSSH's `MaxSessions` starved the connection. A required parameter
+  /// makes that deadline impossible to forget; see [kAgentListTimeout]'s
+  /// doc comment in `terminal_session.dart` for the incident this rule
+  /// comes from.
+  ///
+  /// A caller MUST check [MuxCapability.agentWait] before looping on this
+  /// method: an adapter that does not advertise it may answer instantly,
+  /// and "wait, then re-arm" would become a spin.
+  ///
+  /// Note that a wait armed with the state the agent is ALREADY in returns
+  /// immediately — measured against herdr 0.8.0. A caller that wants to be
+  /// told about CHANGE must therefore arm the complement of the current
+  /// state.
+  Future<MuxAgentWaitResult> waitForAgent(
     String target, {
     required Set<AgentState> until,
+    required Duration timeout,
   });
 }
 

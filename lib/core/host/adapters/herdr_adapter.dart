@@ -67,6 +67,9 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   @override
   Set<MuxCapability> get capabilities => const {
     MuxCapability.agentState,
+    // Backed by a genuinely blocking `herdr agent wait` — see
+    // [waitForAgent] for the live measurements this rests on.
+    MuxCapability.agentWait,
     MuxCapability.structuredOutput,
   };
 
@@ -169,32 +172,107 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
     );
   }
 
+  /// Blocks on `herdr agent wait` until [target] enters one of [until], or
+  /// until herdr's own `--timeout` expires.
+  ///
+  /// MEASURED against a real herdr 0.8.0 host — this subcommand was
+  /// previously documented here as unverified and out of scope, and this
+  /// method faked the wait with [listAgents] plus a filter. Every claim
+  /// below now comes from a live invocation:
+  ///
+  /// * `agent wait <TARGET> [--until <STATUS>]... [--timeout <MS>]`, where
+  ///   `--until` repeats and accepts idle|working|blocked|done|unknown.
+  /// * It is EVENT-DRIVEN, not internally polled: with the wait armed, the
+  ///   host state was flipped after 5s of sleep and the call returned at
+  ///   5.055s — a 55ms reaction.
+  /// * Success exits 0 with `{id, result: {agent, type: "agent_info"}}` —
+  ///   one AGENT, not the `agents` LIST that `agent list` returns.
+  /// * A timeout exits 1 with `{error: {code: "timeout", ...}}` on stderr.
+  /// * A wait armed with the state the agent is ALREADY in returns
+  ///   immediately (0.115s — process startup). A caller that wants to hear
+  ///   about CHANGE must arm the complement of the current state.
+  ///
+  /// [timeout] is spent on the HOST, via `--timeout`, and is deliberately
+  /// NOT also applied to [HostCommandRunner.run] as a transport deadline.
+  /// The distinction is the one [kAgentListTimeout] was written about:
+  /// herdr's own flag CANCELS the work — the remote process exits and its
+  /// channel closes — whereas a transport deadline merely ABANDONS the
+  /// future, leaving the channel held. Since a caller re-arms after every
+  /// return, abandonment would stack one held channel per window until
+  /// OpenSSH's `MaxSessions` starved the connection. Awaiting a
+  /// self-terminating remote command keeps the ceiling at exactly one
+  /// channel by construction rather than by a guard flag.
+  ///
+  /// The residual case that buys: a herdr that ignores its own `--timeout`
+  /// holds one channel indefinitely, and this method never notices. That is
+  /// the same single-channel exposure the previous implementation bounded,
+  /// and a genuinely dead transport is still caught a layer up, where the
+  /// SSH client's own teardown disconnects the session.
   @override
-  Future<AgentStatus?> waitForAgent(
+  Future<MuxAgentWaitResult> waitForAgent(
     String target, {
     required Set<AgentState> until,
+    required Duration timeout,
   }) async {
-    // Single-shot check against the agent's CURRENT state — does not poll
-    // or block. This adapter does not advertise [MuxCapability.agentWait]
-    // (see [capabilities]): a real blocking wait would need either the
-    // unverified `herdr agent wait` CLI subcommand (explicitly out of
-    // scope for this slice) or an unverified polling protocol against a
-    // live host, and advertising a capability this method does not back
-    // would be dishonest. See the apply report's D4.
-    final result = await listAgents();
-    final agents = switch (result) {
-      MuxAgentsAvailable(:final agents) => agents,
-      MuxAgentServerNotRunning() => const <AgentStatus>[],
-    };
-    for (final agent in agents) {
-      if (agent.target == target && until.contains(agent.state)) {
-        return agent;
-      }
+    if (until.isEmpty) {
+      // herdr does not treat "no --until" as "no states": it substitutes
+      // its own documented default of idle|done|blocked. Emitting the
+      // command anyway would silently wait for states the caller never
+      // asked for, so an empty set fails here instead.
+      throw ArgumentError.value(
+        until,
+        'until',
+        'must name at least one state: herdr substitutes its own default '
+            '(idle|done|blocked) when no --until is given',
+      );
     }
-    return null;
+
+    final result = await _runner.run(_agentWaitCommand(target, until, timeout));
+
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up, which is not herdr reporting a timeout: no
+      // exit status was read, so nothing is known about the agent. Reported
+      // as a failure so a caller does not read it as "nothing changed".
+      return const MuxAgentWaitFailed('transport_incomplete');
+    }
+    if (result.exitCode != 0) {
+      final code = _parseErrorCode(result.stderr);
+      // `timeout` is the ONLY code that means "nothing changed"; every
+      // other one — agent_not_found for a pane that vanished,
+      // server_not_running for a dead socket, or stderr that is not the
+      // JSON envelope at all — means we could not find out.
+      if (code == 'timeout') return const MuxAgentWaitTimedOut();
+      return MuxAgentWaitFailed(code);
+    }
+
+    final envelope = jsonDecode(result.stdout) as Map<String, dynamic>;
+    final agentJson =
+        (envelope['result'] as Map<String, dynamic>)['agent']
+            as Map<String, dynamic>;
+    return MuxAgentWaitMatched(_parseAgentInfo(agentJson));
   }
 
   // ── Private ────────────────────────────────────────────────────────────
+
+  /// Builds the `agent wait` invocation.
+  ///
+  /// [until] is emitted in [AgentState] declaration order rather than in
+  /// set-iteration order, so the emitted string does not depend on the
+  /// order a caller happened to build its set in — the command is what
+  /// tests assert on, because both of this adapter's shipped defects lived
+  /// in the command while the parse stayed green.
+  String _agentWaitCommand(
+    String target,
+    Set<AgentState> until,
+    Duration timeout,
+  ) {
+    final states = AgentState.values
+        .where(until.contains)
+        .map((state) => '--until ${state.name}')
+        .join(' ');
+    return '$_absPath${_sessionScope}agent wait ${shellQuote(target)} '
+        '$states --timeout ${timeout.inMilliseconds}';
+  }
 
   /// `--session` is a GLOBAL option and MUST precede the subcommand —
   /// verified against the real binary, where `herdr --session helm-0 agent

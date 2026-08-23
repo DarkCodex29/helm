@@ -68,6 +68,49 @@ const _agentListNoServer =
     '"message":"no herdr server is running at socket; run `herdr` to '
     'start or attach it"}}';
 
+/// One `AgentInfo`, captured VERBATIM from a live `herdr --session helm-0
+/// agent list` on a real host — including the fields helm does not read.
+/// Note what is ABSENT: neither `name` nor `title` is present, so `label`
+/// falls back to `terminal_id`, and `agent` ("claude") is a field this
+/// adapter does not currently read.
+const _blockedAgentInfo = {
+  'agent': 'claude',
+  'agent_status': 'blocked',
+  'cwd': '/home/deployer',
+  'focused': true,
+  'foreground_cwd': '/home/deployer',
+  'pane_id': 'w1:p1',
+  'revision': 1,
+  'state_change_seq': 8,
+  'tab_id': 'w1:t1',
+  'terminal_id': 'term_659ab3dc3a8541',
+  'terminal_title': 'deployer@vmi2862525: ~',
+  'terminal_title_stripped': 'deployer@vmi2862525: ~',
+  'workspace_id': 'w1',
+};
+
+/// `agent wait`'s success envelope: `{id, result: {agent, type}}` — one
+/// AGENT, not the `agents` LIST `agent list` returns. Captured verbatim.
+String _agentWaitSuccess(Map<String, Object?> agent) => jsonEncode({
+  'id': 'cli:agent:wait',
+  'result': {'agent': agent, 'type': 'agent_info'},
+});
+
+/// Verbatim, exit code 1, on stderr.
+const _agentWaitTimeout =
+    '{"error":{"code":"timeout","message":"timed out waiting for agent '
+    'status"},"id":"cli:agent:wait"}';
+
+/// Verbatim, exit code 1, on stderr — what the OLD terminal-id target
+/// produced on every single call.
+const _agentWaitNotFound =
+    '{"error":{"code":"agent_not_found","message":"agent target '
+    'term_659ab3dc3a8541 not found"},"id":"cli:agent:wait"}';
+
+const _agentWaitNoServer =
+    '{"id":"cli:agent:wait","error":{"code":"server_not_running",'
+    '"message":"no herdr server is running at socket"}}';
+
 const _agentListUnrecognizedError =
     '{"id":"cli:agent:list","error":{"code":"internal_error",'
     '"message":"unexpected failure"}}';
@@ -342,112 +385,284 @@ void main() {
     });
 
     test(
-      'advertises agentState and structuredOutput, never agentWait — '
-      'waitForAgent is a single-shot check, not a genuine wait',
+      'advertises agentWait now that waitForAgent really blocks on '
+      'herdr agent wait',
       () {
         expect(adapter.capabilities, {
           MuxCapability.agentState,
+          MuxCapability.agentWait,
           MuxCapability.structuredOutput,
         });
-        expect(
-          adapter.capabilities,
-          isNot(contains(MuxCapability.agentWait)),
-        );
       },
     );
   });
 
-  group('waitForAgent', () {
-    test('returns the status when the agent already matches', () async {
+  group('waitForAgent — a REAL blocking wait on herdr agent wait', () {
+    // MEASURED against a real herdr 0.8.0 binary, not assumed. This
+    // subcommand was previously dismissed as unverified, and this adapter
+    // faked the wait with `agent list` plus a filter. Every fact below
+    // comes from a live invocation:
+    //
+    //   $ herdr agent wait --help
+    //     Usage: herdr agent wait <TARGET> [OPTIONS]
+    //       --until <STATUS>  State to match; repeat for more than one
+    //                         state [idle, working, blocked, done, unknown]
+    //       --timeout <MS>    Fail after this many milliseconds
+    //     Without --until, matches idle, done, or blocked.
+    //     Without --timeout, waits indefinitely.
+    //
+    // EVENT-DRIVEN, not internally polled: with the wait armed, the host
+    // state was flipped after 5s of sleep and the call returned at
+    // 5.055s — a 55ms reaction. Internal polling would have cost up to a
+    // whole interval more.
+    //
+    // ALREADY-MATCHING RETURNS IMMEDIATELY: against an agent already
+    // `blocked`, `--until blocked --timeout 3000` returned in 0.115s
+    // (process startup) with a success envelope. Against the same agent,
+    // `--until idle --until working --until done --until unknown
+    // --timeout 3000` timed out at 3.13s. That is why a caller must arm
+    // the COMPLEMENT of the current state — see TerminalSession.
+    //
+    // Success envelope (verbatim, exit 0):
+    //   {"id":"cli:agent:wait","result":{"agent":{...},
+    //    "type":"agent_info"}}
+    // Timeout envelope (verbatim, exit 1, on stderr):
+    //   {"error":{"code":"timeout","message":"timed out waiting for agent
+    //    status"},"id":"cli:agent:wait"}
+    // Wrong identifier (verbatim, exit 1, on stderr):
+    //   {"error":{"code":"agent_not_found","message":"agent target
+    //    term_659ab3dc3a8541 not found"},"id":"cli:agent:wait"}
+
+    test(
+      'emits the real agent wait command: pane target, one --until per '
+      'requested state, and the timeout in milliseconds',
+      () async {
+        // The command STRING is the assertion, not the parse. Two defects
+        // in this adapter's history — the trailing `--session` spelling
+        // and the terminal-id target — both lived in the emitted command
+        // while canned stdout kept the parse tests green. This is the
+        // shape that catches the third one.
+        const expected =
+            "herdr agent wait 'w1:p1' --until working --until blocked "
+            '--timeout 300000';
+        runner.whenRun(
+          expected,
+          HostCommandResult(stdout: _agentWaitSuccess(_blockedAgentInfo), exitCode: 0),
+        );
+
+        await adapter.waitForAgent(
+          'w1:p1',
+          until: {AgentState.blocked, AgentState.working},
+          timeout: const Duration(minutes: 5),
+        );
+
+        expect(runner.runCalls, [expected]);
+      },
+    );
+
+    test(
+      'orders --until by state, so the emitted command does not depend on '
+      'the order a caller happened to build its set in',
+      () async {
+        const expected =
+            "herdr agent wait 'w1:p1' --until idle --until working "
+            '--until blocked --until done --until unknown --timeout 1000';
+        runner.whenRun(
+          expected,
+          HostCommandResult(stdout: _agentWaitSuccess(_blockedAgentInfo), exitCode: 0),
+        );
+
+        await adapter.waitForAgent(
+          'w1:p1',
+          until: {
+            AgentState.unknown,
+            AgentState.done,
+            AgentState.blocked,
+            AgentState.working,
+            AgentState.idle,
+          },
+          timeout: const Duration(seconds: 1),
+        );
+
+        expect(runner.runCalls, [expected]);
+      },
+    );
+
+    test('shell-quotes the target, which reaches a remote shell', () async {
+      const expected =
+          "herdr agent wait 'w1:p1;rm -rf /' --until blocked --timeout 1000";
       runner.whenRun(
-        _agentListCommand,
-        HostCommandResult(
-          stdout: _agentListSuccess([
-            {
-              'terminal_id': 't1',
-              'agent_status': 'blocked',
-              'workspace_id': 'w1',
-              'tab_id': 'tab1',
-              'pane_id': 'p1',
-              'focused': true,
-              'revision': 1,
-            },
-          ]),
-          exitCode: 0,
-        ),
+        expected,
+        HostCommandResult(stdout: _agentWaitSuccess(_blockedAgentInfo), exitCode: 0),
       );
 
-      final status = await adapter.waitForAgent(
-        'p1',
-        until: {AgentState.blocked, AgentState.done},
+      await adapter.waitForAgent(
+        'w1:p1;rm -rf /',
+        until: {AgentState.blocked},
+        timeout: const Duration(seconds: 1),
       );
 
-      expect(status, (target: 'p1', label: 't1', state: AgentState.blocked));
+      expect(runner.runCalls, [expected]);
     });
 
     test(
-      'returns null when the agent exists but is not in any requested '
-      'state',
+      'never falls back to agent list — it is a wait now, not a list plus '
+      'a filter',
+      () async {
+        // `agent list` is deliberately left UNREGISTERED: the fake throws
+        // for an unscripted command, so a regression to the old
+        // single-shot implementation fails loudly here.
+        runner.whenRun(
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+          HostCommandResult(stdout: _agentWaitSuccess(_blockedAgentInfo), exitCode: 0),
+        );
+
+        await adapter.waitForAgent(
+          'w1:p1',
+          until: {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
+        );
+
+        expect(runner.runCalls.single, contains('agent wait'));
+        expect(runner.runCalls.single, isNot(contains('agent list')));
+      },
+    );
+
+    test('reports the matched agent, parsed from the wait envelope', () async {
+      runner.whenRun(
+        "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+        HostCommandResult(stdout: _agentWaitSuccess(_blockedAgentInfo), exitCode: 0),
+      );
+
+      final result = await adapter.waitForAgent(
+        'w1:p1',
+        until: {AgentState.blocked},
+        timeout: const Duration(seconds: 1),
+      );
+
+      expect(result, isA<MuxAgentWaitMatched>());
+      expect((result as MuxAgentWaitMatched).agent, (
+        target: 'w1:p1',
+        label: 'term_659ab3dc3a8541',
+        state: AgentState.blocked,
+      ));
+    });
+
+    test(
+      'a herdr timeout is TIMED OUT, never FAILED — nothing changed is not '
+      'an error, and a caller must be free to simply re-arm',
       () async {
         runner.whenRun(
-          _agentListCommand,
-          HostCommandResult(
-            stdout: _agentListSuccess([
-              {
-                'terminal_id': 't1',
-                'agent_status': 'working',
-                'workspace_id': 'w1',
-                'tab_id': 'tab1',
-                'pane_id': 'p1',
-                'focused': true,
-                'revision': 1,
-              },
-            ]),
-            exitCode: 0,
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+          const HostCommandResult(stderr: _agentWaitTimeout, exitCode: 1),
+        );
+
+        final result = await adapter.waitForAgent(
+          'w1:p1',
+          until: {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
+        );
+
+        expect(result, isA<MuxAgentWaitTimedOut>());
+        expect(result, isNot(isA<MuxAgentWaitFailed>()));
+      },
+    );
+
+    test(
+      'a vanished target is FAILED and carries the code, never TIMED OUT — '
+      'a caller must not read "the pane is gone" as "nothing changed"',
+      () async {
+        runner.whenRun(
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+          const HostCommandResult(stderr: _agentWaitNotFound, exitCode: 1),
+        );
+
+        final result = await adapter.waitForAgent(
+          'w1:p1',
+          until: {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
+        );
+
+        expect(result, isA<MuxAgentWaitFailed>());
+        expect((result as MuxAgentWaitFailed).code, 'agent_not_found');
+      },
+    );
+
+    test('a dead agent server is FAILED, never TIMED OUT', () async {
+      runner.whenRun(
+        "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+        const HostCommandResult(stderr: _agentWaitNoServer, exitCode: 1),
+      );
+
+      final result = await adapter.waitForAgent(
+        'w1:p1',
+        until: {AgentState.blocked},
+        timeout: const Duration(seconds: 1),
+      );
+
+      expect(result, isA<MuxAgentWaitFailed>());
+      expect((result as MuxAgentWaitFailed).code, 'server_not_running');
+    });
+
+    test(
+      'stderr that is not herdr JSON at all is FAILED with no code, not '
+      'silently read as a timeout',
+      () async {
+        runner.whenRun(
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+          const HostCommandResult(
+            stderr: 'herdr: command not found',
+            exitCode: 127,
           ),
         );
 
-        final status = await adapter.waitForAgent(
-          't1',
+        final result = await adapter.waitForAgent(
+          'w1:p1',
           until: {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
         );
 
-        expect(status, isNull);
+        expect(result, isA<MuxAgentWaitFailed>());
+        expect((result as MuxAgentWaitFailed).code, isNull);
       },
     );
 
-    test('returns null when no agent matches the target', () async {
-      runner.whenRun(
-        _agentListCommand,
-        HostCommandResult(stdout: _agentListSuccess(const []), exitCode: 0),
-      );
-
-      final status = await adapter.waitForAgent(
-        'missing',
-        until: {AgentState.idle},
-      );
-
-      expect(status, isNull);
-    });
-
     test(
-      'returns null, never throws, when the herdr agent-tracking server '
-      'is not running',
+      'a transport that gave up without an exit code is FAILED, never a '
+      'timeout that invites an immediate re-arm',
       () async {
         runner.whenRun(
-          _agentListCommand,
-          const HostCommandResult(stderr: _agentListNoServer, exitCode: 1),
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+          const HostCommandResult(timedOut: true),
         );
 
-        final status = await adapter.waitForAgent(
-          't1',
+        final result = await adapter.waitForAgent(
+          'w1:p1',
           until: {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
         );
 
-        expect(status, isNull);
+        expect(result, isA<MuxAgentWaitFailed>());
+      },
+    );
+
+    test(
+      'an empty until set is rejected outright — herdr would silently '
+      'substitute its own default of idle|done|blocked',
+      () async {
+        expect(
+          () => adapter.waitForAgent(
+            'w1:p1',
+            until: const {},
+            timeout: const Duration(seconds: 1),
+          ),
+          throwsArgumentError,
+        );
+        expect(runner.runCalls, isEmpty);
       },
     );
   });
+
 
   group('listSessions', () {
     test(
@@ -759,41 +974,47 @@ void main() {
     });
 
     test(
-      'waitForAgent asks the scoped socket too — it is listAgents plus a '
-      'filter, so an unscoped query here would answer for another session',
+      'the wait is scoped too, and --session still precedes the '
+      'subcommand — an unscoped wait would watch another session',
       () async {
-        // Reproduces the exact measured lie: the UNSCOPED spelling answers
-        // for herdr's default session and reports zero agents, while the
-        // scoped one reports the blocked agent that is really there. A
-        // regression therefore surfaces as "no agent found", which is what
-        // the user saw on the device.
-        final scopedRunner = ambidextrousRunner();
-        scopedRunner.whenRun(
-          "herdr --session 'helm-0' agent list",
-          HostCommandResult(
-            stdout: _agentListSuccess([
-              {
-                'terminal_id': 't1',
-                'agent_status': 'blocked',
-                'workspace_id': 'w1',
-                'tab_id': 'tab1',
-                'pane_id': 'p1',
-                'focused': true,
-                'revision': 1,
-              },
-            ]),
-            exitCode: 0,
-          ),
-        );
+        // Reproduces the measured lie in the wait's shape: the UNSCOPED
+        // spelling talks to herdr's DEFAULT session socket, where the pane
+        // this session is attached to does not exist at all — so an
+        // unscoped wait does not merely watch the wrong agent, it fails
+        // with agent_not_found forever.
+        const expected =
+            "herdr --session 'helm-0' agent wait 'w1:p1' --until blocked "
+            '--timeout 1000';
+        final scopedRunner = FakeHostCommandRunner();
+        // Both spellings are canned so a regression fails on the
+        // ASSERTION that names the defect, not on the fake having nothing
+        // registered.
+        for (final command in const [
+          expected,
+          "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
+        ]) {
+          scopedRunner.whenRun(
+            command,
+            HostCommandResult(
+              stdout: _agentWaitSuccess(_blockedAgentInfo),
+              exitCode: 0,
+            ),
+          );
+        }
         final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
 
-        final status = await scoped.waitForAgent(
-          'p1',
+        await scoped.waitForAgent(
+          'w1:p1',
           until: const {AgentState.blocked},
+          timeout: const Duration(seconds: 1),
         );
 
-        expect(scopedRunner.runCalls, ["herdr --session 'helm-0' agent list"]);
-        expect(status?.state, AgentState.blocked);
+        final emitted = scopedRunner.runCalls.single;
+        expect(emitted, expected);
+        expect(
+          emitted.indexOf('--session'),
+          lessThan(emitted.indexOf('agent wait')),
+        );
       },
     );
 
