@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
+import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:helm/features/terminal/presentation/widgets/agent_state_chip.dart';
 
@@ -77,23 +78,44 @@ class TerminalTabBar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 7,
-              height: 7,
-              margin: const EdgeInsets.only(right: 6),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: tab.isConnected ? _connectedColor : _disconnectedColor,
-                boxShadow: tab.isConnected
-                    ? [
-                        BoxShadow(
-                          color: _connectedColor.withValues(alpha: 0.5),
-                          blurRadius: 4,
-                          spreadRadius: 0,
-                        ),
-                      ]
-                    : null,
-              ),
+            // Listening, not reading `tab.isConnected` during build.
+            //
+            // `TerminalTab.isConnected` is a snapshot of the session's
+            // status at build time, and NOTHING rebuilds this strip when
+            // that status changes: `tabsProvider` only emits when tabs are
+            // added, removed or activated, so a tab that connected
+            // successfully kept a red dot until some unrelated event
+            // happened to rebuild it. A red dot on a working session is a
+            // lie, and it was on screen for every single connect.
+            //
+            // Same shape as the agent badge below, for the same reason:
+            // the value lives on the session, so the session is what has
+            // to be listened to.
+            ValueListenableBuilder<ConnectionStatus>(
+              valueListenable: tab.session.statusNotifier,
+              builder: (context, status, _) {
+                // Only `connected` is a working session. `connecting` and
+                // `error` must not read as one.
+                final isConnected = status == ConnectionStatus.connected;
+                return Container(
+                  width: 7,
+                  height: 7,
+                  margin: const EdgeInsets.only(right: 6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isConnected ? _connectedColor : _disconnectedColor,
+                    boxShadow: isConnected
+                        ? [
+                            BoxShadow(
+                              color: _connectedColor.withValues(alpha: 0.5),
+                              blurRadius: 4,
+                              spreadRadius: 0,
+                            ),
+                          ]
+                        : null,
+                  ),
+                );
+              },
             ),
             // Agent state, glanceable without opening the drawer — the
             // point of putting it here at all.
