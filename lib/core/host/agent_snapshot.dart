@@ -3,8 +3,9 @@ import 'package:helm/core/host/multiplexer_adapter.dart';
 /// What the app currently knows about the AI agents running inside one
 /// attached multiplexer session.
 ///
-/// UNVERIFIED SPIKE: this type and everything that reads it ship with no
-/// test coverage by explicit owner decision.
+/// Covered by `test/core/host/agent_snapshot_test.dart` (the badge and
+/// urgency decisions) and by the consumer tests for the drawer and the
+/// tab strip.
 ///
 /// FOUR variants, not two, and the extra ones are the whole point.
 /// [MuxAgentsResult] already refuses to collapse "the server answered with

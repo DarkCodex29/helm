@@ -5,7 +5,8 @@ import 'package:helm/core/host/multiplexer_adapter.dart';
 /// Visual vocabulary for [AgentState], shared by the tab badge and the
 /// drawer list so the two can never disagree about what a state looks like.
 ///
-/// UNVERIFIED SPIKE: nothing in this file has test coverage.
+/// Covered by
+/// `test/features/terminal/presentation/widgets/agent_state_chip_test.dart`.
 ///
 /// Deliberately avoids the green/red already spent on the tab strip's
 /// CONNECTION dot. A red agent badge sitting beside a red disconnected dot

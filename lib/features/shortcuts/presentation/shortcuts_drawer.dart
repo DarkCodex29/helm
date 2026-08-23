@@ -249,7 +249,10 @@ class _SectionHeader extends StatelessWidget {
 
 /// Renders what the active session knows about its AI agents.
 ///
-/// UNVERIFIED SPIKE: no test covers this widget.
+/// Covered by
+/// `test/features/shortcuts/presentation/shortcuts_drawer_agents_test.dart`,
+/// which asserts each branch's exact wording and that no two of them read
+/// alike.
 ///
 /// Every branch below exists to keep four different things apart that a
 /// naive implementation would render identically as "an empty list":

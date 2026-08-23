@@ -155,7 +155,9 @@ final class AttachExitUnknown extends AttachExitOutcome {
 
 /// How often a connected session re-asks the host which agents are running.
 ///
-/// UNVERIFIED SPIKE: no test covers this cadence.
+/// The cadence itself is covered in
+/// `test/features/terminal/data/terminal_session_agents_test.dart`,
+/// against a virtual clock.
 ///
 /// Chosen against the two failure modes at the extremes. Sub-second polling
 /// opens one exec channel per second PER OPEN TAB against a host the user
@@ -212,7 +214,9 @@ const kAgentListTimeout = Duration(seconds: 8);
 /// and back, so its owner can start and stop the work that produces its
 /// value.
 ///
-/// UNVERIFIED SPIKE: no test covers this class.
+/// Its arm/disarm transitions are covered through
+/// [TerminalSession.agentsNotifier] in
+/// `test/features/terminal/data/terminal_session_agents_test.dart`.
 ///
 /// Exists so agent polling is driven by demand rather than by the mere
 /// existence of a connection: a session no widget is rendering must not
@@ -351,8 +355,6 @@ class TerminalSession {
 
   /// What this session last learned about the AI agents inside the
   /// multiplexer session it is attached to.
-  ///
-  /// UNVERIFIED SPIKE: no test covers this notifier or its lifecycle.
   ///
   /// Unlike [advisoriesNotifier], this is published while the session is
   /// HEALTHY — agent state is only useful live. It starts, and returns to,
@@ -708,8 +710,6 @@ class TerminalSession {
   /// Arms or disarms the periodic agent refresh so that it runs when — and
   /// only when — it is both meaningful and wanted.
   ///
-  /// UNVERIFIED SPIKE: no test covers this method.
-  ///
   /// WHY A POLL AT ALL, and why this session owns it:
   ///
   /// The adapter cannot push. `HerdrAdapter.waitForAgent` reads like a
@@ -776,8 +776,6 @@ class TerminalSession {
 
   /// Asks the host once for the current agent list and publishes the
   /// result on [agentsNotifier].
-  ///
-  /// UNVERIFIED SPIKE: no test covers this method.
   ///
   /// Never throws and never rejects: every failure — an unsupported
   /// multiplexer, a dead agent server, a timeout, or the [StateError]

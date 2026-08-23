@@ -347,6 +347,44 @@ void main() {
       },
     );
 
+    test(
+      'while observed, it re-asks once per kAgentPollInterval — the badge '
+      'is the whole point, so a snapshot taken once at connect would be '
+      'stale within seconds',
+      () async {
+        final adapter = FakeAgentAdapter()
+          ..whenAgents(const MuxAgentsAvailable([_blockedAgent]));
+        final session = await _connectedSession(adapter: adapter);
+
+        void listener() {}
+        // Armed INSIDE the virtual clock: Timer.periodic binds to the zone
+        // that creates it, so a timer armed outside would never be driven
+        // by `elapse`.
+        FakeAsync().run((async) {
+          session.agentsNotifier.addListener(listener);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 1, reason: 'immediate first read');
+
+          async.elapse(kAgentPollInterval);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 2);
+
+          async.elapse(kAgentPollInterval * 3);
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 5, reason: 'one per interval');
+
+          // Just short of the next tick, nothing extra fires.
+          async.elapse(kAgentPollInterval - const Duration(milliseconds: 1));
+          async.flushMicrotasks();
+          expect(adapter.listAgentsCalls, 5);
+
+          session.agentsNotifier.removeListener(listener);
+        });
+
+        await session.dispose();
+      },
+    );
+
     test('the last observer leaving disarms the poll', () async {
       final adapter = FakeAgentAdapter()
         ..whenAgents(const MuxAgentsAvailable([_blockedAgent]));
