@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
+import 'package:helm/features/terminal/presentation/widgets/agent_state_chip.dart';
 
 class TerminalTabBar extends StatelessWidget {
   const TerminalTabBar({
@@ -92,6 +94,27 @@ class TerminalTabBar extends StatelessWidget {
                       ]
                     : null,
               ),
+            ),
+            // Agent state, glanceable without opening the drawer — the
+            // point of putting it here at all.
+            //
+            // Listening (rather than reading `tab.session` state during
+            // build) is also what ARMS the session's agent poll: it only
+            // queries the host while something is actually observing, so
+            // this builder is both the consumer and the trigger. See
+            // TerminalSession._syncAgentPolling.
+            ValueListenableBuilder<AgentSnapshot>(
+              valueListenable: tab.session.agentsNotifier,
+              builder: (context, snapshot, _) {
+                final state = mostUrgentAgentState(snapshot);
+                // Null for every snapshot nobody measured — an unsupported
+                // multiplexer, an unreachable agent server, or a session
+                // that has not been asked yet. A badge is a positive claim
+                // about the host; drawing one there would assert a state
+                // helm does not have.
+                if (state == null) return const SizedBox.shrink();
+                return AgentBadge(state: state);
+              },
             ),
             Flexible(
               child: Text(
