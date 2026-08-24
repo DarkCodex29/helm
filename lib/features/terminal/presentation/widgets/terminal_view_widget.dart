@@ -28,6 +28,15 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
   void initState() {
     super.initState();
     _focusNode = FocusNode();
+    // No attachViewport() here on purpose.
+    //
+    // The window it would cover — "a size is not known yet, so wait for
+    // one" — opens when the session is CREATED, which is before this
+    // widget exists: TabsNotifier.addTab only schedules the rebuild that
+    // mounts this view, then dials immediately. addTab therefore owns the
+    // announcement (see the comment there), and by the time initState runs
+    // a size is either already recorded or about to be, so a second
+    // announcement here would change nothing that any test could observe.
     if (widget.isActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _focusNode.requestFocus();
@@ -45,6 +54,9 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
 
   @override
   void dispose() {
+    // Releases a connect() still parked waiting for this view's first
+    // size — a tab closed mid-connect must not leave one waiting.
+    widget.session.detachViewport();
     _focusNode.dispose();
     super.dispose();
   }
@@ -53,47 +65,36 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            const double charWidth = 7.8;
-            const double charHeight = 16.0;
-            final cols = (constraints.maxWidth / charWidth).floor().clamp(
-              20,
-              300,
-            );
-            final rows = (constraints.maxHeight / charHeight).floor().clamp(
-              5,
-              200,
-            );
-
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              widget.session.onResize(cols, rows);
-            });
-
-            return TerminalView(
-              widget.session.terminal,
-              theme: HelmTerminalTheme.monokai,
-              textStyle: const TerminalStyle(
-                fontFamily: 'JetBrainsMono',
-                fontFamilyFallback: [
-                  'Menlo',
-                  'Monaco',
-                  'Courier New',
-                  'monospace',
-                ],
-                fontSize: 13,
-              ),
-              hardwareKeyboardOnly: true,
-              focusNode: _focusNode,
-              autofocus: widget.isActive,
-              keyboardType: TextInputType.visiblePassword,
-              keyboardAppearance: Brightness.dark,
-              deleteDetection: true,
-              backgroundOpacity: 1.0,
-              simulateScroll: true,
-              readOnly: false,
-            );
-          },
+        // No LayoutBuilder, and no hand-computed column/row count.
+        //
+        // This used to divide the incoming constraints by a hardcoded
+        // 7.8x16.0 cell and push THAT at the session. It was a second,
+        // disagreeing source of truth: measured on an iPhone 17 Pro it
+        // produced 51x31 while xterm — laying the same area out with the
+        // real font metrics it actually renders with — produced 51x29. Two
+        // rows of the remote's output had nowhere to go.
+        //
+        // TerminalView already resizes the Terminal from those real
+        // metrics during layout, and TerminalSession now listens to that
+        // from its constructor, so the size the renderer computed is the
+        // size the remote is told. One source of truth, no estimate.
+        TerminalView(
+          widget.session.terminal,
+          theme: HelmTerminalTheme.monokai,
+          textStyle: const TerminalStyle(
+            fontFamily: 'JetBrainsMono',
+            fontFamilyFallback: ['Menlo', 'Monaco', 'Courier New', 'monospace'],
+            fontSize: 13,
+          ),
+          hardwareKeyboardOnly: true,
+          focusNode: _focusNode,
+          autofocus: widget.isActive,
+          keyboardType: TextInputType.visiblePassword,
+          keyboardAppearance: Brightness.dark,
+          deleteDetection: true,
+          backgroundOpacity: 1.0,
+          simulateScroll: true,
+          readOnly: false,
         ),
         // Host findings on a session that is otherwise working.
         //

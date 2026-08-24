@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/host_advisor.dart';
@@ -232,6 +233,21 @@ const kAgentWaitWindow = Duration(minutes: 5);
 /// whichever comes first.
 const kAgentListTimeout = Duration(seconds: 8);
 
+/// Ceiling on how long [TerminalSession.connect] waits for an attached view
+/// to report its first real size.
+///
+/// Not a timing guess about layout — it is a safety valve. A view calls
+/// [TerminalSession.attachViewport] from `initState` and lays out on the
+/// very next frame, so the measured wait on an iPhone 17 Pro is under one
+/// frame and this deadline is never reached in practice. It exists so a
+/// view that is built but never laid out (kept offstage, or inside a
+/// zero-height parent) degrades to the documented default instead of
+/// parking the connect forever.
+///
+/// Deliberately far longer than a frame: expiring early would put back
+/// exactly the bug this unit removes — a PTY opened at a fabricated size.
+const kViewportLayoutDeadline = Duration(seconds: 3);
+
 /// [ValueNotifier] that reports when it goes from unobserved to observed
 /// and back, so its owner can start and stop the work that produces its
 /// value.
@@ -296,7 +312,20 @@ class TerminalSession {
        _attachOpener = attachOpener ?? _defaultAttachOpener,
        _hostProber = hostProber,
        _hostRunnerFactory = hostRunnerFactory ?? _defaultHostRunnerFactory,
-       terminal = terminal ?? Terminal(maxLines: 5000);
+       terminal = terminal ?? Terminal(maxLines: 5000) {
+    // Wired HERE, not in _bridgeIO, and this is the whole fix for the
+    // remote drawing wider than the screen.
+    //
+    // xterm's RenderTerminal resizes this Terminal from real font metrics
+    // during its first performLayout — which happens while connect() is
+    // still in flight. _bridgeIO only runs after the connection succeeds,
+    // so a callback installed there misses that first resize entirely, and
+    // xterm re-fires onResize only when the size CHANGES. The authoritative
+    // size was therefore observed by nobody, and the remote kept whatever
+    // it was opened with. Measured on an iPhone 17 Pro: the PTY stayed at
+    // xterm's 80x24 default while the viewport was 51x29.
+    this.terminal.onResize = (w, h, pw, ph) => onResize(w, h);
+  }
 
   static final _log = HelmLogger('TerminalSession');
 
@@ -333,6 +362,89 @@ class TerminalSession {
   HostCommandRunner? _hostRunner;
   HostReport? _hostReport;
   MultiplexerSelection? _multiplexerSelection;
+
+  /// Size of the surface actually rendering [terminal], as last reported
+  /// through [onResize]. Null until something has reported one.
+  ///
+  /// This is the ONLY size [connect] opens a PTY at. [Terminal.viewWidth]
+  /// is deliberately not read: it answers 80x24 — xterm's constructor
+  /// default — until the view lays out, and a PTY opened at that size makes
+  /// the remote paint 80 columns into a viewport that fits 51.
+  int? _viewportColumns;
+  int? _viewportRows;
+
+  /// Columns/rows of the surface rendering this session, or null when
+  /// nothing has reported a size yet.
+  int? get viewportColumns => _viewportColumns;
+  int? get viewportRows => _viewportRows;
+
+  /// True between [attachViewport] and [detachViewport]: a view exists and
+  /// a real size is therefore coming. Distinguishes "the size is not known
+  /// YET" (wait for it) from "there is no view at all" (use the documented
+  /// default), so a headless caller never waits for a size that will never
+  /// arrive.
+  bool _viewportAttached = false;
+
+  /// Completed by the first [onResize] after a viewport is attached, or by
+  /// [detachViewport] when the view goes away before laying out. Recreated
+  /// per attach so a re-attached view can be waited on again.
+  Completer<void>? _viewportSized;
+
+  /// Declares that a view is rendering [terminal] and will report its size.
+  ///
+  /// Called from the view's `initState`, which runs BEFORE its first
+  /// layout — that ordering is what lets [connect] tell "not laid out yet"
+  /// apart from "no view", without guessing either.
+  void attachViewport() {
+    _viewportAttached = true;
+    if (_viewportColumns == null && _viewportSized == null) {
+      _viewportSized = Completer<void>();
+    }
+  }
+
+  /// Declares that the view rendering [terminal] is gone.
+  ///
+  /// Releases a [connect] still waiting on a first size: a tab closed while
+  /// connecting must not leave that connect parked forever.
+  void detachViewport() {
+    _viewportAttached = false;
+    _releaseViewportWaiters();
+  }
+
+  void _releaseViewportWaiters() {
+    final pending = _viewportSized;
+    _viewportSized = null;
+    if (pending != null && !pending.isCompleted) pending.complete();
+  }
+
+  /// The size [connect] opens its PTYs at.
+  ///
+  /// Returns a size already reported without waiting. Otherwise waits for
+  /// the attached view's first layout, bounded by [kViewportLayoutDeadline]
+  /// so a view that somehow never lays out degrades instead of hanging the
+  /// connect. Falls back to [AppConstants.defaultTerminalColumns]/[
+  /// AppConstants.defaultTerminalRows] only when there genuinely is no view
+  /// to ask — which is what those constants document.
+  Future<({int columns, int rows})> _resolveViewportSize() async {
+    if (_viewportColumns == null && _viewportAttached) {
+      final pending = _viewportSized;
+      if (pending != null) {
+        try {
+          await pending.future.timeout(kViewportLayoutDeadline);
+        } on TimeoutException {
+          _log.w(
+            'Viewport never reported a size for ${profile.name}; opening the '
+            'PTY at the documented default instead',
+          );
+        }
+      }
+    }
+
+    return (
+      columns: _viewportColumns ?? AppConstants.defaultTerminalColumns,
+      rows: _viewportRows ?? AppConstants.defaultTerminalRows,
+    );
+  }
 
   /// What the host probe reported during the last [connect], or null when
   /// no probe has run — either because nothing is connected yet, or because
@@ -455,12 +567,19 @@ class TerminalSession {
     advisoriesNotifier.value = const [];
     _log.i('Connecting session for ${profile.name}');
 
+    // Resolved ONCE, before anything is opened, and reused for every PTY
+    // this connect creates. Reading the size again per-PTY is what made the
+    // attach size a race: the shell PTY was opened at 80x24 and the attach
+    // PTY at whatever a later frame had produced, so which one was right
+    // depended on network latency.
+    final viewport = await _resolveViewportSize();
+
     try {
       final result = await _sshService.connectAndOpenShell(
         profile,
         privateKeyPem,
-        columns: terminal.viewWidth,
-        rows: terminal.viewHeight,
+        columns: viewport.columns,
+        rows: viewport.rows,
       );
 
       _client = result.client;
@@ -528,8 +647,8 @@ class TerminalSession {
           _muxAdapter.attachCommand(sessionRef),
           SSHPtyConfig(
             type: 'xterm-256color',
-            width: terminal.viewWidth,
-            height: terminal.viewHeight,
+            width: viewport.columns,
+            height: viewport.rows,
           ),
         );
 
@@ -627,7 +746,23 @@ class TerminalSession {
     }
   }
 
+  /// Reports the size of the surface rendering [terminal].
+  ///
+  /// Recording happens UNCONDITIONALLY, including while disconnected. That
+  /// is the half that was missing: the authoritative first size arrives
+  /// during layout, while the session is still `connecting`, and the old
+  /// body dropped it on the floor because there was no live session to push
+  /// it at. Nothing re-sent it afterwards — xterm only re-fires on a size
+  /// CHANGE — so the remote kept the size it was opened with until a
+  /// rotation or a keyboard toggle happened to move it.
+  ///
+  /// Pushing to the remote still requires a live connection; a resize is
+  /// not something that can be queued at a dead session.
   void onResize(int width, int height) {
+    _viewportColumns = width;
+    _viewportRows = height;
+    _releaseViewportWaiters();
+
     final session = _session;
     if (session != null && statusNotifier.value == ConnectionStatus.connected) {
       _sshService.resizeTerminal(session, columns: width, rows: height);
@@ -640,6 +775,11 @@ class TerminalSession {
     // that completes during this teardown must already see the session as
     // gone. Both write to a ValueNotifier this method is about to dispose.
     _disposed = true;
+    // A tab closed while its first connect was still waiting for a
+    // viewport must not leave that connect parked on a completer nothing
+    // will ever finish.
+    _viewportAttached = false;
+    _releaseViewportWaiters();
     _stopAgentTracking();
     await _stdoutSub?.cancel();
     await _stderrSub?.cancel();
@@ -736,9 +876,9 @@ class TerminalSession {
       }
     };
 
-    terminal.onResize = (w, h, pw, ph) {
-      onResize(w, h);
-    };
+    // `terminal.onResize` is NOT wired here. It is installed in the
+    // constructor so the first layout-driven resize — which lands while
+    // this connect is still in flight — is observed rather than lost.
   }
 
   void _handleDisconnect([

@@ -80,6 +80,17 @@ class TabsNotifier extends Notifier<TabsState> {
       profile: profile,
     );
 
+    // Adding a tab makes it the ACTIVE tab, which is precisely the promise
+    // that a HelmTerminalView is about to render this session. Announcing
+    // it here — before dialing — is what lets connect() wait for the real
+    // viewport instead of opening the remote PTY at xterm's 80x24 default.
+    //
+    // It has to be said HERE and not only in the view's initState: the
+    // state assignment below merely schedules a rebuild, so the view does
+    // not exist yet at the moment connect() is called. That gap is the
+    // whole reason the remote used to paint wider than the screen.
+    session.attachViewport();
+
     final newTabs = [...state.tabs, tab];
     state = state.copyWith(tabs: newTabs, activeIndex: newTabs.length - 1);
 
