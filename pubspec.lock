@@ -221,10 +221,10 @@ packages:
     dependency: "direct main"
     description:
       name: dartssh2
-      sha256: "3aef8eda75331dabf2b444728b7650b3f4f75c0768a6ad8ab2ec2d04d777dabf"
+      sha256: "1a21ef1e62f2ece3ee71de7ec106dc8faf67762b12ca2ab59b1cd08d5aa1f6ab"
       url: "https://pub.dev"
     source: hosted
-    version: "2.16.0"
+    version: "3.3.1"
   equatable:
     dependency: transitive
     description:

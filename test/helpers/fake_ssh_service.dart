@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 
@@ -41,6 +42,15 @@ class FakeSSHSocket implements SSHSocket {
     if (!_incoming.isClosed) _incoming.close();
     if (!_doneCompleter.isCompleted) _doneCompleter.complete();
   }
+
+  /// No-op: this fake writes through [_DiscardSink], so there is never any
+  /// buffered outgoing data for a flush to force out.
+  ///
+  /// [SSHSocket.flush] carries a default empty body, but [FakeSSHSocket]
+  /// `implements` the interface rather than extending it, so the member has
+  /// to be declared here.
+  @override
+  Future<void> flush() async {}
 
   /// Simulates the remote peer ending the connection cleanly (e.g. the SSH
   /// server closed the socket). Drives [SSHClient.done] to complete without
@@ -120,6 +130,16 @@ class FakeSSHService extends SSHService {
   final List<SSHClient> disconnectCalls = [];
   final List<ResizeCall> resizeCalls = [];
 
+  /// Host key authorizations this service was asked to record.
+  final List<HostKeyAuthorizationRequiredException> acceptedAuthorizations = [];
+
+  /// Method names in the order they were called, so a test can assert on
+  /// SEQUENCE rather than only on occurrence. Trusting a key has to happen
+  /// before the dial that depends on it, and only an ordered record can
+  /// tell a correct implementation from one that reconnects first and
+  /// trusts afterwards — both of which leave the same call counts behind.
+  final List<String> orderOfCalls = [];
+
   final List<Object> _queue = [];
 
   /// Enqueues a successful [SSHConnectionResult] for the next
@@ -140,6 +160,7 @@ class FakeSSHService extends SSHService {
     int columns = 80,
     int rows = 24,
   }) async {
+    orderOfCalls.add('connectAndOpenShell');
     connectCalls.add(
       ConnectAndOpenShellCall(
         profile: profile,
@@ -150,9 +171,7 @@ class FakeSSHService extends SSHService {
     );
 
     if (_queue.isEmpty) {
-      throw StateError(
-        'FakeSSHService: no connectAndOpenShell result queued',
-      );
+      throw StateError('FakeSSHService: no connectAndOpenShell result queued');
     }
 
     final next = _queue.removeAt(0);
@@ -161,7 +180,16 @@ class FakeSSHService extends SSHService {
   }
 
   @override
+  Future<void> acceptHostKeyAuthorization(
+    HostKeyAuthorizationRequiredException authorization,
+  ) async {
+    orderOfCalls.add('acceptAuthorization');
+    acceptedAuthorizations.add(authorization);
+  }
+
+  @override
   Future<void> disconnect(SSHClient client) async {
+    orderOfCalls.add('disconnect');
     disconnectCalls.add(client);
   }
 

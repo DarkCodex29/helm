@@ -14,7 +14,7 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   # SSH
-  dartssh2: ^2.16.0
+  dartssh2: ^3.3.1
 
   # Terminal emulation
   xterm: ^4.0.0

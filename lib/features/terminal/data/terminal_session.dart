@@ -18,6 +18,7 @@ import 'package:helm/core/host/probe/host_report.dart';
 import 'package:helm/core/host/session_reference.dart';
 import 'package:helm/core/host/ssh_host_command_runner.dart';
 import 'package:helm/core/utils/logger.dart';
+import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
@@ -567,6 +568,71 @@ class TerminalSession {
     const {},
   );
 
+  /// The one-time host key authorization this session is waiting on, or
+  /// null when there is none.
+  ///
+  /// Holds the sealed [HostKeyAuthorizationRequiredException] rather than
+  /// one concrete gate, because the two of them — a pin helm can no longer
+  /// read, and a key type it has never seen — differ only in what they
+  /// EXPLAIN. Both suspend the same connection, wait on the same yes or
+  /// no, and write nothing without one. Giving each its own notifier would
+  /// let two prompts be pending at once, a state no connection can
+  /// actually reach, and force this class to invent a precedence rule for
+  /// it.
+  ///
+  /// Published on the FAILURE path and only there, because the decision
+  /// cannot be taken where it arises. dartssh2 runs `onVerifyHostKey`
+  /// mid-handshake with the server already waiting on our NEWKEYS — its own
+  /// source calls out that a slow callback there reads as a hung key
+  /// exchange — so putting a fingerprint in front of a human from inside it
+  /// would spend OpenSSH's LoginGraceTime (120s by default) and fail the
+  /// connection anyway. The handshake therefore fails closed first, and the
+  /// question is asked here, over a connection that is already torn down.
+  ///
+  /// Deliberately NOT a [HostAdvisory]. Advisories are dismissible
+  /// display-only findings whose card documents that it "decides nothing";
+  /// this is an authorization gate whose answer is written to the trust
+  /// store. Routing it through that surface would give a security decision
+  /// a dismiss button.
+  ///
+  /// Never carries a [HostKeyMismatchException]. A mismatch is an alarm, not
+  /// a prompt, and must not reach a surface with a one-tap trust action.
+  final ValueNotifier<HostKeyAuthorizationRequiredException?>
+  hostKeyAuthorizationNotifier = ValueNotifier(null);
+
+  /// Trusts the pending host key and dials again. No-op when nothing is
+  /// pending.
+  ///
+  /// Call only from a surface that has shown the user the fingerprint and
+  /// taken an explicit acceptance.
+  ///
+  /// The trust is recorded BEFORE the dial: reconnecting first would fail
+  /// on the very pin this replaces, spending the attempt to prove what is
+  /// already known. The prompt is cleared in the same step, so a
+  /// double-tap cannot re-answer a question that has been answered.
+  Future<void> trustHostKeyAndReconnect() async {
+    final pending = hostKeyAuthorizationNotifier.value;
+    if (pending == null) return;
+
+    hostKeyAuthorizationNotifier.value = null;
+    await _sshService.acceptHostKeyAuthorization(pending);
+    _log.i(
+      'Host key for ${pending.host}:${pending.port} (${pending.keyType}) '
+      'authorized by the user',
+    );
+    await reconnect();
+  }
+
+  /// Records that the user declined the pending authorization.
+  ///
+  /// Writes nothing to the trust store, so the same question is raised
+  /// again on the next attempt. Declining is not remembered on purpose: a
+  /// host key Helm cannot vouch for does not become trustworthy by being
+  /// ignored, and persisting the refusal would only hide it.
+  void declineHostKeyAuthorization() {
+    hostKeyAuthorizationNotifier.value = null;
+  }
+
   /// Records that the user dismissed [advisory], for as long as this
   /// session lives. Idempotent.
   ///
@@ -685,6 +751,10 @@ class TerminalSession {
     // re-verified. Clearing them here means the surface never shows a
     // stale explanation next to a fresh failure.
     advisoriesNotifier.value = const [];
+    // Same reasoning, and it matters more here: an authorization prompt
+    // left over from an earlier attempt would offer a trust button beside
+    // whatever this attempt turns out to fail on.
+    hostKeyAuthorizationNotifier.value = null;
     _log.i('Connecting session for ${profile.name}');
 
     // Resolved ONCE, before anything is opened, and reused for every PTY
@@ -818,6 +888,12 @@ class TerminalSession {
       terminal.write(
         '\r\n[Helm] Connection failed: ${SSHService.describeError(e)}\r\n',
       );
+      // Also raised as an interactive prompt, because the terminal copy
+      // alone cannot be acted on: it is text in a view the multiplexer
+      // clears on attach, and the fingerprint in it cannot be copied.
+      if (e is HostKeyAuthorizationRequiredException) {
+        hostKeyAuthorizationNotifier.value = e;
+      }
       _publishAdvisories();
       rethrow;
     }
@@ -922,6 +998,7 @@ class TerminalSession {
     statusNotifier.dispose();
     advisoriesNotifier.dispose();
     dismissedAdvisoriesNotifier.dispose();
+    hostKeyAuthorizationNotifier.dispose();
     agentsNotifier.dispose();
     sessionVitalityNotifier.dispose();
   }
@@ -1258,8 +1335,9 @@ class TerminalSession {
     if (snapshot is! AgentsKnown || snapshot.agents.isEmpty) return null;
 
     final watched = snapshot.agents.reduce((a, b) {
-      final byUrgency =
-          agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state));
+      final byUrgency = agentStateUrgency(
+        b.state,
+      ).compareTo(agentStateUrgency(a.state));
       if (byUrgency != 0) return byUrgency > 0 ? b : a;
       return b.target.compareTo(a.target) < 0 ? b : a;
     });
@@ -1267,9 +1345,7 @@ class TerminalSession {
     return (
       api: support.agents,
       target: watched.target,
-      until: AgentState.values
-          .where((state) => state != watched.state)
-          .toSet(),
+      until: AgentState.values.where((state) => state != watched.state).toSet(),
     );
   }
 

@@ -87,6 +87,27 @@ class TerminalSemantics {
   /// probe or the host diagnostics actually found something, so its
   /// absence on a healthy host is itself the correct assertion.
   static const hostAdvisory = 'helm.terminal.host_advisory';
+
+  /// The one-time host key re-authorization prompt, shown in place of the
+  /// reconnect block when a host was pinned before Helm changed how it
+  /// computes fingerprints.
+  ///
+  /// Its absence is the assertion an upgrade flow wants on a host that was
+  /// never pinned by an older build. Its presence must never be asserted
+  /// interchangeably with [connectionStatusOverlay]'s reconnect
+  /// affordance: they are mutually exclusive, because reconnecting without
+  /// answering this would fail on the very pin it exists to replace.
+  static const hostKeyMigration = 'helm.terminal.host_key_migration';
+
+  /// The prompt asking the user to authorize a key algorithm this host has
+  /// never presented, shown in place of the reconnect block.
+  ///
+  /// Distinct from [hostKeyMigration] rather than reusing it, because the
+  /// two gates are told apart by exactly one thing — what they say — and a
+  /// shared identifier would let a test assert "the user was asked" while
+  /// the wrong explanation was on screen.
+  static const hostKeyTypeAuthorization =
+      'helm.terminal.host_key_type_authorization';
 }
 
 /// Identifiers on `SettingsScreen`.

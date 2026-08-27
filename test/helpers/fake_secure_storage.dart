@@ -41,6 +41,19 @@ class FakeSecureStorage extends FlutterSecureStorage {
     WindowsOptions? wOptions,
   }) async => values[key];
 
+  /// Returns a COPY, matching the real plugin: `readAll` marshals a fresh
+  /// map across the platform channel, so no caller can reach the backing
+  /// store by mutating what it was handed.
+  @override
+  Future<Map<String, String>> readAll({
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async => {...values};
+
   @override
   Future<bool> containsKey({
     required String key,

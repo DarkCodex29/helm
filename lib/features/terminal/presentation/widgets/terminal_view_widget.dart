@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
+import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/domain/advisory_surface_bounds.dart';
 import 'package:helm/features/terminal/presentation/widgets/host_advisory_card.dart';
+import 'package:helm/features/terminal/presentation/widgets/host_key_migration_card.dart';
+import 'package:helm/features/terminal/presentation/widgets/host_key_type_card.dart';
 import 'package:xterm/xterm.dart';
 
 class HelmTerminalView extends StatefulWidget {
@@ -193,148 +196,216 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
 
             final isConnecting = status == ConnectionStatus.connecting;
 
-            return Positioned.fill(
-              // `explicitChildNodes` keeps the reconnect button a node of
-              // its own instead of being folded into this overlay node,
-              // so both identifiers stay addressable at the same time.
-              child: Semantics(
-                identifier: TerminalSemantics.connectionStatusOverlay,
-                container: true,
-                explicitChildNodes: true,
-                child: GestureDetector(
-                  onTap: isConnecting ? null : () => widget.session.reconnect(),
-                  child: Container(
-                    decoration: const BoxDecoration(color: Color(0xCC0D1117)),
-                    // The overlay fills the terminal area, and that area
-                    // is not always tall enough for this column: the
-                    // on-screen keyboard, a small device, or landscape can
-                    // all leave it well under the ~200px the disconnected
-                    // layout wants. Overflow paints yellow-and-black
-                    // stripes over the message explaining the failure,
-                    // which is the opposite of degrading quietly.
-                    //
-                    // A scroll view rather than a clip because the message
-                    // must stay READABLE when it does not fit, not merely
-                    // stop complaining. `shrinkWrap`-like behaviour is
-                    // implicit: with room to spare the Center still
-                    // centers the intrinsic-height column, so the layout
-                    // is byte-for-byte unchanged in the common case.
-                    //
-                    // A SingleChildScrollView claims the drag gesture, not
-                    // the tap, so the tap-to-reconnect GestureDetector
-                    // wrapping this still fires — pinned by a test.
-                    child: SingleChildScrollView(
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isConnecting) ...[
-                              const SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Color(0xFF58A6FF),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'Connecting…',
-                                style: TextStyle(
-                                  color: Color(0xFF58A6FF),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ] else ...[
-                              Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  color: const Color(0xFF21262D),
-                                  border: Border.all(
-                                    color: const Color(
-                                      0xFFF85149,
-                                    ).withValues(alpha: 0.4),
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.wifi_off,
-                                  color: Color(0xFFF85149),
-                                  size: 32,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'Connection lost',
-                                style: TextStyle(
-                                  color: Color(0xFFE6EDF3),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'Tap to reconnect',
-                                style: TextStyle(
-                                  color: Color(0xFF8B949E),
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 24),
-                              // `container` is required here. Without it the
-                              // identifier is absorbed by the overlay's own
-                              // tappable node, which also swallows the two
-                              // status Texts, leaving the real button as an
-                              // unnamed sibling.
-                              Semantics(
-                                identifier: TerminalSemantics.reconnectButton,
-                                container: true,
-                                child: ElevatedButton.icon(
-                                  onPressed: () => widget.session.reconnect(),
-                                  icon: const Icon(Icons.refresh, size: 16),
-                                  label: const Text('Reconnect'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF58A6FF),
-                                    foregroundColor: const Color(0xFF0D1117),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 10,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
+            return ValueListenableBuilder<
+              HostKeyAuthorizationRequiredException?
+            >(
+              valueListenable: widget.session.hostKeyAuthorizationNotifier,
+              builder: (context, authorization, _) {
+                // A host key waiting to be authorized takes this overlay
+                // over completely — see the `authorization != null` branch
+                // below for why it replaces the reconnect block rather than
+                // sitting beside it.
+                final awaitingTrustDecision = authorization != null;
+
+                return Positioned.fill(
+                  // `explicitChildNodes` keeps the reconnect button a node of
+                  // its own instead of being folded into this overlay node,
+                  // so both identifiers stay addressable at the same time.
+                  child: Semantics(
+                    identifier: TerminalSemantics.connectionStatusOverlay,
+                    container: true,
+                    explicitChildNodes: true,
+                    child: GestureDetector(
+                      // Tap-to-reconnect is suppressed while a trust decision
+                      // is open. It would dial straight back into the same
+                      // refusal, and — worse — would let an accidental touch
+                      // stand in for an answer to a security question.
+                      onTap: isConnecting || awaitingTrustDecision
+                          ? null
+                          : () => widget.session.reconnect(),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Color(0xCC0D1117),
+                        ),
+                        // The overlay fills the terminal area, and that area
+                        // is not always tall enough for this column: the
+                        // on-screen keyboard, a small device, or landscape can
+                        // all leave it well under the ~200px the disconnected
+                        // layout wants. Overflow paints yellow-and-black
+                        // stripes over the message explaining the failure,
+                        // which is the opposite of degrading quietly.
+                        //
+                        // A scroll view rather than a clip because the message
+                        // must stay READABLE when it does not fit, not merely
+                        // stop complaining. `shrinkWrap`-like behaviour is
+                        // implicit: with room to spare the Center still
+                        // centers the intrinsic-height column, so the layout
+                        // is byte-for-byte unchanged in the common case.
+                        //
+                        // A SingleChildScrollView claims the drag gesture, not
+                        // the tap, so the tap-to-reconnect GestureDetector
+                        // wrapping this still fires — pinned by a test.
+                        child: SingleChildScrollView(
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isConnecting) ...[
+                                  const SizedBox(
+                                    width: 36,
+                                    height: 36,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF58A6FF),
                                     ),
                                   ),
-                                ),
-                              ),
-                              // What the host probe and diagnostics found,
-                              // rendered here rather than on a surface of
-                              // its own: these findings exist to explain
-                              // the failure the user is already looking at.
-                              // Absent entirely when there is nothing to
-                              // report, which is the healthy case.
-                              Padding(
-                                padding: const EdgeInsets.only(top: 24),
-                                // Bounded by the same rule as the
-                                // connected surface. This one already sits
-                                // in a scroll view, so it cannot clip —
-                                // but an uncapped card here would push the
-                                // reconnect button off the top of a short
-                                // terminal, which is the same failure
-                                // wearing a different hat.
-                                child: _advisorySurface(
-                                  maxHeight: advisorySurfaceMaxHeight(areaHeight),
-                                ),
-                              ),
-                            ],
-                          ],
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Connecting…',
+                                    style: TextStyle(
+                                      color: Color(0xFF58A6FF),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ] else if (authorization != null) ...[
+                                  // Shown INSTEAD of the reconnect block, not
+                                  // above it. Reconnecting without answering
+                                  // fails on the very check this prompt exists
+                                  // to settle, so offering both would put a
+                                  // button next to the question that quietly
+                                  // ignores it.
+                                  //
+                                  // The switch is over a sealed hierarchy, so
+                                  // a gate added later cannot reach this
+                                  // overlay without being given copy of its
+                                  // own — the compiler refuses to let it
+                                  // inherit someone else's explanation.
+                                  switch (authorization) {
+                                    HostKeyMigrationRequiredException() =>
+                                      HostKeyMigrationCard(
+                                        migration: authorization,
+                                        username:
+                                            widget.session.profile.username,
+                                        onTrust: () => widget.session
+                                            .trustHostKeyAndReconnect(),
+                                        onCancel: widget
+                                            .session
+                                            .declineHostKeyAuthorization,
+                                      ),
+                                    HostKeyTypeAuthorizationRequiredException() =>
+                                      HostKeyTypeCard(
+                                        authorization: authorization,
+                                        username:
+                                            widget.session.profile.username,
+                                        onTrust: () => widget.session
+                                            .trustHostKeyAndReconnect(),
+                                        onCancel: widget
+                                            .session
+                                            .declineHostKeyAuthorization,
+                                      ),
+                                  },
+                                ] else ...[
+                                  Container(
+                                    width: 64,
+                                    height: 64,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      color: const Color(0xFF21262D),
+                                      border: Border.all(
+                                        color: const Color(
+                                          0xFFF85149,
+                                        ).withValues(alpha: 0.4),
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.wifi_off,
+                                      color: Color(0xFFF85149),
+                                      size: 32,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Connection lost',
+                                    style: TextStyle(
+                                      color: Color(0xFFE6EDF3),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Tap to reconnect',
+                                    style: TextStyle(
+                                      color: Color(0xFF8B949E),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  // `container` is required here. Without it the
+                                  // identifier is absorbed by the overlay's own
+                                  // tappable node, which also swallows the two
+                                  // status Texts, leaving the real button as an
+                                  // unnamed sibling.
+                                  Semantics(
+                                    identifier:
+                                        TerminalSemantics.reconnectButton,
+                                    container: true,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () =>
+                                          widget.session.reconnect(),
+                                      icon: const Icon(Icons.refresh, size: 16),
+                                      label: const Text('Reconnect'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFF58A6FF,
+                                        ),
+                                        foregroundColor: const Color(
+                                          0xFF0D1117,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 10,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  // What the host probe and diagnostics found,
+                                  // rendered here rather than on a surface of
+                                  // its own: these findings exist to explain
+                                  // the failure the user is already looking at.
+                                  // Absent entirely when there is nothing to
+                                  // report, which is the healthy case.
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 24),
+                                    // Bounded by the same rule as the
+                                    // connected surface. This one already sits
+                                    // in a scroll view, so it cannot clip —
+                                    // but an uncapped card here would push the
+                                    // reconnect button off the top of a short
+                                    // terminal, which is the same failure
+                                    // wearing a different hat.
+                                    child: _advisorySurface(
+                                      maxHeight: advisorySurfaceMaxHeight(
+                                        areaHeight,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           },
         ),

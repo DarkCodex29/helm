@@ -48,38 +48,89 @@ class SSHService {
     );
 
     // Set by the verification callback below when the presented host key
-    // contradicts the pinned one, then rethrown once the handshake fails.
-    HostKeyMismatchException? mismatch;
+    // cannot be accepted, then rethrown once the handshake fails.
+    //
+    // Held as a local rather than reported from inside the callback because
+    // the callback CANNOT WAIT FOR A USER. dartssh2 runs it mid-handshake,
+    // with the server already waiting on our NEWKEYS — its own source
+    // comments the gap ("a slow callback here has already been mistaken for
+    // a hung key exchange", ssh_transport.dart:1779). Parking that on a
+    // human reading a fingerprint would burn OpenSSH's LoginGraceTime, 120
+    // seconds by default, and fail the connection anyway. So every verdict
+    // that is not already trusted fails the handshake closed here, and the
+    // decision is put to the user afterwards, on a torn-down connection.
+    Object? rejection;
 
     final client = SSHClient(
       socket,
       username: profile.username,
       identities: identities,
       keepAliveInterval: const Duration(seconds: 30),
-      // dartssh2 2.16.0 signature is (String type, Uint8List fingerprint):
+      // dartssh2 >= 3.x signature is (String type, Uint8List fingerprint):
       // `type` is the host key algorithm ("ssh-ed25519"), NOT the hostname,
-      // and `fingerprint` is already an MD5 digest of the host key rather than
-      // the raw key bytes. The hostname therefore has to come from the profile
-      // closure, and the digest is what we pin.
-      onVerifyHostKey: (hostKeyType, hostKeyDigest) async {
+      // and `fingerprint` is the UTF-8 of the OpenSSH `SHA256:<base64>`
+      // string — the same text `ssh-keygen -lf` prints, built by
+      // `_hostkeyFingerprint` (ssh_transport.dart:47) and passed at :1771.
+      // The hostname therefore has to come from the profile closure.
+      //
+      // This argument's MEANING changed between 2.16.0 and 3.x while its
+      // type did not: 2.16.0 passed a raw MD5 digest. That is why the
+      // fingerprint is decoded and shape-checked rather than trusted, and
+      // why the storage key is versioned — see KnownHostsService.
+      onVerifyHostKey: (hostKeyType, hostKeyFingerprint) async {
         try {
           final verification = await _knownHostsService.verifyHostKey(
             host: profile.host,
             port: profile.port,
-            hostKeyBytes: hostKeyDigest,
+            keyType: hostKeyType,
+            fingerprintBytes: hostKeyFingerprint,
           );
 
-          if (verification.verdict == HostKeyVerdict.mismatch) {
-            mismatch = HostKeyMismatchException(
-              host: profile.host,
-              port: profile.port,
-              expectedFingerprint: verification.storedFingerprint!,
-              receivedFingerprint: verification.receivedFingerprint,
-            );
-            return false;
-          }
+          switch (verification.verdict) {
+            case HostKeyVerdict.firstSeen:
+            case HostKeyVerdict.match:
+              return true;
 
-          return true;
+            case HostKeyVerdict.mismatch:
+              rejection = HostKeyMismatchException(
+                host: profile.host,
+                port: profile.port,
+                keyType: verification.keyType,
+                expectedFingerprint: verification.storedFingerprint!,
+                receivedFingerprint: verification.receivedFingerprint,
+              );
+              return false;
+
+            case HostKeyVerdict.unverifiablePin:
+              // Distinct from the mismatch above all the way to the
+              // surface. Helm cannot verify the old pin, so continuing
+              // would be an unauthenticated trust decision — but nothing
+              // here suggests the key changed, and dressing it up as an
+              // interception would spend the alarm on a false positive.
+              rejection = HostKeyMigrationRequiredException(
+                host: profile.host,
+                port: profile.port,
+                keyType: verification.keyType,
+                receivedFingerprint: verification.receivedFingerprint,
+                legacyFingerprint: verification.storedFingerprint!,
+              );
+              return false;
+
+            case HostKeyVerdict.unpinnedKeyType:
+              // The downgrade guard. Returning true here — which is what
+              // an absent per-key-type entry used to mean — would let an
+              // attacker who controls algorithm negotiation pick a type
+              // this host has never offered and have their key pinned
+              // without a word. See HostKeyVerdict.unpinnedKeyType.
+              rejection = HostKeyTypeAuthorizationRequiredException(
+                host: profile.host,
+                port: profile.port,
+                keyType: verification.keyType,
+                receivedFingerprint: verification.receivedFingerprint,
+                knownKeyTypes: verification.knownKeyTypes,
+              );
+              return false;
+          }
         } catch (e, stackTrace) {
           // Never complete this callback with an error: dartssh2 forwards the
           // failure into closeWithError(SSHError), so a non-SSHError object
@@ -105,21 +156,65 @@ class SSHService {
       _log.i('Shell opened for ${profile.name}');
       return SSHConnectionResult(client: client, session: session);
     } catch (_) {
-      client.close();
+      // Awaited since dartssh2 3.0.0: `close()` returns a Future that
+      // completes once socket and channel teardown finish. Dropping it left
+      // the transport tearing down while the caller was already handling the
+      // failure.
+      await client.close();
 
-      // A rejected host key surfaces as a generic auth-abort error, so replace
-      // it with the mismatch detail the callback captured.
-      final detected = mismatch;
+      // A rejected host key surfaces as a generic auth-abort error, so
+      // replace it with whichever verdict the callback captured.
+      final detected = rejection;
       if (detected != null) throw detected;
       rethrow;
     }
+  }
+
+  /// Records the user's decision to trust the key described by
+  /// [authorization].
+  ///
+  /// Exposed here, rather than by handing callers the [KnownHostsService],
+  /// because this class already owns the trust store and is what every
+  /// caller already depends on. Widening the surface by one method beats
+  /// threading a second service through [TerminalSession] and every fake
+  /// of it.
+  ///
+  /// Call ONLY after the user has been shown
+  /// [HostKeyAuthorizationRequiredException.receivedFingerprint] and has
+  /// explicitly accepted it. Nothing about the exception existing
+  /// authorizes this.
+  ///
+  /// The switch is over a sealed hierarchy, so the two gates cannot be
+  /// serviced by the same write. They differ in what they touch BESIDES
+  /// the new pin: a migration deletes the superseded entry it replaces,
+  /// while a new key type must leave every existing pin standing. Routing
+  /// both through one of those would either strand a legacy record or
+  /// discard trust the user never withdrew.
+  Future<void> acceptHostKeyAuthorization(
+    HostKeyAuthorizationRequiredException authorization,
+  ) {
+    return switch (authorization) {
+      HostKeyMigrationRequiredException() => _knownHostsService.acceptMigration(
+        host: authorization.host,
+        port: authorization.port,
+        keyType: authorization.keyType,
+        fingerprint: authorization.receivedFingerprint,
+      ),
+      HostKeyTypeAuthorizationRequiredException() => _knownHostsService
+          .acceptNewKeyType(
+            host: authorization.host,
+            port: authorization.port,
+            keyType: authorization.keyType,
+            fingerprint: authorization.receivedFingerprint,
+          ),
+    };
   }
 
   /// Gracefully disconnects the SSH client.
   Future<void> disconnect(SSHClient client) async {
     if (!client.isClosed) {
       _log.i('Disconnecting SSH client');
-      client.close();
+      await client.close();
       await client.done.catchError((_) {}); // ignore close errors
     }
   }
@@ -189,21 +284,74 @@ class SSHService {
   /// straight into the xterm view, where a bare LF would stagger the text.
   static String describeError(Object error) {
     if (error is HostKeyMismatchException) {
+      final command = hostKeyVerificationCommand(error.keyType);
       return 'Host key verification failed for ${error.host}:${error.port}.\r\n'
-          'The server presented a different SSH host key than the one Helm '
-          'pinned on the first connection. This may be a man-in-the-middle '
+          'The server presented a different ${error.keyType} host key than '
+          'the one Helm pinned for it. This may be a man-in-the-middle '
           'attack: someone on the network could be impersonating the server, '
           'and continuing would expose this session.\r\n'
           'Expected: ${error.expectedFingerprint}\r\n'
           'Received: ${error.receivedFingerprint}\r\n'
-          'These two values are only meaningful against each other: they are '
-          "Helm's own digest of the host key, not the fingerprint OpenSSH "
-          'publishes, and they will not match what ssh-keygen prints on the '
-          'server.\r\n'
-          'If the server was legitimately rebuilt or re-keyed, confirm that '
-          'through a channel you already trust — not by comparing the values '
-          'above — then forget the pinned key for this host and reconnect to '
-          'trust it again.';
+          // These are now OpenSSH fingerprints, so this paragraph is the
+          // opposite of what it said before. While Helm double-hashed
+          // dartssh2's digest, the displayed values could not equal what
+          // ssh-keygen prints and the copy correctly warned against
+          // comparing them. That is fixed: the strings above are byte for
+          // byte what `ssh-keygen -lf` emits, and pointing the user at the
+          // one check that settles this is now honest.
+          '${command == null ? '' : 'On the server, through a channel you '
+                    'already trust, run:\r\n'
+                    '  $command\r\n'
+                    'and compare its output with "Received" above.\r\n'}'
+          'If the server was legitimately rebuilt or re-keyed, confirm the '
+          'new value that way first, then forget the pinned key for this '
+          'host and reconnect to trust it again.';
+    }
+    if (error is HostKeyMigrationRequiredException) {
+      final command = hostKeyVerificationCommand(error.keyType);
+      // Deliberately shares no sentence with the mismatch copy above. This
+      // is not an interception and must not read like one — see
+      // HostKeyVerdict.unverifiablePin.
+      return 'Helm needs you to confirm the host key for '
+          '${error.host}:${error.port} once.\r\n'
+          'This update changed how Helm computes host key fingerprints, so '
+          'the value stored for this server can no longer be compared. This '
+          'is not necessarily a sign that the key changed — every server '
+          'Helm already trusted needs confirming once.\r\n'
+          '${error.keyType} fingerprint: ${error.receivedFingerprint}\r\n'
+          '${command == null ? '' : 'To check it, run this on the server '
+                    'through a channel you already trust:\r\n'
+                    '  $command\r\n'}'
+          'The previously stored value is not shown: it used an older format '
+          'and cannot be compared with anything the server reports, so '
+          'putting it beside the value above would only invite a comparison '
+          'that means nothing.\r\n'
+          'Confirm the fingerprint before trusting it. If it does not match, '
+          'do not continue.';
+    }
+    if (error is HostKeyTypeAuthorizationRequiredException) {
+      final command = hostKeyVerificationCommand(error.keyType);
+      // Shares no sentence with either paragraph above. This is not an
+      // interception, and it is not the fingerprint-format migration —
+      // borrowing that copy would send the user hunting for a stored value
+      // that was never the problem. See HostKeyVerdict.unpinnedKeyType.
+      return 'Helm needs you to confirm a new host key type for '
+          '${error.host}:${error.port}.\r\n'
+          'This server was already trusted for '
+          '${error.knownKeyTypes.join(', ')}, and has now presented a '
+          '${error.keyType} key, which Helm has never seen for it. That is '
+          'often legitimate — a re-keyed server, or an administrator adding '
+          'a newer algorithm alongside an older one. It can also be someone '
+          'on the network offering an algorithm your server does not use, '
+          'so that their key looks new rather than wrong.\r\n'
+          '${error.keyType} fingerprint: ${error.receivedFingerprint}\r\n'
+          '${command == null ? '' : 'To check it, run this on the server '
+                    'through a channel you already trust:\r\n'
+                    '  $command\r\n'}'
+          'The keys already trusted for this server are left alone either '
+          'way: confirming adds this type, it does not replace them.\r\n'
+          'Confirm the fingerprint before trusting it. If it does not match, '
+          'do not continue.';
     }
     if (error is SSHAuthError) return 'Authentication failed';
     if (error is SSHChannelRequestError &&
