@@ -95,6 +95,12 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   @override
   PaneAwareMultiplexer? get panes => null;
 
+  /// Null by default, for the same reason [panes] is: a consumer that
+  /// reads the workspace tree must say so by using
+  /// [FakeWorkspaceAwareAdapter] instead.
+  @override
+  WorkspaceAwareMultiplexer? get workspaces => null;
+
   @override
   Future<MuxAgentsResult> listAgents() async {
     listAgentsCalls++;
@@ -178,6 +184,9 @@ class FakeAgentlessAdapter implements MultiplexerAdapter {
 
   @override
   PaneAwareMultiplexer? get panes => null;
+
+  @override
+  WorkspaceAwareMultiplexer? get workspaces => null;
 
   @override
   Future<MuxDetection> detect() async =>
@@ -266,5 +275,118 @@ class FakePaneAwareAdapter extends FakeAgentAdapter
       );
     }
     return result;
+  }
+}
+
+/// Scripted [MultiplexerAdapter] that advertises the WORKSPACE TREE — the
+/// third capability `HerdrAdapter` genuinely has, and the only one that
+/// answers "which client, which project".
+///
+/// Extends [FakeAgentAdapter] rather than standing alone because herdr
+/// advertises both, and a consumer that reads the tree may legitimately
+/// read agents in the same breath.
+class FakeWorkspaceAwareAdapter extends FakeAgentAdapter
+    implements WorkspaceAwareMultiplexer {
+  /// How many times [listWorkspaceTree] has been entered. The channel
+  /// budget is asserted on this, so it counts ENTRIES, not completions.
+  int listTreeCalls = 0;
+
+  /// Every [focusTab] target, in invocation order.
+  final List<String> focusedTabs = [];
+
+  MuxWorkspaceTreeResult? _treeResult;
+  Object? _treeError;
+  Completer<void>? _treeGate;
+
+  MuxTabFocusResult _tabFocusResult = const MuxTabFocused();
+  Completer<void>? _tabFocusGate;
+
+  /// Next [listWorkspaceTree] answers with [result].
+  void whenTree(MuxWorkspaceTreeResult result) {
+    _resetTree();
+    _treeResult = result;
+  }
+
+  /// Next [listWorkspaceTree] throws [error].
+  void whenTreeThrows(Object error) {
+    _resetTree();
+    _treeError = error;
+  }
+
+  /// Next [listWorkspaceTree] never completes until [releaseTree] is
+  /// called, so a consumer's own `.timeout(...)` has to fire rather than
+  /// this fake pre-emptively throwing a [TimeoutException] the consumer
+  /// never raised.
+  void whenTreeHangs() {
+    _resetTree();
+    _treeGate = Completer<void>();
+  }
+
+  void releaseTree() {
+    final gate = _treeGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  void _resetTree() {
+    _treeResult = null;
+    _treeError = null;
+    _treeGate = null;
+  }
+
+  /// Next [focusTab] answers with [result].
+  void whenTabFocus(MuxTabFocusResult result) {
+    _tabFocusGate = null;
+    _tabFocusResult = result;
+  }
+
+  /// Next [focusTab] never completes until [releaseTabFocus] is called.
+  void whenTabFocusHangs() {
+    _tabFocusGate = Completer<void>();
+  }
+
+  void releaseTabFocus() {
+    final gate = _tabFocusGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  @override
+  Set<MuxCapability> get capabilities => const {
+    MuxCapability.agentState,
+    MuxCapability.workspaceTree,
+  };
+
+  @override
+  WorkspaceAwareMultiplexer? get workspaces => this;
+
+  @override
+  Future<MuxWorkspaceTreeResult> listWorkspaceTree() async {
+    listTreeCalls++;
+    final gate = _treeGate;
+    if (gate != null) {
+      await gate.future;
+      return const MuxWorkspaceTreeAvailable(workspaces: [], tabs: []);
+    }
+    final error = _treeError;
+    if (error != null) throw error;
+    final result = _treeResult;
+    if (result == null) {
+      throw StateError(
+        'FakeWorkspaceAwareAdapter: listWorkspaceTree() called with nothing '
+        'scripted',
+      );
+    }
+    return result;
+  }
+
+  /// Records the target, then answers with whatever [whenTabFocus]
+  /// scripted. Defaults to [MuxTabFocused] for the same reason
+  /// [focusAgent] does: focus is user-initiated, and the interesting
+  /// assertion is which target was asked for.
+  @override
+  Future<MuxTabFocusResult> focusTab(String tabId) async {
+    focusedTabs.add(tabId);
+    final gate = _tabFocusGate;
+    if (gate != null) await gate.future;
+    return _tabFocusResult;
   }
 }

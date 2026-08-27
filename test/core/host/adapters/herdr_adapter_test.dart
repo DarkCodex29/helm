@@ -508,11 +508,16 @@ void main() {
       'advertises agentWait now that waitForAgent really blocks on '
       'herdr agent wait',
       () {
+        // Asserted as an EXACT set, not with `contains`, so a capability
+        // gained or lost is a decision someone has to make here rather
+        // than a silent drift. workspaceTree joined it when the drawer
+        // learned to read herdr's workspaces and tabs.
         expect(adapter.capabilities, {
           MuxCapability.agentState,
           MuxCapability.agentWait,
           MuxCapability.structuredOutput,
           MuxCapability.paneListing,
+          MuxCapability.workspaceTree,
         });
       },
     );

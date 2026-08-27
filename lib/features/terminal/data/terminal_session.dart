@@ -265,6 +265,29 @@ const kPaneListTimeout = Duration(seconds: 8);
 /// guard is released by the QUERY settling, never by the caller giving up.
 const kAgentFocusTimeout = Duration(seconds: 8);
 
+/// Ceiling on the workspace-tree query before the tree is reported unknown.
+///
+/// Same value and same reasoning as [kAgentListTimeout], with the rate of
+/// [kAgentFocusTimeout]: `listWorkspaceTree` takes no timeout parameter,
+/// and this query is issued when a THUMB opens the drawer, not on helm's
+/// own schedule. Reopening a drawer against a wedged host is as natural as
+/// re-tapping a row, so [TerminalSession.refreshWorkspaceTree] releases its
+/// guard on the QUERY settling rather than on this deadline firing — which
+/// is what keeps the abandoned-channel count at one per session instead of
+/// one per open.
+///
+/// It bounds TWO remote commands, not one: `workspace list` then `tab list`
+/// (see `HerdrAdapter.listWorkspaceTree`). They run in sequence on a single
+/// awaited future, so the ceiling covers the pair and the channel budget is
+/// unchanged — at no point are both open at once.
+const kWorkspaceTreeTimeout = Duration(seconds: 8);
+
+/// Ceiling on a single tab focus before it is reported as failed.
+///
+/// Same value and same reasoning as [kAgentFocusTimeout], which is the
+/// timeout for the same gesture aimed at a different target.
+const kTabFocusTimeout = Duration(seconds: 8);
+
 /// Ceiling on how long [TerminalSession.connect] waits for an attached view
 /// to report its first real size.
 ///
@@ -589,6 +612,15 @@ class TerminalSession {
   /// Guards against overlapping focus requests. Released by the request's
   /// own completion, never by a timeout — see [focusAgent].
   bool _focusRequestInFlight = false;
+
+  /// Guards against overlapping workspace-tree queries. Released by the
+  /// query's own completion, never by a timeout — see
+  /// [refreshWorkspaceTree].
+  bool _workspaceTreeQueryInFlight = false;
+
+  /// Guards against overlapping tab-focus requests. Released by the
+  /// request's own completion, never by a timeout — see [focusTab].
+  bool _tabFocusInFlight = false;
 
   /// Pending re-entry into [_trackAgents] when tracking could not be
   /// event-driven this cycle. Non-null only while a retry is genuinely
@@ -1360,6 +1392,112 @@ class TerminalSession {
     } catch (e) {
       _log.w('Agent focus failed for ${profile.name} ($target): $e');
       return const MuxAgentFocusFailed(null);
+    }
+  }
+
+  /// Asks the host once for its workspace tree — the user's clients and the
+  /// projects inside them.
+  ///
+  /// Returned rather than published on a notifier, unlike [agentsNotifier].
+  /// Agent state is a LIVE fact worth tracking while nobody asked; the tree
+  /// is structure the user edits by hand in herdr, and it is read at the
+  /// one instant somebody opens the drawer to look at it. A notifier would
+  /// buy a cadence nothing needs and would have to be kept honest across
+  /// disconnects for a value no widget renders in between.
+  ///
+  /// Never throws and never rejects. Every failure — a torn-down session, a
+  /// dropped connection, a multiplexer with no workspaces, a wedged host,
+  /// or the [StateError] `listWorkspaceTree` raises for an unrecognized
+  /// herdr error envelope — becomes a variant the caller must switch over.
+  /// It NEVER degrades to [MuxWorkspaceTreeAvailable], which is the only
+  /// variant a caller may draw a tree from.
+  ///
+  /// [MuxWorkspaceTreeUnsupported] is reached ONLY past the connected
+  /// check, and that ordering matters: before [connect] resolves a
+  /// multiplexer, `_muxAdapter` is still the unconnected tmux fallback, and
+  /// naming it here would be a fabricated claim about a multiplexer this
+  /// session never selected — the trap [connect]'s own agent-tracking guard
+  /// is written about.
+  Future<MuxWorkspaceTreeResult> refreshWorkspaceTree() async {
+    if (_disposed) return const MuxWorkspaceTreeUnreachable();
+    if (statusNotifier.value != ConnectionStatus.connected) {
+      return const MuxWorkspaceTreeUnreachable();
+    }
+    if (_workspaceTreeQueryInFlight) {
+      return const MuxWorkspaceTreeUnreachable();
+    }
+
+    final treeApi = _muxAdapter.workspaces;
+    if (treeApi == null) return MuxWorkspaceTreeUnsupported(_muxAdapter.id);
+
+    _workspaceTreeQueryInFlight = true;
+    final query = treeApi.listWorkspaceTree();
+    // Released when the QUERY settles, not when this call stops waiting —
+    // the discipline [kAgentListTimeout] documents. `.timeout` abandons the
+    // Future without closing the remote channel, so releasing on
+    // abandonment would let the next drawer-open stack a second channel on
+    // top of one nobody closed.
+    //
+    // The error is swallowed here and handled on the awaited branch below:
+    // both observe the same Future, and an unobserved rejection on this one
+    // would surface as an unhandled async error.
+    unawaited(
+      query
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() => _workspaceTreeQueryInFlight = false),
+    );
+
+    try {
+      final result = await query.timeout(kWorkspaceTreeTimeout);
+      // The session can be torn down or dropped during the round-trip.
+      // Handing back a tree then would describe a host this session is no
+      // longer attached to.
+      if (_disposed) return const MuxWorkspaceTreeUnreachable();
+      if (statusNotifier.value != ConnectionStatus.connected) {
+        return const MuxWorkspaceTreeUnreachable();
+      }
+      return result;
+    } catch (e) {
+      _log.w('Workspace tree query failed for ${profile.name}: $e');
+      return const MuxWorkspaceTreeUnreachable();
+    }
+  }
+
+  /// Asks the host to switch to [tabId], so the user is looking at that
+  /// project.
+  ///
+  /// [tabId] is a [MuxTab.tabId] straight from the tree the caller is
+  /// rendering. This is [focusAgent] aimed at a different target, and every
+  /// word of that method's doc comment applies here — including the reason
+  /// the in-flight guard is released by the request settling rather than by
+  /// this call giving up on it.
+  Future<MuxTabFocusResult> focusTab(String tabId) async {
+    if (_disposed) return const MuxTabFocusFailed('session_disposed');
+    if (statusNotifier.value != ConnectionStatus.connected) {
+      return const MuxTabFocusFailed('not_connected');
+    }
+    if (_tabFocusInFlight) {
+      return const MuxTabFocusFailed('focus_already_in_flight');
+    }
+
+    final treeApi = _muxAdapter.workspaces;
+    if (treeApi == null) {
+      return const MuxTabFocusFailed('multiplexer_cannot_focus_tabs');
+    }
+
+    _tabFocusInFlight = true;
+    final request = treeApi.focusTab(tabId);
+    unawaited(
+      request
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() => _tabFocusInFlight = false),
+    );
+
+    try {
+      return await request.timeout(kTabFocusTimeout);
+    } catch (e) {
+      _log.w('Tab focus failed for ${profile.name} ($tabId): $e');
+      return const MuxTabFocusFailed(null);
     }
   }
 

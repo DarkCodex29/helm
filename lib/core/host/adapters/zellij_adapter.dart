@@ -51,6 +51,12 @@ class ZellijAdapter implements MultiplexerAdapter {
   @override
   PaneAwareMultiplexer? get panes => null;
 
+  /// Always null. zellij has sessions and tabs, but no workspace layer and
+  /// no per-workspace agent roll-up, so mapping its vocabulary onto
+  /// [MuxWorkspace] would invent a hierarchy this host does not have.
+  @override
+  WorkspaceAwareMultiplexer? get workspaces => null;
+
   @override
   Future<MuxDetection> detect() async {
     final result = await _runner.run(

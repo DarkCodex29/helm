@@ -29,7 +29,11 @@ import 'package:helm/core/host/shell_quote.dart';
 /// for exactly which facts are CONFIRMED versus this adapter's own
 /// disclosed assumptions.
 class HerdrAdapter
-    implements MultiplexerAdapter, AgentAwareMultiplexer, PaneAwareMultiplexer {
+    implements
+        MultiplexerAdapter,
+        AgentAwareMultiplexer,
+        PaneAwareMultiplexer,
+        WorkspaceAwareMultiplexer {
   HerdrAdapter(this._runner, {String absPath = 'herdr', String? sessionRef})
     : _absPath = absPath,
       _sessionRef = sessionRef;
@@ -76,6 +80,10 @@ class HerdrAdapter
     // is the one field that makes "worked in" versus "merely recreated"
     // answerable at all. See [listPanes].
     MuxCapability.paneListing,
+    // herdr is the only multiplexer with a workspace layer, which is the
+    // structure the user actually organizes work by. See
+    // [listWorkspaceTree].
+    MuxCapability.workspaceTree,
   };
 
   /// Always non-null: herdr is the only multiplexer that advertises
@@ -87,6 +95,10 @@ class HerdrAdapter
   /// Always non-null, for the same reason [agents] is.
   @override
   PaneAwareMultiplexer? get panes => this;
+
+  /// Always non-null, for the same reason [agents] is.
+  @override
+  WorkspaceAwareMultiplexer? get workspaces => this;
 
   @override
   Future<MuxDetection> detect() async {
@@ -354,7 +366,164 @@ class HerdrAdapter
     return const MuxAgentFocused();
   }
 
+  /// Reads the whole workspace tree via `workspace list` then `tab list`.
+  ///
+  /// MEASURED against the owner's live herdr 0.8.2, not assumed. Both are
+  /// SOCKET-backed like [listAgents] and unlike [listSessions]: both answer
+  /// in the `{id, result}` envelope (`"id":"cli:workspace:list"` /
+  /// `"cli:tab:list"`), both are session-scoped, and both fail with
+  /// `server_not_running` on stderr with an EMPTY stdout when no server is
+  /// up. Captured shapes:
+  ///
+  /// ```text
+  /// workspace list → {result: {type: "workspace_list", workspaces: [
+  ///     {workspace_id, label, number, tab_count, pane_count,
+  ///      agent_status, focused, active_tab_id}, ...]}}
+  /// tab list       → {result: {type: "tab_list", tabs: [
+  ///     {tab_id, workspace_id, label, number, pane_count,
+  ///      agent_status, focused}, ...]}}
+  /// ```
+  ///
+  /// `agent_status` carries the SAME vocabulary `agent list` does — observed
+  /// working / idle / unknown — so it goes through [_parseAgentState] rather
+  /// than a second mapping that could drift away from the first.
+  ///
+  /// TWO COMMANDS, ONE RESULT, and the sequencing is the contract. The tab
+  /// query runs only if the workspace query succeeded, and EITHER failing
+  /// fails the whole tree. Returning the workspaces alone would let a caller
+  /// draw headers with nothing beneath them — "every client has no
+  /// projects", a claim neither command made. See [MuxWorkspaceTreeResult].
+  ///
+  /// Error handling is [listAgents]': `server_not_running` maps to a typed
+  /// state, and any other machine-readable code — or stderr that is not the
+  /// JSON envelope at all — is thrown rather than collapsed into it.
+  @override
+  Future<MuxWorkspaceTreeResult> listWorkspaceTree() async {
+    final workspaces = await _runner.run(_workspaceListCommand);
+    if (workspaces.exitCode != 0) {
+      return _treeFailure('workspace list', workspaces);
+    }
+    final tabs = await _runner.run(_tabListCommand);
+    if (tabs.exitCode != 0) return _treeFailure('tab list', tabs);
+
+    return MuxWorkspaceTreeAvailable(
+      workspaces: _parseList(
+        workspaces.stdout,
+        'workspaces',
+      ).map(_parseWorkspaceInfo).toList(),
+      tabs: _parseList(tabs.stdout, 'tabs').map(_parseTabInfo).toList(),
+    );
+  }
+
+  /// Switches the host to [tabId] via `herdr tab focus`.
+  ///
+  /// MEASURED against the real 0.8.2 binary:
+  ///
+  /// ```text
+  /// $ herdr tab focus --help
+  ///   Focus a tab
+  ///   Usage: herdr tab focus <tab_id>
+  /// ```
+  ///
+  /// The target is POSITIONAL — there is no `--tab-id` flag — and it is the
+  /// id [_parseTabInfo] puts in [MuxTab.tabId].
+  ///
+  /// THE ONE CLAIM HERE THAT IS NOT FROM A LIVE INVOCATION is the
+  /// not-found code, `tab_not_found`. It was read out of the 0.8.2 binary's
+  /// string table, where it sits beside `pane_not_found` and the message
+  /// "tab not found". It was NOT confirmed by running `tab focus`, because
+  /// the only herdr reachable was the owner's live session holding real
+  /// client work, and a focus would have moved his screen mid-task. That is
+  /// weaker evidence than the rest of this class rests on and is recorded
+  /// as such — but it is stronger than assuming by analogy to
+  /// `agent_not_found`, and the cost of being wrong is bounded: an
+  /// unrecognized code falls through to [MuxTabFocusFailed] carrying it,
+  /// which reports "we could not find out" rather than anything false.
+  ///
+  /// The success body is deliberately NOT parsed, for [focusAgent]'s
+  /// reason: success is the exit status, and a parse of a payload no caller
+  /// reads is one more way to fail while the host did the thing asked.
+  @override
+  Future<MuxTabFocusResult> focusTab(String tabId) async {
+    final result = await _runner.run(_tabFocusCommand(tabId));
+    if (result.timedOut || result.exitCode == null) {
+      // No exit status was read, so nothing is known about whether the tab
+      // moved. Never reported as success.
+      return const MuxTabFocusFailed('transport_incomplete');
+    }
+    if (result.exitCode != 0) {
+      final code = _parseErrorCode(result.stderr);
+      if (code == 'tab_not_found') return const MuxTabFocusTargetNotFound();
+      return MuxTabFocusFailed(code);
+    }
+    return const MuxTabFocused();
+  }
+
   // ── Private ────────────────────────────────────────────────────────────
+
+  /// Classifies a failed tree query. `server_not_running` is the only
+  /// recognized code; anything else is thrown rather than collapsed into
+  /// it, so an unexpected failure cannot masquerade as the common one.
+  /// [stage] names which of the two commands failed, because a tree that
+  /// half-succeeded is the case worth being able to read in a log.
+  MuxWorkspaceTreeResult _treeFailure(String stage, HostCommandResult result) {
+    final code = _parseErrorCode(result.stderr);
+    if (code == 'server_not_running') {
+      return const MuxWorkspaceTreeUnreachable();
+    }
+    throw StateError(
+      'herdr $stage failed with an unrecognized error '
+      '(exit code ${result.exitCode}): '
+      '${code ?? 'no machine-readable error.code in stderr'}',
+    );
+  }
+
+  /// Pulls `result.<key>` out of a socket-backed envelope.
+  List<Map<String, dynamic>> _parseList(String stdout, String key) {
+    final envelope = jsonDecode(stdout) as Map<String, dynamic>;
+    return ((envelope['result'] as Map<String, dynamic>)[key] as List)
+        .cast<Map<String, dynamic>>();
+  }
+
+  /// Parses one `workspace list` entry. Reads three of the eight fields on
+  /// the wire — see [MuxWorkspace] for why the other five are dropped.
+  MuxWorkspace _parseWorkspaceInfo(Map<String, dynamic> json) => (
+    workspaceId: json['workspace_id'] as String,
+    label: json['label'] as String,
+    agentState: _parseAgentState(json['agent_status'] as String),
+  );
+
+  /// Parses one `tab list` entry.
+  ///
+  /// `number` is read as an `int` rather than coerced from `num`, for the
+  /// reason [_parsePaneInfo] reads `revision` that way: a silent `.toInt()`
+  /// would hide a wire contract that had changed underneath the ordering
+  /// this field exists to provide.
+  MuxTab _parseTabInfo(Map<String, dynamic> json) => (
+    tabId: json['tab_id'] as String,
+    workspaceId: json['workspace_id'] as String,
+    label: json['label'] as String,
+    number: json['number'] as int,
+    focused: json['focused'] as bool,
+    agentState: _parseAgentState(json['agent_status'] as String),
+  );
+
+  /// `--session` precedes the subcommand because it is a GLOBAL option, and
+  /// the scope is load-bearing for the same MEASURED reason it is on
+  /// [_agentListCommand]: each herdr session owns its own api socket, and a
+  /// socket-backed query answers only for the socket it connects to.
+  /// Verified that both spellings reach the scoped socket — `herdr --session
+  /// helm-0 tab list` failed naming `sessions/helm-0/herdr.sock`, proving
+  /// the flag is honoured rather than ignored.
+  String get _workspaceListCommand => '$_absPath${_sessionScope}workspace list';
+
+  /// Scoped for the same reason [_workspaceListCommand] is.
+  String get _tabListCommand => '$_absPath${_sessionScope}tab list';
+
+  /// [tabId] is shell-quoted because it reaches a remote shell and is
+  /// host-supplied (AD-3).
+  String _tabFocusCommand(String tabId) =>
+      '$_absPath${_sessionScope}tab focus ${shellQuote(tabId)}';
 
   /// Builds the `agent focus` invocation.
   ///

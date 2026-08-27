@@ -39,6 +39,16 @@ enum MuxCapability {
   /// path but has no per-pane revision counter, so it cannot answer the
   /// question this capability exists for and does not advertise it.
   paneListing,
+
+  /// The adapter can enumerate the host's WORKSPACES and the tabs inside
+  /// them — the two-level structure the user organizes work by.
+  ///
+  /// Advertised by `HerdrAdapter` only, and not for want of a mapping:
+  /// tmux and zellij have sessions and windows, but neither carries the
+  /// per-workspace agent roll-up this exists to surface, and flattening
+  /// their vocabulary into herdr's would invent a hierarchy the host does
+  /// not have. See [WorkspaceAwareMultiplexer].
+  workspaceTree,
 }
 
 /// Install state of a multiplexer, reported by [MultiplexerAdapter.detect].
@@ -375,6 +385,172 @@ abstract interface class AgentAwareMultiplexer {
   Future<MuxAgentFocusResult> focusAgent(String target);
 }
 
+/// One workspace reported by [WorkspaceAwareMultiplexer.listWorkspaceTree].
+///
+/// THREE fields out of the eight herdr sends, for the reason [MuxPane]
+/// drops nine of twelve: this type answers one question — which of the
+/// user's clients is this, and is anything happening in it — and only
+/// these three answer it. `number`, `pane_count`, `tab_count`, `focused`
+/// and `active_tab_id` are all real fields on the wire and all deliberately
+/// unread, because a stored field is a field a future reader has to work
+/// out whether they may trust.
+///
+/// [agentState] is herdr's own per-workspace roll-up, MEASURED to use the
+/// same `agent_status` vocabulary as `agent list` — so it is parsed by the
+/// SAME mapping rather than by a second one that could drift away from it.
+typedef MuxWorkspace = ({
+  String workspaceId,
+  String label,
+  AgentState agentState,
+});
+
+/// One tab reported by [WorkspaceAwareMultiplexer.listWorkspaceTree].
+///
+/// [number] is carried where [MuxWorkspace] drops it, and that asymmetry is
+/// MEASURED rather than arbitrary. Against the owner's live herdr 0.8.2 the
+/// workspace list arrived in number order, but the TAB list did not: one
+/// workspace's tabs came back 5,1,2,3,4,6, with the focused tab hoisted to
+/// the front. A consumer that rendered arrival order would therefore
+/// reshuffle the list the instant the user tapped a row. This adapter does
+/// not reorder — a consumer is entitled to the host's own order, and an
+/// adapter that quietly rewrote it would no longer be reporting the host —
+/// so [number] is what lets the consumer choose a stable one.
+///
+/// [focused] is the host's answer to "where am I already", which is a
+/// different fact from where the user could go next.
+typedef MuxTab = ({
+  String tabId,
+  String workspaceId,
+  String label,
+  int number,
+  bool focused,
+  AgentState agentState,
+});
+
+/// Result of [WorkspaceAwareMultiplexer.listWorkspaceTree].
+///
+/// ONE result for BOTH halves of the tree, and that is the whole point
+/// rather than a convenience. herdr answers workspaces and tabs through two
+/// separate commands, so a naive surface would expose two results — and a
+/// caller holding a successful workspace list beside a failed tab list
+/// would render workspace headers with nothing beneath them. That reads as
+/// "every one of your clients has no projects": a LIE composed out of one
+/// truth and one failure, which neither result could have told on its own.
+/// The tree is one claim, so it gets one result.
+///
+/// [MuxWorkspaceTreeUnsupported] is produced at the SESSION boundary rather
+/// than by any adapter — no adapter can report that it is not itself. It
+/// lives in this family for the same reason [AgentSupport]'s variants live
+/// in this file: the family is everything a consumer must switch over, and
+/// splitting it would only move the switch, not remove it.
+sealed class MuxWorkspaceTreeResult {
+  const MuxWorkspaceTreeResult();
+}
+
+/// The tree was read in full.
+///
+/// [workspaces] may be empty when the host IS reachable and genuinely has
+/// none — a different, valid case from [MuxWorkspaceTreeUnreachable].
+///
+/// KNOWN LIMIT, stated rather than hidden: the two commands are not atomic
+/// on the host, so a tab created between them can name a workspace this
+/// list does not carry. A consumer that groups tabs under workspaces will
+/// not draw such a tab. The window is one round-trip against a structure
+/// changed by hand, and closing it would need a herdr call that returns
+/// both at once, which 0.8.2 does not offer.
+final class MuxWorkspaceTreeAvailable extends MuxWorkspaceTreeResult {
+  const MuxWorkspaceTreeAvailable({
+    required this.workspaces,
+    required this.tabs,
+  });
+
+  final List<MuxWorkspace> workspaces;
+
+  /// Every tab across every workspace, in the host's own order. Group by
+  /// [MuxTab.workspaceId]; sort by [MuxTab.number].
+  final List<MuxTab> tabs;
+}
+
+/// The tree could not be read: the server was unreachable, EITHER command
+/// failed, or the transport gave up.
+///
+/// MUST NOT be confused with [MuxWorkspaceTreeAvailable] carrying an empty
+/// list — that reads as "this host has no workspaces", a different claim
+/// from "we could not ask".
+final class MuxWorkspaceTreeUnreachable extends MuxWorkspaceTreeResult {
+  const MuxWorkspaceTreeUnreachable();
+}
+
+/// The active multiplexer has no concept of workspaces at all, so there is
+/// nothing here to be unreachable. Names the multiplexer because the user
+/// chose it, and the actionable fact is that THIS one cannot answer.
+final class MuxWorkspaceTreeUnsupported extends MuxWorkspaceTreeResult {
+  const MuxWorkspaceTreeUnsupported(this.muxId);
+
+  final MultiplexerId muxId;
+}
+
+/// Result of [WorkspaceAwareMultiplexer.focusTab].
+///
+/// Deliberately a PARALLEL type to [MuxAgentFocusResult] rather than a
+/// reuse of it, and the three variants mean exactly what that type's do —
+/// see its doc comment for why a `bool` is wrong here. They are kept apart
+/// because [MuxAgentFocusTargetNotFound] states, in its name and its
+/// contract, that no such AGENT exists; answering a tab focus with it would
+/// put a lie in the type. Nothing else about the shape is new, which is the
+/// point: a reader who has understood one has understood both.
+sealed class MuxTabFocusResult {
+  const MuxTabFocusResult();
+}
+
+/// The multiplexer switched to the tab.
+///
+/// Carries nothing, for [MuxAgentFocused]'s reason: success is decided by
+/// the exit status, so a response body helm never reads cannot break the
+/// one operation the user is waiting on.
+final class MuxTabFocused extends MuxTabFocusResult {
+  const MuxTabFocused();
+}
+
+/// The multiplexer has no such tab: it was closed between the tree being
+/// drawn and the row being tapped. A fact about helm's own screen — the
+/// tree on it is out of date — never to be collapsed into
+/// [MuxTabFocusFailed], which says nothing is known at all.
+final class MuxTabFocusTargetNotFound extends MuxTabFocusResult {
+  const MuxTabFocusTargetNotFound();
+}
+
+/// The focus could not be performed or its outcome is unknown. [code]
+/// carries the multiplexer's machine-readable error code when it gave one
+/// and is null when it did not, so an unrecognized failure is reported as
+/// unrecognized rather than mapped onto a known one.
+final class MuxTabFocusFailed extends MuxTabFocusResult {
+  const MuxTabFocusFailed(this.code);
+
+  final String? code;
+}
+
+/// Execution surface for adapters that advertise
+/// [MuxCapability.workspaceTree].
+///
+/// Reachable only through [MultiplexerAdapter.workspaces], the same
+/// type-enforcement [AgentAwareMultiplexer] and [PaneAwareMultiplexer] use:
+/// a caller cannot read the tree without first proving, via a null check,
+/// that the multiplexer HAS one. See design.md AD-2.
+abstract interface class WorkspaceAwareMultiplexer {
+  /// Reads the whole tree — every workspace and every tab — as one claim.
+  Future<MuxWorkspaceTreeResult> listWorkspaceTree();
+
+  /// Switches the HOST to [tabId], so the user is looking at that project.
+  ///
+  /// [tabId] is the identifier [MuxTab.tabId] carries. Takes no timeout for
+  /// [AgentAwareMultiplexer.focusAgent]'s reason: a focus is a one-shot
+  /// command that returns as soon as the multiplexer has moved, so there is
+  /// no host-side deadline to hand it, and bounding a wedged one is the
+  /// caller's transport concern — see `TerminalSession.focusTab`.
+  Future<MuxTabFocusResult> focusTab(String tabId);
+}
+
 /// One adapter contract across every supported multiplexer.
 ///
 /// Only five operations are uniform across herdr/tmux/zellij: [detect],
@@ -404,6 +580,14 @@ abstract interface class MultiplexerAdapter {
   /// its panes have been worked in. Keeping the two accessors separate is
   /// what stops one capability being read as evidence for the other.
   PaneAwareMultiplexer? get panes;
+
+  /// Non-null only when [MuxCapability.workspaceTree] is advertised.
+  ///
+  /// A THIRD independent fact, separate for the same reason [panes] is
+  /// separate from [agents]: knowing what an agent is doing says nothing
+  /// about whether the multiplexer can say which client that agent belongs
+  /// to.
+  WorkspaceAwareMultiplexer? get workspaces;
 
   Future<MuxDetection> detect();
 
