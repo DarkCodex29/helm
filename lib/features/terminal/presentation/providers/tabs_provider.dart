@@ -10,6 +10,7 @@ import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/domain/auto_connect_decision.dart';
+import 'package:helm/features/terminal/domain/session_name.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:uuid/uuid.dart';
 
@@ -50,10 +51,62 @@ class TabsNotifier extends Notifier<TabsState> {
   @override
   TabsState build() => const TabsState();
 
+  /// Suffix for a session nobody named.
+  ///
+  /// The first block of a v4 UUID: eight hex characters, short enough to
+  /// stay readable in `herdr session list` and in the tab title bar.
+  ///
+  /// Random rather than sequential, and that is the point. A counter is
+  /// what produced `[helm-1, helm-1]`, and a counter also RESETS when the
+  /// app does while herdr sessions do not — `helm-0`, `helm-1` and
+  /// `helm-2` were all still running on the verified host from earlier
+  /// launches, so a fresh counter would silently reattach to one of them.
+  /// [resolveSessionName] still checks the result against the names in
+  /// use, so uniqueness is structural rather than probabilistic.
+  static String _mintSessionSuffix() => _uuid.v4().split('-').first;
+
+  /// Opens a tab for [profile], or focuses the one already holding the
+  /// session it resolves to.
+  ///
+  /// [tmuxSessionName] names a specific session and outranks the profile.
+  /// Crash recovery and project shortcuts both use it — see
+  /// [resolveSessionName] for the full precedence and for why a positional
+  /// counter is not an option.
   Future<void> addTab(
     ConnectionProfile profile, {
     String? tmuxSessionName,
   }) async {
+    // Resolved BEFORE the key lookup, so focusing an already-open session
+    // costs nothing and cannot be turned into a silent no-op by a missing
+    // key — the tab the user is asking for is right there either way.
+    final resolution = resolveSessionName(
+      profile: profile,
+      requestedSessionName: tmuxSessionName,
+      openTabs: [
+        for (final t in state.tabs)
+          (tabId: t.id, sessionName: t.session.tmuxSessionName),
+      ],
+      mintSuffix: _mintSessionSuffix,
+    );
+
+    switch (resolution) {
+      case FocusOpenTab(:final tabId, :final sessionName):
+        // Two tabs on one herdr session render the same screen and, since
+        // 62565f3, each resizes that shared remote PTY to its own
+        // viewport. Showing the tab that already has it is the honest
+        // answer to "open this session" when it is already open.
+        final index = state.tabs.indexWhere((t) => t.id == tabId);
+        if (index != -1) {
+          _log.i('Session $sessionName is already open — focusing its tab');
+          state = state.copyWith(activeIndex: index);
+          return;
+        }
+      case OpenSession():
+        break;
+    }
+
+    final sessionName = (resolution as OpenSession).sessionName;
+
     final sshService = ref.read(sshServiceProvider);
     final keyService = ref.read(sshKeyServiceProvider);
 
@@ -62,10 +115,6 @@ class TabsNotifier extends Notifier<TabsState> {
       _log.e('No SSH private key found — cannot open tab');
       return;
     }
-
-    final tabCount = state.tabs.length;
-    final sessionName =
-        tmuxSessionName ?? '${AppConstants.defaultSessionRef}-$tabCount';
 
     final session = TerminalSession(
       profile: profile,
