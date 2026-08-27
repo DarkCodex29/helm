@@ -54,15 +54,46 @@ enum MuxCapability {
 /// Install state of a multiplexer, reported by [MultiplexerAdapter.detect].
 class MuxDetection {
   const MuxDetection.installed({required this.absPath, required this.version})
-    : installed = true;
+    : installed = true,
+      determined = true;
 
   const MuxDetection.notInstalled()
     : installed = false,
       absPath = null,
-      version = null;
+      version = null,
+      determined = true;
+
+  /// The host was asked and never answered — the transport timed out, or the
+  /// channel closed without ever reporting an exit status — so NOTHING was
+  /// established about this binary.
+  ///
+  /// A THIRD state, because neither of the other two can carry this without
+  /// lying. [MuxDetection.notInstalled] is a positive CLAIM that the host
+  /// does not have this multiplexer, and a caller acts on it by selecting a
+  /// different one; making that claim out of a slow link would drop the user
+  /// onto a multiplexer their host may not even run, and leave them blaming
+  /// the host for it. Absence of an answer is not evidence of absence.
+  ///
+  /// [installed] is false here only for want of evidence FOR the binary,
+  /// never as evidence AGAINST it, so a caller that switches on install
+  /// state MUST read [determined] before [installed]. Mirrors
+  /// `MultiplexerUnverified` in `multiplexer_selection.dart`, which already
+  /// draws exactly this line for the probe-based selection path.
+  const MuxDetection.undetermined()
+    : installed = false,
+      absPath = null,
+      version = null,
+      determined = false;
 
   /// Whether the multiplexer binary was found on the host.
+  ///
+  /// Meaningful ONLY when [determined] — see [MuxDetection.undetermined].
   final bool installed;
+
+  /// Whether the host answered at all, so [installed] carries evidence
+  /// rather than merely the lack of it. False only for
+  /// [MuxDetection.undetermined].
+  final bool determined;
 
   /// Absolute path of the binary. Non-null only when [installed].
   final String? absPath;

@@ -266,6 +266,40 @@ void main() {
     });
   });
 
+  group('listWorkspaceTree — a transport that never answered', () {
+    test(
+      'a workspace list that timed out is UNREACHABLE, never a crash — the '
+      'variant already names "the transport gave up" as one of its cases',
+      () async {
+        final runner = FakeHostCommandRunner()
+          ..whenRun(
+            _workspaceListCommand,
+            const HostCommandResult(timedOut: true),
+          );
+
+        final result = await HerdrAdapter(runner).workspaces!
+            .listWorkspaceTree();
+
+        expect(result, isA<MuxWorkspaceTreeUnreachable>());
+      },
+    );
+
+    test(
+      'a tab list that timed out after a good workspace list is UNREACHABLE '
+      'too — half a tree is the one thing this result refuses to report',
+      () async {
+        final runner = FakeHostCommandRunner()
+          ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
+          ..whenRun(_tabListCommand, const HostCommandResult(timedOut: true));
+
+        final result = await HerdrAdapter(runner).workspaces!
+            .listWorkspaceTree();
+
+        expect(result, isA<MuxWorkspaceTreeUnreachable>());
+      },
+    );
+  });
+
   group('focusTab', () {
     test('passes the tab id POSITIONALLY, shell-quoted', () async {
       final runner = FakeHostCommandRunner()

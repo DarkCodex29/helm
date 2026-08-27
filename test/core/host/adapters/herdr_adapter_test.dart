@@ -515,6 +515,21 @@ void main() {
       expect(result, isA<MuxAgentServerNotRunning>());
     });
 
+    test(
+      'a transport that gave up is UNREACHABLE, never a crash — a null exit '
+      'code is no exit code at all, not herdr reporting a failed command',
+      () async {
+        runner.whenRun(
+          _agentListCommand,
+          const HostCommandResult(timedOut: true),
+        );
+
+        final result = await adapter.listAgents();
+
+        expect(result, isA<MuxAgentServerNotRunning>());
+      },
+    );
+
     test('throws instead of silently collapsing an unrecognized error.code '
         'into server-not-running', () async {
       runner.whenRun(
@@ -688,6 +703,23 @@ void main() {
 
       await expectLater(adapter.listPanes(), throwsStateError);
     });
+
+    test(
+      'a transport that gave up is UNREACHABLE, never a crash — this is the '
+      'failure caught on a real device, where a timed-out pane list was read '
+      'as herdr answering with an unrecognized error and took the vitality '
+      'check down with a StateError',
+      () async {
+        runner.whenRun(
+          _paneListCommand,
+          const HostCommandResult(timedOut: true),
+        );
+
+        final result = await adapter.listPanes();
+
+        expect(result, isA<MuxPaneServerNotRunning>());
+      },
+    );
   });
 
   group('listPanes command shape', () {
@@ -1273,6 +1305,22 @@ void main() {
       expect(result, isA<MuxServerNotRunning>());
     });
 
+    test(
+      'a transport that gave up reports the same typed failure state, and '
+      'reaches it deliberately rather than by a null exit code happening to '
+      'compare unequal to zero',
+      () async {
+        runner.whenRun(
+          _sessionListCommand,
+          const HostCommandResult(timedOut: true),
+        );
+
+        final result = await adapter.listSessions();
+
+        expect(result, isA<MuxServerNotRunning>());
+      },
+    );
+
     test('a genuinely empty session list is reported when the server IS '
         'running and herdr has zero known sessions', () async {
       runner.whenRun(
@@ -1336,7 +1384,25 @@ void main() {
       expect(detection.installed, isFalse);
       expect(detection.absPath, isNull);
       expect(detection.version, isNull);
+      // The host ANSWERED, so this is evidence, not merely a lack of it.
+      expect(detection.determined, isTrue);
     });
+
+    test(
+      'a transport that never answered is UNDETERMINED, never NOT INSTALLED '
+      '— a host that did not reply has said nothing about whether the binary '
+      'is there, and a caller acts on that difference by picking a different '
+      'multiplexer entirely',
+      () async {
+        runner.whenRun(_detectCommand, const HostCommandResult(timedOut: true));
+
+        final detection = await adapter.detect();
+
+        expect(detection.determined, isFalse);
+        expect(detection.absPath, isNull);
+        expect(detection.version, isNull);
+      },
+    );
   });
 
   group('hasSession', () {

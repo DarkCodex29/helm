@@ -132,6 +132,15 @@ class HerdrAdapter
     final result = await _runner.run(
       'command -v $_absPath >/dev/null 2>&1 && $_absPath --version',
     );
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up, and this is the costliest of the four places
+      // that mattered. [MuxDetection.notInstalled] is a claim the host does
+      // not have herdr, and a caller acts on it by choosing a DIFFERENT
+      // multiplexer — so a slow link would silently move the user onto tmux
+      // or zellij, taking the agent surface with it, on evidence that was
+      // never gathered. Absence of an answer is not evidence of absence.
+      return const MuxDetection.undetermined();
+    }
     if (result.exitCode != 0) return const MuxDetection.notInstalled();
     return MuxDetection.installed(
       absPath: _absPath,
@@ -142,6 +151,16 @@ class HerdrAdapter
   @override
   Future<MuxSessionsResult> listSessions() async {
     final result = await _runner.run(_sessionListCommand);
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up. The branch below reasons about a NON-ZERO
+      // EXIT — a corrupted session directory, a permission error — and a
+      // command that never reported an exit status made none of those
+      // claims. The returned value is the same [MuxServerNotRunning] either
+      // way, but it is reached here deliberately rather than by `null != 0`
+      // happening to be true, so a later edit to that comparison cannot
+      // silently turn a timeout into a parse of output that never arrived.
+      return const MuxServerNotRunning();
+    }
     if (result.exitCode != 0) {
       // CONFIRMED: `session list --json` is a LOCAL operation (it reads
       // the session/config directory) and exits 0 even when no herdr
@@ -216,6 +235,16 @@ class HerdrAdapter
   @override
   Future<MuxAgentsResult> listAgents() async {
     final result = await _runner.run(_agentListCommand);
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up. No exit status was read, so herdr reported
+      // nothing at all — this is not a command that ran and failed, and the
+      // branch below would misread it as one, parse absent stderr, and throw.
+      // [MuxAgentServerNotRunning] is the honest member: its contract is "the
+      // server cannot be reached to find out", which is exactly what happened,
+      // and [AgentsUnreachable] downstream already names "did not answer in
+      // time" as one of its own cases.
+      return const MuxAgentServerNotRunning();
+    }
     if (result.exitCode != 0) {
       final code = _parseErrorCode(result.stderr);
       if (code == 'server_not_running') {
@@ -274,6 +303,18 @@ class HerdrAdapter
   @override
   Future<MuxPanesResult> listPanes() async {
     final result = await _runner.run(_paneListCommand);
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up, for [listAgents]' reason and with the same
+      // resolution. This is the branch a real Galaxy S22 Ultra fell into
+      // against a live host: a timed-out `pane list` reached the exit-code
+      // test below, `null != 0` was true, and a command that never answered
+      // was reported as one that answered with an unrecognized error — a
+      // StateError thrown out of the vitality check. [MuxPaneServerNotRunning]
+      // says "nothing is known about this session's panes", which is the
+      // truth, and [SessionVitalityUnreachable] downstream already names "it
+      // did not answer in time" as one of its own cases.
+      return const MuxPaneServerNotRunning();
+    }
     if (result.exitCode != 0) {
       final code = _parseErrorCode(result.stderr);
       if (code == 'server_not_running') return const MuxPaneServerNotRunning();
@@ -524,6 +565,15 @@ class HerdrAdapter
   /// [stage] names which of the two commands failed, because a tree that
   /// half-succeeded is the case worth being able to read in a log.
   MuxWorkspaceTreeResult _treeFailure(String stage, HostCommandResult result) {
+    if (result.timedOut || result.exitCode == null) {
+      // The TRANSPORT gave up on EITHER command. Guarded here rather than at
+      // both call sites because this is the one place both funnel through,
+      // and it is the place that would otherwise parse stderr that was never
+      // written and throw. [MuxWorkspaceTreeUnreachable] already names "the
+      // transport gave up" as one of its own cases; only the routing to it
+      // was missing.
+      return const MuxWorkspaceTreeUnreachable();
+    }
     final code = _parseErrorCode(result.stderr);
     if (code == 'server_not_running') {
       return const MuxWorkspaceTreeUnreachable();
