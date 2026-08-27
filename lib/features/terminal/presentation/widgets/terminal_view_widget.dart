@@ -119,8 +119,28 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
         TerminalView(
           widget.session.terminal,
           theme: HelmTerminalTheme.monokai,
+          // Named fonts only, and every one of them resolvable at first
+          // paint. There is no `fontFamily: 'JetBrainsMono'` here any more:
+          // it was declared for two years against a `pubspec.yaml` with no
+          // `fonts:` section and no `assets/` directory, so it resolved to
+          // nothing and fell silently through to this same list. The app
+          // was already running on Menlo/Monaco/monospace; only the code
+          // claimed otherwise.
+          //
+          // Runtime-fetching it through `google_fonts` — which is already a
+          // dependency and does exactly that for Inter — is NOT the fix
+          // here, and the asymmetry is deliberate. Inter dresses UI text,
+          // where a late swap reflows a label. This font is measured:
+          // TerminalView derives the cell from it and the session pushes
+          // those dimensions at the remote PTY (see the comment above this
+          // widget). A font arriving after first paint would resize the
+          // remote mid-session, which is the failure 62565f3 exists to
+          // prevent.
+          //
+          // Bundling the real face is a legitimate upgrade — it just has to
+          // be an asset, so the metrics are right on the first frame rather
+          // than the first successful download.
           textStyle: const TerminalStyle(
-            fontFamily: 'JetBrainsMono',
             fontFamilyFallback: ['Menlo', 'Monaco', 'Courier New', 'monospace'],
             fontSize: 13,
           ),
