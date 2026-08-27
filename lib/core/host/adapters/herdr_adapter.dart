@@ -645,6 +645,16 @@ class HerdrAdapter
   /// every real agent, and the user read `term_659ab3dc3a8541` where the
   /// host knew the answer was `claude`. `terminal_id` stays as the last
   /// resort because it is the only one of the four the schema guarantees.
+  ///
+  /// `tab_id` and `workspace_id` are read here, from THIS entry, and never
+  /// derived from `pane_id`. Against the owner's live herdr 0.8.2 every
+  /// agent carried both outright, so there is nothing to infer; the ids do
+  /// share a visible shape (`w1:p1` sat in tab `w1:t1`) but reading that
+  /// shape would be trusting a spelling convention over a stated fact, and
+  /// it breaks the moment one tab holds two panes.
+  ///
+  /// Read as nullable for the reason [AgentStatus] states: they are not
+  /// schema-guaranteed, and a throw here would take the whole list down.
   AgentStatus _parseAgentInfo(Map<String, dynamic> json) {
     final terminalId = json['terminal_id'] as String;
     final label =
@@ -656,6 +666,8 @@ class HerdrAdapter
       target: json['pane_id'] as String,
       label: label,
       state: _parseAgentState(json['agent_status'] as String),
+      tabId: json['tab_id'] as String?,
+      workspaceId: json['workspace_id'] as String?,
     );
   }
 

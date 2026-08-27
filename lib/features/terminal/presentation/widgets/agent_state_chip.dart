@@ -23,10 +23,7 @@ class AgentStateStyle {
     Color(0xFFD29922),
     Icons.priority_high,
   );
-  static const _working = AgentStateStyle._(
-    Color(0xFF58A6FF),
-    Icons.autorenew,
-  );
+  static const _working = AgentStateStyle._(Color(0xFF58A6FF), Icons.autorenew);
   static const _done = AgentStateStyle._(Color(0xFF3FB950), Icons.check);
   static const _idle = AgentStateStyle._(
     Color(0xFF6E7681),
@@ -95,9 +92,27 @@ class AgentBadge extends StatelessWidget {
 /// agent rather than hunting for its pane by hand. Inert without one, so a
 /// surface with nothing to act on cannot look pressable.
 class AgentRow extends StatelessWidget {
-  const AgentRow({super.key, required this.agent, this.onTap});
+  const AgentRow({
+    super.key,
+    required this.agent,
+    this.contextLabel,
+    this.onTap,
+  });
 
   final AgentStatus agent;
+
+  /// Where this agent is — see [agentContextLabel], which produces it.
+  ///
+  /// Null is the DEFAULT and the fallback in one: a row given nothing
+  /// renders exactly as it did before context existed, because an agent
+  /// helm cannot place is still a real agent the user may need to reach.
+  /// Nothing is invented to fill the gap.
+  ///
+  /// Secondary on purpose. The agent's own name stays the primary line —
+  /// this only breaks the tie between two rows that would otherwise read
+  /// identically, so it borrows the muted treatment the drawer already
+  /// spends on a project shortcut's path rather than introducing one.
+  final String? contextLabel;
 
   /// Invoked when the row is tapped. Null makes the row inert.
   final VoidCallback? onTap;
@@ -135,15 +150,39 @@ class AgentRow extends StatelessWidget {
               Icon(style.icon, size: 14, color: style.color),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  agent.label,
-                  style: const TextStyle(
-                    color: Color(0xFFE6EDF3),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  // Only as tall as it needs to be, so a row WITHOUT a
+                  // context keeps the single-line height it always had
+                  // and the two kinds of row still sit on one rhythm.
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      agent.label,
+                      style: const TextStyle(
+                        color: Color(0xFFE6EDF3),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (contextLabel != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        contextLabel!,
+                        style: const TextStyle(
+                          color: Color(0xFF8B949E),
+                          fontSize: 11,
+                        ),
+                        // The owner has a tab called "Facturación
+                        // Electrónica"; on a 280dp drawer that line has to
+                        // clip rather than push the state word off-screen.
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(width: 8),

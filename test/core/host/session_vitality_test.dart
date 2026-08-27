@@ -39,24 +39,26 @@ const _anAgent = (
   target: 'w1:p1',
   label: 'claude',
   state: AgentState.working,
+  tabId: 'w1:t1',
+  workspaceId: 'w1',
 );
 
 void main() {
   group('judgeSessionVitality — VIRGIN needs every negative fact', () {
-    test(
-      'the measured resurrected-empty session: untouched panes at home with '
-      'an authoritative empty agent list reads as VIRGIN',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane(paneId: 'w1:p1'), _pane(paneId: 'w1:p2')],
-          agents: const AgentsKnown([]),
-          homeDirectory: _home,
-        );
+    test('the measured resurrected-empty session: untouched panes at home with '
+        'an authoritative empty agent list reads as VIRGIN', () {
+      final verdict = judgeSessionVitality(
+        panes: [
+          _pane(paneId: 'w1:p1'),
+          _pane(paneId: 'w1:p2'),
+        ],
+        agents: const AgentsKnown([]),
+        homeDirectory: _home,
+      );
 
-        expect(verdict, isA<SessionVitalityKnown>());
-        expect((verdict as SessionVitalityKnown).shape, SessionShape.virgin);
-      },
-    );
+      expect(verdict, isA<SessionVitalityKnown>());
+      expect((verdict as SessionVitalityKnown).shape, SessionShape.virgin);
+    });
 
     test('a single pane is enough evidence when it is the only pane', () {
       final verdict = judgeSessionVitality(
@@ -72,7 +74,10 @@ void main() {
   group('judgeSessionVitality — any ONE positive fact makes it LIVED-IN', () {
     test('a pane whose revision moved past 1 has been used', () {
       final verdict = judgeSessionVitality(
-        panes: [_pane(paneId: 'w1:p1'), _pane(paneId: 'w1:p2', revision: 7)],
+        panes: [
+          _pane(paneId: 'w1:p1'),
+          _pane(paneId: 'w1:p2', revision: 7),
+        ],
         agents: const AgentsKnown([]),
         homeDirectory: _home,
       );
@@ -82,7 +87,10 @@ void main() {
 
     test('a pane that has been cd-ed away from home has been used', () {
       final verdict = judgeSessionVitality(
-        panes: [_pane(paneId: 'w1:p1'), _pane(paneId: 'w1:p2', cwd: '/srv/app')],
+        panes: [
+          _pane(paneId: 'w1:p1'),
+          _pane(paneId: 'w1:p2', cwd: '/srv/app'),
+        ],
         agents: const AgentsKnown([]),
         homeDirectory: _home,
       );
@@ -100,65 +108,53 @@ void main() {
       expect((verdict as SessionVitalityKnown).shape, SessionShape.livedIn);
     });
 
-    test(
-      'revision alone settles LIVED-IN even when the agent list could not '
-      'be read — one positive fact does not need the others',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane(revision: 4)],
-          agents: const AgentsUnreachable(),
-          homeDirectory: _home,
-        );
+    test('revision alone settles LIVED-IN even when the agent list could not '
+        'be read — one positive fact does not need the others', () {
+      final verdict = judgeSessionVitality(
+        panes: [_pane(revision: 4)],
+        agents: const AgentsUnreachable(),
+        homeDirectory: _home,
+      );
 
-        expect((verdict as SessionVitalityKnown).shape, SessionShape.livedIn);
-      },
-    );
+      expect((verdict as SessionVitalityKnown).shape, SessionShape.livedIn);
+    });
 
-    test(
-      'a live agent settles LIVED-IN even with no home to compare cwd '
-      'against',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane()],
-          agents: const AgentsKnown([_anAgent]),
-          homeDirectory: null,
-        );
+    test('a live agent settles LIVED-IN even with no home to compare cwd '
+        'against', () {
+      final verdict = judgeSessionVitality(
+        panes: [_pane()],
+        agents: const AgentsKnown([_anAgent]),
+        homeDirectory: null,
+      );
 
-        expect((verdict as SessionVitalityKnown).shape, SessionShape.livedIn);
-      },
-    );
+      expect((verdict as SessionVitalityKnown).shape, SessionShape.livedIn);
+    });
   });
 
   group('judgeSessionVitality — never guesses', () {
-    test(
-      'an unknown home directory yields INDETERMINATE, never VIRGIN: '
-      '"cwd equals home" is unanswerable without home',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane()],
-          agents: const AgentsKnown([]),
-          homeDirectory: null,
-        );
+    test('an unknown home directory yields INDETERMINATE, never VIRGIN: '
+        '"cwd equals home" is unanswerable without home', () {
+      final verdict = judgeSessionVitality(
+        panes: [_pane()],
+        agents: const AgentsKnown([]),
+        homeDirectory: null,
+      );
 
-        expect(verdict, isA<SessionVitalityIndeterminate>());
-        expect(verdict, isNot(isA<SessionVitalityKnown>()));
-      },
-    );
+      expect(verdict, isA<SessionVitalityIndeterminate>());
+      expect(verdict, isNot(isA<SessionVitalityKnown>()));
+    });
 
-    test(
-      'an unreachable agent server yields INDETERMINATE: panes that look '
-      'untouched cannot rule out an agent nobody could ask about',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane()],
-          agents: const AgentsUnreachable(),
-          homeDirectory: _home,
-        );
+    test('an unreachable agent server yields INDETERMINATE: panes that look '
+        'untouched cannot rule out an agent nobody could ask about', () {
+      final verdict = judgeSessionVitality(
+        panes: [_pane()],
+        agents: const AgentsUnreachable(),
+        homeDirectory: _home,
+      );
 
-        expect(verdict, isA<SessionVitalityIndeterminate>());
-        expect(verdict, isNot(isA<SessionVitalityKnown>()));
-      },
-    );
+      expect(verdict, isA<SessionVitalityIndeterminate>());
+      expect(verdict, isNot(isA<SessionVitalityKnown>()));
+    });
 
     test(
       'an unprobed agent snapshot yields INDETERMINATE for the same reason',
@@ -173,34 +169,28 @@ void main() {
       },
     );
 
-    test(
-      'a multiplexer that cannot report agents yields INDETERMINATE, not a '
-      'VIRGIN verdict built on a capability it never had',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: [_pane()],
-          agents: const AgentsUnsupported(MultiplexerId.tmux),
-          homeDirectory: _home,
-        );
+    test('a multiplexer that cannot report agents yields INDETERMINATE, not a '
+        'VIRGIN verdict built on a capability it never had', () {
+      final verdict = judgeSessionVitality(
+        panes: [_pane()],
+        agents: const AgentsUnsupported(MultiplexerId.tmux),
+        homeDirectory: _home,
+      );
 
-        expect(verdict, isA<SessionVitalityIndeterminate>());
-      },
-    );
+      expect(verdict, isA<SessionVitalityIndeterminate>());
+    });
 
-    test(
-      'zero panes yields INDETERMINATE, not a vacuously VIRGIN verdict: '
-      '"every pane is a fresh shell" is a claim about panes that exist',
-      () {
-        final verdict = judgeSessionVitality(
-          panes: const [],
-          agents: const AgentsKnown([]),
-          homeDirectory: _home,
-        );
+    test('zero panes yields INDETERMINATE, not a vacuously VIRGIN verdict: '
+        '"every pane is a fresh shell" is a claim about panes that exist', () {
+      final verdict = judgeSessionVitality(
+        panes: const [],
+        agents: const AgentsKnown([]),
+        homeDirectory: _home,
+      );
 
-        expect(verdict, isA<SessionVitalityIndeterminate>());
-        expect(verdict, isNot(isA<SessionVitalityKnown>()));
-      },
-    );
+      expect(verdict, isA<SessionVitalityIndeterminate>());
+      expect(verdict, isNot(isA<SessionVitalityKnown>()));
+    });
 
     test('revision 0 is still untouched — the threshold is "past 1"', () {
       final verdict = judgeSessionVitality(

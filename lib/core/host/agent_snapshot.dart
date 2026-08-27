@@ -103,3 +103,64 @@ AgentState? mostUrgentAgentState(AgentSnapshot snapshot) {
       .map((a) => a.state)
       .reduce((a, b) => agentStateUrgency(b) > agentStateUrgency(a) ? b : a);
 }
+
+/// Where [agent] is, as one line of secondary text — its project and the
+/// client that project belongs to — or null when helm cannot honestly name
+/// either.
+///
+/// This is a JOIN, not a query: it reads [tree], which the drawer already
+/// holds, against ids [agent] already carries. Nothing here asks the host.
+///
+/// It exists because the agent list alone is not identifying. Against the
+/// owner's live host every one of his three agents is labelled `opencode`,
+/// so a list of them is three identical rows, and the one decision this
+/// surface exists to support — which of these do I tap — cannot be made.
+/// The tree already holds the answer his eyes use one section below:
+/// `Calera`, `Helm`, `Shalom`.
+///
+/// Returns null, rather than a placeholder, for EVERY way of not knowing:
+/// the tree is still in flight ([tree] null), it could not be read, this
+/// multiplexer has no workspaces, the host never said where the agent is
+/// ([AgentStatus.tabId] and [AgentStatus.workspaceId] null), or the tree
+/// simply does not contain those ids because a tab closed between the two
+/// reads. A row that gets null renders exactly as it did before this
+/// existed — still listed, still tappable — which is the same refusal to
+/// draw an unmeasured fact that [mostUrgentAgentState] enforces for the
+/// badge and [AgentSnapshot] enforces for the list itself.
+///
+/// The two halves are looked up INDEPENDENTLY, each against the id the
+/// agent carries for it, so a vanished tab still names its client and a
+/// vanished workspace still names its project. Neither is derived from the
+/// other, and neither is derived from [AgentStatus.target]: pane and tab
+/// ids do share a visible shape on this host, but that is a spelling
+/// convention, and herdr states both facts outright.
+String? agentContextLabel(AgentStatus agent, MuxWorkspaceTreeResult? tree) {
+  if (tree is! MuxWorkspaceTreeAvailable) return null;
+
+  // A null id matches nothing: MuxTab.tabId and MuxWorkspace.workspaceId
+  // are both non-null, so "the host did not say" and "the tree has no such
+  // row" collapse into one branch without a second check for either.
+  final parts = [
+    _labelOf(tree.tabs, (t) => t.tabId == agent.tabId, (t) => t.label),
+    _labelOf(
+      tree.workspaces,
+      (w) => w.workspaceId == agent.workspaceId,
+      (w) => w.label,
+    ),
+  ].whereType<String>();
+
+  // Read as "project, in client". The separator is text, so it survives a
+  // screen reader — unlike a colour or an indent, which say nothing aloud.
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+String? _labelOf<T>(
+  List<T> rows,
+  bool Function(T) matches,
+  String Function(T) label,
+) {
+  for (final row in rows) {
+    if (matches(row)) return label(row);
+  }
+  return null;
+}

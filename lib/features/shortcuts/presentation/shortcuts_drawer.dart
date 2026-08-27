@@ -126,6 +126,11 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                     const _SectionHeader(label: 'AGENTS'),
                     _AgentsSection(
                       session: activeTab?.session,
+                      // The SAME future the WORKSPACES section below reads,
+                      // not a second read. The tree says which project and
+                      // client each agent sits in, which is the only thing
+                      // that tells three rows all called `opencode` apart.
+                      tree: _workspaceTree,
                       focusError: _focusError,
                       onFocus: _focusAgent,
                     ),
@@ -417,11 +422,22 @@ class _SectionHeader extends StatelessWidget {
 class _AgentsSection extends StatelessWidget {
   const _AgentsSection({
     required this.session,
+    required this.tree,
     required this.focusError,
     required this.onFocus,
   });
 
   final TerminalSession? session;
+
+  /// The workspace tree read once for this opening of the drawer, used ONLY
+  /// to name where each agent is — see [agentContextLabel].
+  ///
+  /// Deliberately not awaited before the rows are drawn. An agent list is
+  /// the urgent half of this drawer; holding it back until a second query
+  /// lands would delay the thing the user opened the drawer for in order to
+  /// decorate it. Rows appear at once and gain their context when the tree
+  /// arrives, or keep none if it never does.
+  final Future<MuxWorkspaceTreeResult>? tree;
 
   /// Why the last tap did not raise a pane, or null. Rendered beneath the
   /// rows rather than replacing them: the list is still true, and the user
@@ -499,17 +515,26 @@ class _AgentsSection extends StatelessWidget {
       AgentsKnown(:final agents) when agents.isEmpty => const _EmptyHint(
         text: 'No agents running right now',
       ),
-      AgentsKnown(:final agents) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final agent in _byUrgency(agents))
-            AgentRow(
-              key: ValueKey(agent.target),
-              agent: agent,
-              onTap: () => onFocus(activeSession, agent),
-            ),
-          if (focusError != null) _FocusError(message: focusError!),
-        ],
+      AgentsKnown(:final agents) => FutureBuilder<MuxWorkspaceTreeResult>(
+        future: tree,
+        // A null tree, one still in flight, and one that came back
+        // unreadable all reach `agentContextLabel` as "nothing to join
+        // against", and it answers null for each. The rows are built the
+        // same way in every case, so there is no branch here that could
+        // decide to withhold them.
+        builder: (context, treeSnapshot) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final agent in _byUrgency(agents))
+              AgentRow(
+                key: ValueKey(agent.target),
+                agent: agent,
+                contextLabel: agentContextLabel(agent, treeSnapshot.data),
+                onTap: () => onFocus(activeSession, agent),
+              ),
+            if (focusError != null) _FocusError(message: focusError!),
+          ],
+        ),
       ),
     };
   }
@@ -519,7 +544,8 @@ class _AgentsSection extends StatelessWidget {
   /// polls; sorting a copy leaves the snapshot's list untouched.
   List<AgentStatus> _byUrgency(List<AgentStatus> agents) {
     return [...agents]..sort(
-      (a, b) => agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state)),
+      (a, b) =>
+          agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state)),
     );
   }
 }
@@ -980,11 +1006,7 @@ class _FocusError extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.error_outline,
-            size: 14,
-            color: Color(0xFFF85149),
-          ),
+          const Icon(Icons.error_outline, size: 14, color: Color(0xFFF85149)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

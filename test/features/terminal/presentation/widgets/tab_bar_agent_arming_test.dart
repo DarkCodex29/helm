@@ -105,7 +105,13 @@ void main() {
       final adapter = FakeAgentAdapter()
         ..whenAgents(
           const MuxAgentsAvailable([
-            (target: 'w1:p1', label: 'claude', state: AgentState.blocked),
+            (
+              target: 'w1:p1',
+              label: 'claude',
+              state: AgentState.blocked,
+              tabId: null,
+              workspaceId: null,
+            ),
           ]),
         );
       final session = await _connected(adapter);
@@ -130,7 +136,13 @@ void main() {
       final adapter = FakeAgentAdapter()
         ..whenAgents(
           const MuxAgentsAvailable([
-            (target: 'w1:p1', label: 'claude', state: AgentState.blocked),
+            (
+              target: 'w1:p1',
+              label: 'claude',
+              state: AgentState.blocked,
+              tabId: null,
+              workspaceId: null,
+            ),
           ]),
         );
       final session = await _connected(adapter);

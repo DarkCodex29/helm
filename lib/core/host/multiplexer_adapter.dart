@@ -118,7 +118,28 @@ final class MuxServerNotRunning extends MuxSessionsResult {
 enum AgentState { idle, working, blocked, done, unknown }
 
 /// See [AgentState].
-typedef AgentStatus = ({String target, String label, AgentState state});
+///
+/// [tabId] and [workspaceId] say WHERE the agent is: they join a row in the
+/// agent list to a [MuxTab] and a [MuxWorkspace], which is how a list of
+/// three agents all called `opencode` becomes three agents a user can tell
+/// apart. Both are read straight off the same `agent list` entry as
+/// [target] — the same measurement, at the same instant, so they belong in
+/// the same record rather than in a second structure that could disagree
+/// with this one.
+///
+/// Both are NULLABLE, and null means the host did not say. Only
+/// `terminal_id` is schema-guaranteed on that entry (see
+/// `HerdrAdapter._parseAgentInfo`), so a hard read here would let one
+/// missing field throw during the parse and collapse the ENTIRE agent list
+/// into "the server is unreachable" — a far larger lie than one row that
+/// cannot name its project.
+typedef AgentStatus = ({
+  String target,
+  String label,
+  AgentState state,
+  String? tabId,
+  String? workspaceId,
+});
 
 /// Result of [AgentAwareMultiplexer.listAgents].
 ///

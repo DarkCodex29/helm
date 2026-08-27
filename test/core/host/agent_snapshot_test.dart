@@ -10,10 +10,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 
-AgentStatus _agent(AgentState state, {String target = 't'}) =>
-    (target: target, label: target, state: state);
+AgentStatus _agent(AgentState state, {String target = 't'}) => (
+  target: target,
+  label: target,
+  state: state,
+  tabId: null,
+  workspaceId: null,
+);
 
 void main() {
+  _contextTests();
+
   group('mostUrgentAgentState — no badge unless somebody measured one', () {
     test('nothing asked yet draws no badge', () {
       expect(mostUrgentAgentState(const AgentsNotProbed()), isNull);
@@ -30,13 +37,10 @@ void main() {
       expect(mostUrgentAgentState(const AgentsUnreachable()), isNull);
     });
 
-    test(
-      'a known but empty reading draws no badge either — "nothing is '
-      'happening" is not worth a pixel in the tab strip',
-      () {
-        expect(mostUrgentAgentState(const AgentsKnown([])), isNull);
-      },
-    );
+    test('a known but empty reading draws no badge either — "nothing is '
+        'happening" is not worth a pixel in the tab strip', () {
+      expect(mostUrgentAgentState(const AgentsKnown([])), isNull);
+    });
 
     test('only a known, non-empty reading produces a badge', () {
       expect(
@@ -116,7 +120,8 @@ void main() {
         expect(
           agentStateUrgency(descending[i]),
           greaterThan(agentStateUrgency(descending[i + 1])),
-          reason: '${descending[i].name} must outrank '
+          reason:
+              '${descending[i].name} must outrank '
               '${descending[i + 1].name}',
         );
       }
@@ -130,14 +135,11 @@ void main() {
   });
 
   group('agentStateLabel — what a person actually reads', () {
-    test(
-      'blocked reads as a prompt to answer, not as a failure to '
-      'investigate — it is the state this whole feature exists for',
-      () {
-        expect(agentStateLabel(AgentState.blocked), 'Needs you');
-        expect(agentStateLabel(AgentState.blocked), isNot('Blocked'));
-      },
-    );
+    test('blocked reads as a prompt to answer, not as a failure to '
+        'investigate — it is the state this whole feature exists for', () {
+      expect(agentStateLabel(AgentState.blocked), 'Needs you');
+      expect(agentStateLabel(AgentState.blocked), isNot('Blocked'));
+    });
 
     test('every other state has its own plain-language wording', () {
       expect(agentStateLabel(AgentState.working), 'Working');
@@ -152,6 +154,107 @@ void main() {
         expect(label, isNotEmpty);
         expect(label, isNot(state.name));
       }
+    });
+  });
+}
+
+// ── agentContextLabel ──────────────────────────────────────────────────────
+
+MuxTab _tab(String tabId, String workspaceId, String label) => (
+  tabId: tabId,
+  workspaceId: workspaceId,
+  label: label,
+  number: 1,
+  focused: false,
+  agentState: AgentState.unknown,
+);
+
+MuxWorkspace _workspace(String workspaceId, String label) =>
+    (workspaceId: workspaceId, label: label, agentState: AgentState.unknown);
+
+/// The owner's real tree, trimmed to the two rows these tests join against.
+/// Labels are his, because the defect is about HIS three identical rows.
+final _tree = MuxWorkspaceTreeAvailable(
+  workspaces: [_workspace('w1', 'EBIM'), _workspace('w2', 'Go Nexa')],
+  tabs: [_tab('w1:t1', 'w1', 'Calera'), _tab('w2:t5', 'w2', 'Helm')],
+);
+
+AgentStatus _placed(String? tabId, String? workspaceId) => (
+  target: 'w2:p5',
+  label: 'opencode',
+  state: AgentState.blocked,
+  tabId: tabId,
+  workspaceId: workspaceId,
+);
+
+void _contextTests() {
+  group('agentContextLabel — names the agent only from what was measured', () {
+    test('joins the tab and the workspace it resolved', () {
+      expect(agentContextLabel(_placed('w2:t5', 'w2'), _tree), 'Helm · Go Nexa');
+    });
+
+    test('names two agents in the same state apart — the whole defect', () {
+      final calera = _placed('w1:t1', 'w1');
+      final helm = _placed('w2:t5', 'w2');
+
+      expect(
+        agentContextLabel(calera, _tree),
+        isNot(agentContextLabel(helm, _tree)),
+      );
+    });
+
+    test(
+      'names the workspace alone when the tab is gone from the tree — the '
+      'agent is still in that client, and half a true answer beats none',
+      () {
+        expect(agentContextLabel(_placed('w2:t99', 'w2'), _tree), 'Go Nexa');
+      },
+    );
+
+    test('names the tab alone when the workspace is gone from the tree', () {
+      expect(agentContextLabel(_placed('w2:t5', 'w9'), _tree), 'Helm');
+    });
+
+    test('says nothing when the tree knows neither id', () {
+      expect(agentContextLabel(_placed('w9:t9', 'w9'), _tree), isNull);
+    });
+
+    test('says nothing when the host never reported where the agent is', () {
+      expect(agentContextLabel(_placed(null, null), _tree), isNull);
+    });
+
+    test('says nothing while the tree is still in flight', () {
+      expect(agentContextLabel(_placed('w2:t5', 'w2'), null), isNull);
+    });
+
+    test('says nothing when the tree could not be read', () {
+      expect(
+        agentContextLabel(
+          _placed('w2:t5', 'w2'),
+          const MuxWorkspaceTreeUnreachable(),
+        ),
+        isNull,
+      );
+    });
+
+    test('says nothing when the multiplexer has no workspaces at all', () {
+      expect(
+        agentContextLabel(
+          _placed('w2:t5', 'w2'),
+          const MuxWorkspaceTreeUnsupported(MultiplexerId.tmux),
+        ),
+        isNull,
+      );
+    });
+
+    test('says nothing when the host reported an empty tree', () {
+      expect(
+        agentContextLabel(
+          _placed('w2:t5', 'w2'),
+          const MuxWorkspaceTreeAvailable(workspaces: [], tabs: []),
+        ),
+        isNull,
+      );
     });
   });
 }

@@ -63,8 +63,19 @@ TerminalSession _sessionShowing(
   return session;
 }
 
-AgentStatus _agent(AgentState state, String target) =>
-    (target: target, label: target, state: state);
+AgentStatus _agent(
+  AgentState state,
+  String target, {
+  String? label,
+  String? tabId,
+  String? workspaceId,
+}) => (
+  target: target,
+  label: label ?? target,
+  state: state,
+  tabId: tabId,
+  workspaceId: workspaceId,
+);
 
 /// Every line of text rendered inside the AGENTS section, joined.
 ///
@@ -72,11 +83,15 @@ AgentStatus _agent(AgentState state, String target) =>
 /// sections cannot contribute wording this assertion would misread.
 String _agentsSectionText(WidgetTester tester) {
   final section = find.byWidgetPredicate(
-    (w) => w is Semantics && w.properties.identifier == ShortcutsSemantics.agentsSection,
+    (w) =>
+        w is Semantics &&
+        w.properties.identifier == ShortcutsSemantics.agentsSection,
   );
   expect(section, findsOneWidget);
   return tester
-      .widgetList<Text>(find.descendant(of: section, matching: find.byType(Text)))
+      .widgetList<Text>(
+        find.descendant(of: section, matching: find.byType(Text)),
+      )
       .map((t) => t.data ?? '')
       .join('|');
 }
@@ -123,14 +138,18 @@ Future<TerminalSession?> _pumpDrawer(
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('AGENTS section — four outcomes, only one of them says "none"', () {
-    testWidgets('no active session says so, rather than showing an empty list',
-        (tester) async {
-      await _pumpDrawer(tester, snapshot: null);
+  _agentContextTests();
 
-      expect(find.text('No active session'), findsOneWidget);
-      expect(find.byType(AgentRow), findsNothing);
-    });
+  group('AGENTS section — four outcomes, only one of them says "none"', () {
+    testWidgets(
+      'no active session says so, rather than showing an empty list',
+      (tester) async {
+        await _pumpDrawer(tester, snapshot: null);
+
+        expect(find.text('No active session'), findsOneWidget);
+        expect(find.byType(AgentRow), findsNothing);
+      },
+    );
 
     testWidgets(
       'nothing probed yet says agent state is unknown, never "no agents"',
@@ -140,7 +159,10 @@ void main() {
           snapshot: const AgentsNotProbed(),
         );
 
-        expect(find.text('Not connected — agent state unknown'), findsOneWidget);
+        expect(
+          find.text('Not connected — agent state unknown'),
+          findsOneWidget,
+        );
         expect(find.textContaining('No agents'), findsNothing);
         expect(find.byType(AgentRow), findsNothing);
 
@@ -382,5 +404,232 @@ void main() {
 
       await session?.dispose();
     });
+  });
+}
+
+// ── Agent context ──────────────────────────────────────────────────────────
+
+/// A session that reports itself connected and answers the tree from a
+/// script, so the AGENTS section can be driven against a real tree without
+/// dragging an SSH transport into a widget test. Mirrors
+/// `_TreeScriptedSession` in the workspaces test, which exists for the same
+/// reason.
+class _TreeScriptedSession extends TerminalSession {
+  _TreeScriptedSession(this.tree)
+    : super(profile: _profile, sshService: FakeSSHService());
+
+  final MuxWorkspaceTreeResult tree;
+  int treeCalls = 0;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<MuxWorkspaceTreeResult> refreshWorkspaceTree() async {
+    treeCalls++;
+    return tree;
+  }
+
+  /// The drawer refreshes agents on open. This session's snapshot is set
+  /// directly, and re-asking would need a multiplexer it does not have.
+  @override
+  Future<void> refreshAgents() async {}
+}
+
+/// The owner's real tree, trimmed to the rows these tests join against.
+///
+/// His w2 also holds a tab labelled "Helm" and it is deliberately left out:
+/// the drawer's own header renders the app name "Helm" too, so a fixture by
+/// that name makes a text assertion ambiguous between header and row.
+final _contextTree = MuxWorkspaceTreeAvailable(
+  workspaces: [
+    (workspaceId: 'w1', label: 'EBIM', agentState: AgentState.working),
+    (workspaceId: 'w2', label: 'Go Nexa', agentState: AgentState.blocked),
+  ],
+  tabs: [
+    (
+      tabId: 'w1:t1',
+      workspaceId: 'w1',
+      label: 'Calera',
+      number: 1,
+      focused: false,
+      agentState: AgentState.working,
+    ),
+    (
+      tabId: 'w2:t6',
+      workspaceId: 'w2',
+      label: 'Email',
+      number: 6,
+      focused: true,
+      agentState: AgentState.blocked,
+    ),
+  ],
+);
+
+Future<_TreeScriptedSession> _pumpWithTree(
+  WidgetTester tester, {
+  required List<AgentStatus> agents,
+  required MuxWorkspaceTreeResult tree,
+}) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+
+  final session = _TreeScriptedSession(tree);
+  session.agentsNotifier.value = AgentsKnown(agents);
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        tabsProvider.overrideWith(
+          () => _FixedTabsNotifier(
+            TabsState(
+              tabs: [
+                TerminalTab(
+                  id: 'tab-1',
+                  title: 'helm-0',
+                  session: session,
+                  profile: _profile,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      child: const MaterialApp(home: Scaffold(drawer: ShortcutsDrawer())),
+    ),
+  );
+  tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
+  await tester.pumpAndSettle();
+  return session;
+}
+
+void _agentContextTests() {
+  group('AGENTS section — three rows called opencode must not read alike', () {
+    testWidgets(
+      'names the project and client each agent is in, using the tree the '
+      'drawer already holds',
+      (tester) async {
+        await _pumpWithTree(
+          tester,
+          agents: [
+            _agent(
+              AgentState.working,
+              'w1:p1',
+              label: 'opencode',
+              tabId: 'w1:t1',
+              workspaceId: 'w1',
+            ),
+            _agent(
+              AgentState.blocked,
+              'w2:p6',
+              label: 'opencode',
+              tabId: 'w2:t6',
+              workspaceId: 'w2',
+            ),
+          ],
+          tree: _contextTree,
+        );
+
+        final text = _agentsSectionText(tester);
+        expect(text, contains('Calera · EBIM'));
+        expect(text, contains('Email · Go Nexa'));
+      },
+    );
+
+    testWidgets(
+      'asks the host NOTHING extra for it — the tree is the same one read '
+      'once for the workspace section',
+      (tester) async {
+        final session = await _pumpWithTree(
+          tester,
+          agents: [
+            _agent(
+              AgentState.idle,
+              'w1:p1',
+              label: 'opencode',
+              tabId: 'w1:t1',
+              workspaceId: 'w1',
+            ),
+          ],
+          tree: _contextTree,
+        );
+
+        expect(session.treeCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'still lists and still allows tapping an agent the tree cannot place '
+      '— an unplaceable agent is a real agent',
+      (tester) async {
+        await _pumpWithTree(
+          tester,
+          agents: [
+            _agent(
+              AgentState.blocked,
+              'w9:p9',
+              label: 'opencode',
+              tabId: 'w9:t9',
+              workspaceId: 'w9',
+            ),
+          ],
+          tree: _contextTree,
+        );
+
+        expect(_agentsSectionText(tester), contains('opencode'));
+        expect(find.byType(AgentRow), findsOneWidget);
+        expect(tester.widget<AgentRow>(find.byType(AgentRow)).onTap, isNotNull);
+      },
+    );
+
+    testWidgets(
+      'invents no context when the tree could not be read, rather than '
+      'guessing one from the pane id',
+      (tester) async {
+        await _pumpWithTree(
+          tester,
+          agents: [
+            _agent(
+              AgentState.blocked,
+              'w1:p1',
+              label: 'opencode',
+              tabId: 'w1:t1',
+              workspaceId: 'w1',
+            ),
+          ],
+          tree: const MuxWorkspaceTreeUnreachable(),
+        );
+
+        expect(
+          tester.widget<AgentRow>(find.byType(AgentRow)).contextLabel,
+          isNull,
+        );
+        expect(_agentsSectionText(tester), contains('opencode'));
+      },
+    );
+
+    testWidgets(
+      'lists agents without waiting for the tree — a session with no tree '
+      'to read renders its agents anyway',
+      (tester) async {
+        await _pumpDrawer(
+          tester,
+          snapshot: const AgentsKnown([
+            (
+              target: 'w1:p1',
+              label: 'opencode',
+              state: AgentState.blocked,
+              tabId: 'w1:t1',
+              workspaceId: 'w1',
+            ),
+          ]),
+        );
+
+        expect(find.byType(AgentRow), findsOneWidget);
+        expect(
+          tester.widget<AgentRow>(find.byType(AgentRow)).contextLabel,
+          isNull,
+        );
+      },
+    );
   });
 }

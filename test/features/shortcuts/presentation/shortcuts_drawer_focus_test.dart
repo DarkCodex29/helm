@@ -62,8 +62,13 @@ class _FocusScriptedSession extends TerminalSession {
   }
 }
 
-AgentStatus _agent(AgentState state, String target, {String? label}) =>
-    (target: target, label: label ?? target, state: state);
+AgentStatus _agent(AgentState state, String target, {String? label}) => (
+  target: target,
+  label: label ?? target,
+  state: state,
+  tabId: null,
+  workspaceId: null,
+);
 
 Future<_FocusScriptedSession> _pumpOpenDrawer(
   WidgetTester tester, {

@@ -102,34 +102,31 @@ void main() {
       await down.dispose();
     });
 
-    testWidgets(
-      'the dot turns to the connected colour the moment the session '
-      'connects, with no other rebuild to prompt it',
-      (tester) async {
-        final subject = _session();
-        // A reference tab that is already up, so the assertion names the
-        // connected colour without hardcoding the palette.
-        final reference = _session(status: ConnectionStatus.connected);
+    testWidgets('the dot turns to the connected colour the moment the session '
+        'connects, with no other rebuild to prompt it', (tester) async {
+      final subject = _session();
+      // A reference tab that is already up, so the assertion names the
+      // connected colour without hardcoding the palette.
+      final reference = _session(status: ConnectionStatus.connected);
 
-        await _pumpTabs(tester, [
-          _tab(subject, id: 'a'),
-          _tab(reference, id: 'b'),
-        ]);
+      await _pumpTabs(tester, [
+        _tab(subject, id: 'a'),
+        _tab(reference, id: 'b'),
+      ]);
 
-        final connectedColour = _dotColors(tester)[1];
-        expect(_dotColors(tester)[0], isNot(connectedColour));
+      final connectedColour = _dotColors(tester)[1];
+      expect(_dotColors(tester)[0], isNot(connectedColour));
 
-        // Exactly what a successful connect does — and nothing else. No
-        // provider update, no setState, no new tab list.
-        subject.statusNotifier.value = ConnectionStatus.connected;
-        await tester.pump();
+      // Exactly what a successful connect does — and nothing else. No
+      // provider update, no setState, no new tab list.
+      subject.statusNotifier.value = ConnectionStatus.connected;
+      await tester.pump();
 
-        expect(_dotColors(tester)[0], connectedColour);
+      expect(_dotColors(tester)[0], connectedColour);
 
-        await subject.dispose();
-        await reference.dispose();
-      },
-    );
+      await subject.dispose();
+      await reference.dispose();
+    });
 
     testWidgets('the dot goes back when the session drops', (tester) async {
       final subject = _session(status: ConnectionStatus.connected);
@@ -188,10 +185,7 @@ void main() {
       final first = _session();
       final second = _session();
 
-      await _pumpTabs(tester, [
-        _tab(first, id: 'a'),
-        _tab(second, id: 'b'),
-      ]);
+      await _pumpTabs(tester, [_tab(first, id: 'a'), _tab(second, id: 'b')]);
 
       first.statusNotifier.value = ConnectionStatus.connected;
       await tester.pump();
@@ -235,8 +229,20 @@ void main() {
     ) async {
       final session = _session(
         agents: const AgentsKnown([
-          (target: 'a', label: 'a', state: AgentState.idle),
-          (target: 'b', label: 'b', state: AgentState.blocked),
+          (
+            target: 'a',
+            label: 'a',
+            state: AgentState.idle,
+            tabId: null,
+            workspaceId: null,
+          ),
+          (
+            target: 'b',
+            label: 'b',
+            state: AgentState.blocked,
+            tabId: null,
+            workspaceId: null,
+          ),
         ]),
       );
 
@@ -260,7 +266,13 @@ void main() {
       expect(find.byType(AgentBadge), findsNothing);
 
       session.agentsNotifier.value = const AgentsKnown([
-        (target: 'a', label: 'a', state: AgentState.working),
+        (
+          target: 'a',
+          label: 'a',
+          state: AgentState.working,
+          tabId: null,
+          workspaceId: null,
+        ),
       ]);
       await tester.pump();
 
