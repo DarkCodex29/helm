@@ -553,9 +553,24 @@ class HerdrAdapter
         '$states --timeout ${timeout.inMilliseconds}';
   }
 
-  /// `--session` is a GLOBAL option and MUST precede the subcommand —
-  /// verified against the real binary, where `herdr --session helm-0 agent
-  /// list` succeeds and the trailing-flag spellings are rejected outright.
+  /// `--session` precedes the subcommand because it is a GLOBAL option, and
+  /// the leading placement is the one spelling verified to work on every
+  /// herdr this app has been measured against.
+  ///
+  /// This comment used to claim the trailing spellings were "rejected
+  /// outright". That was recorded as CONFIRMED and is no longer true:
+  /// re-measured against live herdr 0.8.0 and 0.8.2, `herdr agent list
+  /// --session <name>`, `herdr pane list --session <name>` and `herdr
+  /// session list --session <name>` all exit 0, and on 0.8.2 the trailing
+  /// form demonstrably reaches the scoped socket. Either herdr's argument
+  /// parsing relaxed, or the original check generalised from a narrower
+  /// observation; there is no evidence to choose between those.
+  ///
+  /// The emitted command does NOT change. Leading placement works on both
+  /// versions, so it stays as the single spelling. What changed is the
+  /// stated reason, because a CONFIRMED claim that no longer holds is worse
+  /// than no claim at all — it carries authority into someone else's
+  /// decision.
   String get _agentListCommand => '$_absPath${_sessionScope}agent list';
 
   /// Scoped for the same MEASURED reason [_agentListCommand] is: each herdr
@@ -564,9 +579,8 @@ class HerdrAdapter
   /// describe the DEFAULT session's panes while the verdict was published
   /// against the attached one.
   ///
-  /// `--session` precedes the subcommand because it is a GLOBAL option —
-  /// verified against the real binary, where the trailing spellings are
-  /// rejected outright. See [_agentListCommand].
+  /// `--session` precedes the subcommand for the reason — and with the
+  /// correction — recorded on [_agentListCommand].
   String get _paneListCommand => '$_absPath${_sessionScope}pane list';
 
   /// Deliberately NOT scoped. `session list --json` enumerates every herdr

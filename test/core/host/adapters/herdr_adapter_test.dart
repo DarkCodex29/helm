@@ -652,9 +652,17 @@ void main() {
       expect(scopedRunner.runCalls, [expected]);
     });
 
+    // Pins the ONE spelling, not a claim about the other one.
+    //
+    // This test used to be named for the assertion that the trailing
+    // spelling is "rejected outright by the real binary". Re-measured
+    // against live herdr 0.8.0 and 0.8.2, that is false — the trailing form
+    // exits 0 on both. What remains true, and what this pins, is that the
+    // leading placement works everywhere this app has been measured, so it
+    // is the only spelling emitted. See [_agentListCommand]'s doc comment.
     test(
-      'the --session flag precedes the subcommand, never trails it — the '
-      'trailing spelling is rejected outright by the real binary',
+      'the --session flag precedes the subcommand, because leading '
+      'placement is the spelling verified on every measured herdr',
       () async {
         final scopedRunner = FakeHostCommandRunner();
         final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
