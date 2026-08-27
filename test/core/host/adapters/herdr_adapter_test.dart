@@ -144,6 +144,35 @@ const _agentWaitNoServer =
     '{"id":"cli:agent:wait","error":{"code":"server_not_running",'
     '"message":"no herdr server is running at socket"}}';
 
+/// `agent focus`'s success envelope, captured VERBATIM from a live
+/// `herdr agent focus w1:p1` against a real herdr 0.8.2.
+///
+/// It answers with the FOCUSED agent, in the same `{id, result: {agent,
+/// type: "agent_info"}}` shape `agent wait` uses — NOT an empty result and
+/// NOT the `agents` list `agent list` returns. The adapter deliberately
+/// does not parse it (see [MuxAgentFocused]), so this fixture exists to
+/// prove the success path is decided by the EXIT CODE and cannot be broken
+/// by a body nobody reads.
+String _agentFocusSuccess(Map<String, Object?> agent) => jsonEncode({
+  'id': 'cli:agent:focus',
+  'result': {'agent': agent, 'type': 'agent_info'},
+});
+
+/// Verbatim, exit code 1, on STDERR — measured against herdr 0.8.2 with
+/// `herdr agent focus w99:p99`. Confirmed to go to stderr and not stdout:
+/// `herdr agent focus w99:p99 2>/dev/null` prints nothing.
+const _agentFocusNotFound =
+    '{"error":{"code":"agent_not_found","message":"agent target w99:p99 '
+    'not found"},"id":"cli:agent:focus"}';
+
+/// Verbatim, exit code 1, on stderr — measured with
+/// `herdr --session helm-does-not-exist agent focus w1:p1`.
+const _agentFocusNoServer =
+    '{"id":"cli:agent:focus","error":{"code":"server_not_running",'
+    '"message":"no herdr server is running at '
+    '/home/deployer/.config/herdr/sessions/helm-0/herdr.sock; run `herdr '
+    'session attach helm-0` to start or attach it"}}';
+
 const _agentListUnrecognizedError =
     '{"id":"cli:agent:list","error":{"code":"internal_error",'
     '"message":"unexpected failure"}}';
@@ -954,6 +983,217 @@ void main() {
     );
   });
 
+  group('focusAgent — bringing the agent`s pane to the front', () {
+    // MEASURED against a real herdr 0.8.2 binary, not assumed:
+    //
+    //   $ herdr agent focus --help
+    //     Focus an agent
+    //     Usage: herdr agent focus <target>
+    //     Arguments:
+    //       <target>
+    //
+    // The target is POSITIONAL — there is no `--target` flag — and it is
+    // the PANE id, the same identifier `agent wait` accepts and the same
+    // one `AgentStatus.target` already carries. Confirmed by feeding it a
+    // terminal id: `herdr agent focus term_65a07c99f57a51` answers
+    // `agent_not_found`, exactly as `agent wait` does.
+    //
+    // Three outcomes were observed, and all three are distinguishable
+    // from the exit code plus `error.code` alone:
+    //   exit 0 → {"id":"cli:agent:focus","result":{"agent":{...},
+    //             "type":"agent_info"}}      (stdout)
+    //   exit 1 → {"error":{"code":"agent_not_found", ...}}   (stderr)
+    //   exit 1 → {"error":{"code":"server_not_running", ...}} (stderr)
+
+    test(
+      'emits the real focus command with the target POSITIONAL and shell-'
+      'quoted, because it reaches a remote shell',
+      () async {
+        // The command STRING is the assertion, not the parse. Every defect
+        // this adapter has shipped lived in the emitted command while the
+        // parse stayed green — the trailing `--session` spelling and the
+        // terminal-id target both did. A `--target` flag would be the
+        // third, and herdr rejects it outright.
+        const expected = "herdr agent focus 'w1:p1'";
+        runner.whenRun(
+          expected,
+          HostCommandResult(
+            stdout: _agentFocusSuccess(_blockedAgentInfo),
+            exitCode: 0,
+          ),
+        );
+
+        await adapter.focusAgent('w1:p1');
+
+        expect(runner.runCalls, [expected]);
+        expect(runner.runCalls.single, isNot(contains('--target')));
+      },
+    );
+
+    test('shell-quotes a hostile target', () async {
+      const expected = "herdr agent focus 'w1:p1;rm -rf /'";
+      runner.whenRun(
+        expected,
+        HostCommandResult(
+          stdout: _agentFocusSuccess(_blockedAgentInfo),
+          exitCode: 0,
+        ),
+      );
+
+      await adapter.focusAgent('w1:p1;rm -rf /');
+
+      expect(runner.runCalls, [expected]);
+    });
+
+    test(
+      'the focus is scoped, and --session still precedes the subcommand — '
+      'an unscoped focus would raise a pane in another session',
+      () async {
+        const expected = "herdr --session 'helm-0' agent focus 'w1:p1'";
+        final scopedRunner = FakeHostCommandRunner();
+        // Both spellings are canned so a regression fails on the ASSERTION
+        // that names the defect, not on the fake having nothing registered.
+        for (final command in const [expected, "herdr agent focus 'w1:p1'"]) {
+          scopedRunner.whenRun(
+            command,
+            HostCommandResult(
+              stdout: _agentFocusSuccess(_blockedAgentInfo),
+              exitCode: 0,
+            ),
+          );
+        }
+        final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+        await scoped.focusAgent('w1:p1');
+
+        final emitted = scopedRunner.runCalls.single;
+        expect(emitted, expected);
+        expect(
+          emitted.indexOf('--session'),
+          lessThan(emitted.indexOf('agent focus')),
+        );
+      },
+    );
+
+    test('exit 0 is FOCUSED', () async {
+      runner.whenRun(
+        "herdr agent focus 'w1:p1'",
+        HostCommandResult(
+          stdout: _agentFocusSuccess(_blockedAgentInfo),
+          exitCode: 0,
+        ),
+      );
+
+      expect(await adapter.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+    });
+
+    test(
+      'a success body this adapter never parses cannot break the success '
+      'path — the exit code is what decides it',
+      () async {
+        // herdr could add a field, drop `agent`, or change `type` and this
+        // must keep working: nothing downstream reads the body. Asserting
+        // it here is what stops a future contributor "helpfully" parsing a
+        // payload no caller wants.
+        runner.whenRun(
+          "herdr agent focus 'w1:p1'",
+          const HostCommandResult(stdout: 'not json at all', exitCode: 0),
+        );
+
+        expect(await adapter.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+      },
+    );
+
+    test(
+      'a vanished pane is TARGET NOT FOUND, never a generic failure — the '
+      'drawer showed the user a row that is gone, and that is a different '
+      'thing to say than "we could not reach the host"',
+      () async {
+        runner.whenRun(
+          "herdr agent focus 'w99:p99'",
+          const HostCommandResult(stderr: _agentFocusNotFound, exitCode: 1),
+        );
+
+        final result = await adapter.focusAgent('w99:p99');
+
+        expect(result, isA<MuxAgentFocusTargetNotFound>());
+        expect(result, isNot(isA<MuxAgentFocusFailed>()));
+        expect(result, isNot(isA<MuxAgentFocused>()));
+      },
+    );
+
+    test(
+      'a dead agent server is FAILED and carries the code, never FOCUSED',
+      () async {
+        runner.whenRun(
+          "herdr agent focus 'w1:p1'",
+          const HostCommandResult(stderr: _agentFocusNoServer, exitCode: 1),
+        );
+
+        final result = await adapter.focusAgent('w1:p1');
+
+        expect(result, isA<MuxAgentFocusFailed>());
+        expect((result as MuxAgentFocusFailed).code, 'server_not_running');
+      },
+    );
+
+    test(
+      'an unrecognized code is reported AS ITSELF — never silently mapped '
+      'onto server_not_running and never onto a target that is missing',
+      () async {
+        runner.whenRun(
+          "herdr agent focus 'w1:p1'",
+          const HostCommandResult(
+            stderr:
+                '{"id":"cli:agent:focus","error":{"code":"internal_error",'
+                '"message":"unexpected failure"}}',
+            exitCode: 1,
+          ),
+        );
+
+        final result = await adapter.focusAgent('w1:p1');
+
+        expect(result, isA<MuxAgentFocusFailed>());
+        expect((result as MuxAgentFocusFailed).code, 'internal_error');
+        expect(result, isNot(isA<MuxAgentFocusTargetNotFound>()));
+      },
+    );
+
+    test(
+      'stderr that is not herdr JSON at all is FAILED with a NULL code, so '
+      'an unrecognized failure is reported as unrecognized',
+      () async {
+        runner.whenRun(
+          "herdr agent focus 'w1:p1'",
+          const HostCommandResult(
+            stderr: 'herdr: command not found',
+            exitCode: 127,
+          ),
+        );
+
+        final result = await adapter.focusAgent('w1:p1');
+
+        expect(result, isA<MuxAgentFocusFailed>());
+        expect((result as MuxAgentFocusFailed).code, isNull);
+      },
+    );
+
+    test(
+      'a transport that gave up without an exit code is FAILED — nothing '
+      'is known about whether the pane was raised',
+      () async {
+        runner.whenRun(
+          "herdr agent focus 'w1:p1'",
+          const HostCommandResult(timedOut: true),
+        );
+
+        expect(
+          await adapter.focusAgent('w1:p1'),
+          isA<MuxAgentFocusFailed>(),
+        );
+      },
+    );
+  });
 
   group('listSessions', () {
     test(

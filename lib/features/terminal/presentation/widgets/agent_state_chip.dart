@@ -90,56 +90,73 @@ class AgentBadge extends StatelessWidget {
 /// Full-width row for the drawer: icon, agent label, and the state in
 /// words. Unlike [AgentBadge] there is room here for the real wording, so
 /// nothing is left to a tooltip.
+///
+/// Tappable when [onTap] is given — which is how the user reaches the
+/// agent rather than hunting for its pane by hand. Inert without one, so a
+/// surface with nothing to act on cannot look pressable.
 class AgentRow extends StatelessWidget {
-  const AgentRow({super.key, required this.agent});
+  const AgentRow({super.key, required this.agent, this.onTap});
 
   final AgentStatus agent;
+
+  /// Invoked when the row is tapped. Null makes the row inert.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final style = AgentStateStyle.of(agent.state);
     final isUrgent = agent.state == AgentState.blocked;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF21262D),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            // The one that needs a human is the one the eye should land on
-            // first when the drawer opens.
-            color: isUrgent ? style.color : const Color(0xFF30363D),
-            width: isUrgent ? 1.5 : 1,
+    return InkWell(
+      // Wrapping the Padding rather than the Container, matching the
+      // drawer's project tiles so the two rows respond identically.
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Container(
+          // 48 on the CARD, not on the InkWell, so the guarantee survives
+          // someone changing the padding above it. This is a phone held one
+          // -handed and the row below belongs to a different agent; a
+          // mis-hit sends the user to the wrong pane.
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF21262D),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              // The one that needs a human is the one the eye should land
+              // on first when the drawer opens.
+              color: isUrgent ? style.color : const Color(0xFF30363D),
+              width: isUrgent ? 1.5 : 1,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            Icon(style.icon, size: 14, color: style.color),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                agent.label,
-                style: const TextStyle(
-                  color: Color(0xFFE6EDF3),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+          child: Row(
+            children: [
+              Icon(style.icon, size: 14, color: style.color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  agent.label,
+                  style: const TextStyle(
+                    color: Color(0xFFE6EDF3),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              agentStateLabel(agent.state),
-              style: TextStyle(
-                color: style.color,
-                fontSize: 11,
-                fontWeight: isUrgent ? FontWeight.w700 : FontWeight.w500,
+              const SizedBox(width: 8),
+              Text(
+                agentStateLabel(agent.state),
+                style: TextStyle(
+                  color: style.color,
+                  fontSize: 11,
+                  fontWeight: isUrgent ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

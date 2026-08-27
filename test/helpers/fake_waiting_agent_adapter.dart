@@ -105,6 +105,16 @@ class FakeWaitingAgentAdapter
     return completer.future.whenComplete(() => _outstanding--);
   }
 
+  /// Deliberately loud. This fake exists to drive the WAIT loop; a
+  /// consumer that focuses through it is exercising a surface this fake
+  /// makes no promises about, and must say so by using [FakeAgentAdapter].
+  @override
+  Future<MuxAgentFocusResult> focusAgent(String target) async =>
+      throw StateError(
+        'FakeWaitingAgentAdapter: focusAgent() is not scripted here — use '
+        'FakeAgentAdapter for focus behaviour',
+      );
+
   @override
   Future<MuxDetection> detect() async =>
       const MuxDetection.installed(absPath: 'fake', version: 'fake 1.0');

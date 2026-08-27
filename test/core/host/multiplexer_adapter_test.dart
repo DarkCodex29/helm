@@ -16,6 +16,10 @@ class _FakeAgentAwareMultiplexer implements AgentAwareMultiplexer {
     required Set<AgentState> until,
     required Duration timeout,
   }) async => const MuxAgentWaitTimedOut();
+
+  @override
+  Future<MuxAgentFocusResult> focusAgent(String target) async =>
+      const MuxAgentFocused();
 }
 
 class _FakeAgentCapableAdapter implements MultiplexerAdapter {

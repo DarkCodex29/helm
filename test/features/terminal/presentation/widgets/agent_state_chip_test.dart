@@ -141,6 +141,52 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('AgentRow — tapping it is how the user reaches that agent', () {
+    testWidgets('reports the tap to its owner', (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        _host(AgentRow(agent: _agent(AgentState.blocked), onTap: () => taps++)),
+      );
+
+      await tester.tap(find.byType(AgentRow));
+      await tester.pump();
+
+      expect(taps, 1);
+    });
+
+    testWidgets(
+      'is inert without a handler — a row nobody can act on must not look '
+      'or behave as though it were pressable',
+      (tester) async {
+        await tester.pumpWidget(_host(AgentRow(agent: _agent(AgentState.idle))));
+
+        await tester.tap(find.byType(AgentRow));
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+        expect(tester.widget<InkWell>(find.byType(InkWell)).onTap, isNull);
+      },
+    );
+
+    testWidgets(
+      'gives the tap at least 48dp of height, because this is a phone held '
+      'one-handed and the row beneath it belongs to a different agent',
+      (tester) async {
+        for (final state in AgentState.values) {
+          await tester.pumpWidget(
+            _host(AgentRow(agent: _agent(state), onTap: () {})),
+          );
+
+          expect(
+            tester.getSize(find.byType(InkWell)).height,
+            greaterThanOrEqualTo(48.0),
+            reason: '$state row is too small to hit reliably',
+          );
+        }
+      },
+    );
+  });
 }
 
 /// Alpha of the badge container's fill — how loudly it claims attention.

@@ -245,6 +245,26 @@ const kAgentListTimeout = Duration(seconds: 8);
 /// rather than one per poll interval.
 const kPaneListTimeout = Duration(seconds: 8);
 
+/// Ceiling on a single focus request before it is reported as failed.
+///
+/// Same value and same reasoning as [kAgentListTimeout] —
+/// `AgentAwareMultiplexer.focusAgent` takes no timeout, and there is no
+/// host-side flag to give it one, so a wedged host would otherwise park a
+/// tap forever and leave the drawer waiting on an answer that never comes.
+///
+/// The leak it bounds is the one this app has already paid for once. The
+/// list and the pane query are issued by helm on ITS schedule; focus is
+/// issued by a THUMB, and a user who taps a row again because nothing
+/// happened is doing the most natural thing in the world. `.timeout`
+/// abandons the Future without closing the remote channel, so a release on
+/// abandonment would hand every repeat tap a fresh channel — six taps,
+/// six held channels, and OpenSSH's default `MaxSessions` of 10 four taps
+/// further on, at which point a reconnect has no channel left to attach
+/// through. That is commit 773888f's failure with a new trigger, and
+/// [TerminalSession.focusAgent] closes it the same way: the in-flight
+/// guard is released by the QUERY settling, never by the caller giving up.
+const kAgentFocusTimeout = Duration(seconds: 8);
+
 /// Ceiling on how long [TerminalSession.connect] waits for an attached view
 /// to report its first real size.
 ///
@@ -565,6 +585,10 @@ class TerminalSession {
   /// Guards against overlapping pane queries. Released by the query's own
   /// completion, never by a timeout — see [refreshSessionVitality].
   bool _vitalityQueryInFlight = false;
+
+  /// Guards against overlapping focus requests. Released by the request's
+  /// own completion, never by a timeout — see [focusAgent].
+  bool _focusRequestInFlight = false;
 
   /// Pending re-entry into [_trackAgents] when tracking could not be
   /// event-driven this cycle. Non-null only while a retry is genuinely
@@ -1277,6 +1301,65 @@ class TerminalSession {
       if (_disposed) return;
       if (statusNotifier.value != ConnectionStatus.connected) return;
       agentsNotifier.value = const AgentsUnreachable();
+    }
+  }
+
+  /// Asks the host to bring [target]'s pane to the front, so the user is
+  /// looking at that agent.
+  ///
+  /// [target] is an [AgentStatus.target] straight from the snapshot the
+  /// caller is rendering — the pane id herdr's own focus accepts.
+  ///
+  /// Never throws and never rejects, because the caller is a tap handler
+  /// and an error escaping one surfaces as an unhandled async error rather
+  /// than as feedback. Every failure — a torn-down session, a dropped
+  /// connection, a multiplexer that cannot focus, a wedged host, or an
+  /// adapter that threw — becomes a [MuxAgentFocusResult] the caller must
+  /// switch over. It NEVER degrades to [MuxAgentFocused], which is the one
+  /// variant a caller is entitled to close its drawer on.
+  ///
+  /// The codes on [MuxAgentFocusFailed] are helm's OWN when the request
+  /// never reached the multiplexer, and the multiplexer's when it did.
+  /// They exist for logs and tests; nothing in the UI branches on them,
+  /// which is why they are strings rather than a second enum nobody reads.
+  ///
+  /// THE ONE IN-FLIGHT REQUEST is the whole reason this is not a two-line
+  /// pass-through. See [kAgentFocusTimeout]: the guard is released by the
+  /// request settling, never by this call giving up on it, so a wedged
+  /// host costs exactly one abandoned channel no matter how many times a
+  /// frustrated user taps the row.
+  Future<MuxAgentFocusResult> focusAgent(String target) async {
+    if (_disposed) return const MuxAgentFocusFailed('session_disposed');
+    if (statusNotifier.value != ConnectionStatus.connected) {
+      return const MuxAgentFocusFailed('not_connected');
+    }
+    if (_focusRequestInFlight) {
+      return const MuxAgentFocusFailed('focus_already_in_flight');
+    }
+
+    final support = AgentSupport.resolve(_muxAdapter);
+    if (support is! AgentSupportAvailable) {
+      return const MuxAgentFocusFailed('multiplexer_cannot_focus');
+    }
+
+    _focusRequestInFlight = true;
+    final request = support.agents.focusAgent(target);
+    // Released when the REQUEST settles, not when this call stops waiting —
+    // the discipline [kAgentListTimeout] documents. The error is swallowed
+    // here and handled on the awaited branch below: both observe the same
+    // Future, and an unobserved rejection on this one would surface as an
+    // unhandled async error.
+    unawaited(
+      request
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() => _focusRequestInFlight = false),
+    );
+
+    try {
+      return await request.timeout(kAgentFocusTimeout);
+    } catch (e) {
+      _log.w('Agent focus failed for ${profile.name} ($target): $e');
+      return const MuxAgentFocusFailed(null);
     }
   }
 

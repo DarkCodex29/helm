@@ -302,7 +302,67 @@ class HerdrAdapter
     return MuxAgentWaitMatched(_parseAgentInfo(agentJson));
   }
 
+  /// Raises [target]'s pane via `herdr agent focus`.
+  ///
+  /// MEASURED against a real herdr 0.8.2 binary, not assumed:
+  ///
+  /// ```text
+  /// $ herdr agent focus --help
+  ///   Focus an agent
+  ///   Usage: herdr agent focus <target>
+  /// ```
+  ///
+  /// The target is POSITIONAL — there is no `--target` flag — and it is
+  /// the pane id, the identifier [_parseAgentInfo] already puts in
+  /// [AgentStatus.target]. Three outcomes were observed, all three
+  /// separable from the exit code plus `error.code`:
+  ///
+  /// * exit 0, stdout `{id, result: {agent, type: "agent_info"}}` — herdr
+  ///   echoes the agent it focused, in `agent wait`'s envelope rather than
+  ///   `agent list`'s.
+  /// * exit 1, stderr `{"error":{"code":"agent_not_found", ...}}`.
+  /// * exit 1, stderr `{"error":{"code":"server_not_running", ...}}`.
+  ///
+  /// The success body is deliberately NOT parsed. Nothing downstream reads
+  /// it (see [MuxAgentFocused]), and a parse of a payload no caller wants
+  /// would be one more way for this operation to fail while the host in
+  /// fact did the thing that was asked. Success is the exit status.
+  ///
+  /// Error handling is [listAgents]' in substance and [waitForAgent]'s in
+  /// shape: the machine-readable `error.code` decides the outcome, and a
+  /// code this adapter does not recognize is never silently collapsed into
+  /// one it does. It is RETURNED rather than thrown — unlike [listAgents],
+  /// which has nowhere to put it — because the only caller is a tap
+  /// handler, and a [StateError] escaping into a button callback would
+  /// surface as an unhandled async error instead of as feedback.
+  @override
+  Future<MuxAgentFocusResult> focusAgent(String target) async {
+    final result = await _runner.run(_agentFocusCommand(target));
+    if (result.timedOut || result.exitCode == null) {
+      // No exit status was read, so nothing is known about whether the
+      // pane moved. Never reported as success.
+      return const MuxAgentFocusFailed('transport_incomplete');
+    }
+    if (result.exitCode != 0) {
+      final code = _parseErrorCode(result.stderr);
+      // The ONLY code that means "the agent is not there"; everything
+      // else — a dead socket, an unrecognized code, or stderr that is not
+      // the JSON envelope at all — means we could not find out.
+      if (code == 'agent_not_found') return const MuxAgentFocusTargetNotFound();
+      return MuxAgentFocusFailed(code);
+    }
+    return const MuxAgentFocused();
+  }
+
   // ── Private ────────────────────────────────────────────────────────────
+
+  /// Builds the `agent focus` invocation.
+  ///
+  /// [target] is shell-quoted because it reaches a remote shell and is
+  /// host-supplied (AD-3), and `--session` precedes the subcommand because
+  /// it is a GLOBAL option. See [_agentListCommand].
+  String _agentFocusCommand(String target) =>
+      '$_absPath${_sessionScope}agent focus ${shellQuote(target)}';
 
   /// Builds the `agent wait` invocation.
   ///

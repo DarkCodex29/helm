@@ -253,6 +253,71 @@ final class MuxAgentWaitFailed extends MuxAgentWaitResult {
   final String? code;
 }
 
+/// Result of [AgentAwareMultiplexer.focusAgent].
+///
+/// THREE variants, and a `bool` would have been wrong for the same reason
+/// an empty list is wrong for [MuxAgentsResult]: `false` reads as one fact
+/// while covering two, and the caller here acts on the difference. A user
+/// tapped an agent in a list they are looking at RIGHT NOW. If that agent
+/// is gone, the honest answer is that the list is stale — a claim about
+/// helm's own screen. If the host could not be reached, nothing at all is
+/// known about that agent, including whether it is still there. Telling a
+/// person "that agent is gone" when the truth is "we could not ask" is the
+/// same lie [AgentSnapshot] exists to prevent, arriving through an ACTION
+/// instead of through a reading.
+///
+/// The consumer is a UI gesture, so nothing here throws: a tap handler is
+/// not a place an unhandled error may surface from. Every outcome is a
+/// value the caller must switch over.
+sealed class MuxAgentFocusResult {
+  const MuxAgentFocusResult();
+}
+
+/// The multiplexer raised the agent's pane.
+///
+/// Carries NOTHING deliberately. herdr answers with the focused agent's
+/// full `AgentInfo`, and storing it would be storing a field no caller
+/// reads — the reason [MuxPane] drops nine of herdr's twelve pane fields.
+/// It also keeps the success path free of a parse: this variant is decided
+/// by the exit status, so a response body helm never reads cannot break
+/// the one operation the user is waiting on.
+final class MuxAgentFocused extends MuxAgentFocusResult {
+  const MuxAgentFocused();
+}
+
+/// The multiplexer has no such agent: the pane closed, or the agent exited,
+/// between the list being drawn and the row being tapped.
+///
+/// MUST NOT be collapsed into [MuxAgentFocusFailed]. This one is a fact
+/// about the HOST that helm can act on — the list on screen is out of
+/// date — while a failure means helm could not find out anything.
+final class MuxAgentFocusTargetNotFound extends MuxAgentFocusResult {
+  const MuxAgentFocusTargetNotFound();
+}
+
+/// The focus could not be performed or its outcome is unknown: the
+/// agent-tracking server was unreachable, the transport gave up, or the
+/// multiplexer failed in a way this adapter does not recognize.
+///
+/// MUST NOT be treated as [MuxAgentFocused]. [code] carries the
+/// multiplexer's machine-readable error code when it gave one, and is null
+/// when it did not, so an unrecognized failure is reported as unrecognized
+/// rather than mapped onto a known one — the discipline
+/// [MuxAgentWaitFailed] states, for the same reason.
+///
+/// `server_not_running` deliberately does NOT get its own variant the way
+/// it does in [MuxAgentsResult] and [MuxPanesResult]. Those are LISTS,
+/// where the whole hazard is an unreachable server being read as "nothing
+/// there"; this is a single action with no empty answer to be confused
+/// with, and no caller reacts to a dead socket differently from any other
+/// way of not knowing. A variant nobody switches on is a variant every
+/// future reader has to justify, so the code is carried instead.
+final class MuxAgentFocusFailed extends MuxAgentFocusResult {
+  const MuxAgentFocusFailed(this.code);
+
+  final String? code;
+}
+
 /// Execution surface for adapters that advertise [MuxCapability.agentState].
 ///
 /// Reachable only through [MultiplexerAdapter.agents]: there is no
@@ -289,6 +354,25 @@ abstract interface class AgentAwareMultiplexer {
     required Set<AgentState> until,
     required Duration timeout,
   });
+
+  /// Brings [target]'s pane to the front on the HOST, so the user is
+  /// looking at that agent.
+  ///
+  /// [target] is the same identifier [AgentStatus.target] carries — the
+  /// PANE id, not the terminal id. That is not an assumption: MEASURED
+  /// against herdr 0.8.2, `agent focus term_65a07c99f57a51` answers
+  /// `agent_not_found` exactly as `agent wait` does with the same input.
+  ///
+  /// Unlike [waitForAgent] this takes no timeout, and the asymmetry is the
+  /// point rather than an omission. A wait is armed to BLOCK, so it needs
+  /// a deadline the host itself will honour or it holds a channel until
+  /// `MaxSessions` starves the connection (see [kAgentListTimeout]'s doc
+  /// comment in `terminal_session.dart`). A focus is a one-shot command
+  /// that returns as soon as the multiplexer has moved the pane, so there
+  /// is no host-side deadline to hand it. Bounding a wedged one is the
+  /// CALLER's job, and it is a transport concern, not a herdr flag — see
+  /// `TerminalSession.focusAgent`.
+  Future<MuxAgentFocusResult> focusAgent(String target);
 }
 
 /// One adapter contract across every supported multiplexer.

@@ -20,9 +20,34 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   /// How many times [listAgents] has been entered.
   int listAgentsCalls = 0;
 
+  /// Every [focusAgent] target, in invocation order.
+  final List<String> focusTargets = [];
+
   MuxAgentsResult? _result;
   Object? _error;
   Completer<void>? _gate;
+
+  MuxAgentFocusResult _focusResult = const MuxAgentFocused();
+  Completer<void>? _focusGate;
+
+  /// Next [focusAgent] answers with [result].
+  void whenFocus(MuxAgentFocusResult result) {
+    _focusGate = null;
+    _focusResult = result;
+  }
+
+  /// Next [focusAgent] never completes until [releaseFocus] is called, so a
+  /// consumer's own `.timeout(...)` has to fire rather than the fake
+  /// pre-emptively throwing a [TimeoutException] the consumer never raised.
+  void whenFocusHangs() {
+    _focusGate = Completer<void>();
+  }
+
+  /// Lets a [whenFocusHangs] call finish.
+  void releaseFocus() {
+    final gate = _focusGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
 
   /// Next [listAgents] answers with [result].
   void whenAgents(MuxAgentsResult result) {
@@ -98,10 +123,25 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
     String target, {
     required Set<AgentState> until,
     required Duration timeout,
-  }) async => throw StateError(
+  }  ) async => throw StateError(
     'FakeAgentAdapter: waitForAgent() called on an adapter that does not '
     'advertise MuxCapability.agentWait',
   );
+
+  /// Records the target, then answers with whatever [whenFocus] scripted.
+  ///
+  /// Defaults to [MuxAgentFocused] rather than throwing, unlike
+  /// [listAgents]. Focus is a USER-INITIATED action, so the interesting
+  /// assertions are "was it called, and with which target" — a fake that
+  /// demanded scripting for the happy path would make every consumer test
+  /// restate the same line.
+  @override
+  Future<MuxAgentFocusResult> focusAgent(String target) async {
+    focusTargets.add(target);
+    final gate = _focusGate;
+    if (gate != null) await gate.future;
+    return _focusResult;
+  }
 
   @override
   Future<MuxDetection> detect() async =>

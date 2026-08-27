@@ -27,6 +27,24 @@ class ShortcutsDrawer extends ConsumerStatefulWidget {
 }
 
 class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
+  /// Why the last focus attempt did not raise the agent's pane, or null
+  /// when none has failed since.
+  ///
+  /// Held HERE rather than shown in a [SnackBar]: on a failure the drawer
+  /// deliberately stays open, and a snackbar would render underneath the
+  /// drawer's own scrim — feedback the user has to close the drawer to
+  /// read, about a reason they should not have to close the drawer to see.
+  String? _focusError;
+
+  /// True while a focus request is in flight, so a second tap is dropped
+  /// before it reaches the session.
+  ///
+  /// The session enforces the SSH channel budget on its own (see
+  /// `TerminalSession.focusAgent`); this only keeps a double-tap from
+  /// being reported back to the user as a failure when the first tap is
+  /// still perfectly fine.
+  bool _focusing = false;
+
   @override
   void initState() {
     super.initState();
@@ -74,7 +92,11 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                     // AGENTS section — first, because an agent waiting on a
                     // human outranks anything else in this drawer.
                     const _SectionHeader(label: 'AGENTS'),
-                    _AgentsSection(session: activeTab?.session),
+                    _AgentsSection(
+                      session: activeTab?.session,
+                      focusError: _focusError,
+                      onFocus: _focusAgent,
+                    ),
 
                     const SizedBox(height: 8),
                     const Divider(color: Color(0xFF30363D), height: 1),
@@ -135,6 +157,46 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
         ),
       ),
     );
+  }
+
+  /// Raises [agent]'s pane on the host and, only if that worked, closes
+  /// the drawer.
+  ///
+  /// The ORDER is the contract. Closing the drawer is the success report —
+  /// it tells the user they are now looking at that agent — so it happens
+  /// after the host has confirmed, never before and never regardless. A
+  /// focus that did not happen leaves the drawer open and says why, which
+  /// is the same refusal to assert an unmeasured fact that [AgentSnapshot]
+  /// enforces for what this section READS.
+  Future<void> _focusAgent(TerminalSession session, AgentStatus agent) async {
+    if (_focusing) return;
+    // Captured before the await: this State can be torn down while the
+    // host round-trip is in flight, and reading `context` afterwards is
+    // reading a BuildContext across an async gap.
+    final navigator = Navigator.of(context);
+    setState(() {
+      _focusing = true;
+      _focusError = null;
+    });
+
+    final result = await session.focusAgent(agent.target);
+    if (!mounted) return;
+
+    setState(() {
+      _focusing = false;
+      _focusError = switch (result) {
+        MuxAgentFocused() => null,
+        // A fact about helm's own screen: the row the user just tapped
+        // describes something that is no longer there.
+        MuxAgentFocusTargetNotFound() =>
+          '${agent.label} is gone — this list is out of date',
+        // A fact about the host: nothing is known, including whether the
+        // agent is still there. It must not read like the line above.
+        MuxAgentFocusFailed() => 'Could not focus ${agent.label} on the host',
+      };
+    });
+
+    if (result is MuxAgentFocused) navigator.pop();
   }
 
   void _showProjectForm(BuildContext context, ProjectShortcut? existing) {
@@ -267,9 +329,20 @@ class _SectionHeader extends StatelessWidget {
 /// their own words, that helm does not know — which is the entire reason
 /// [AgentSnapshot] is a sealed type instead of a nullable list.
 class _AgentsSection extends StatelessWidget {
-  const _AgentsSection({required this.session});
+  const _AgentsSection({
+    required this.session,
+    required this.focusError,
+    required this.onFocus,
+  });
 
   final TerminalSession? session;
+
+  /// Why the last tap did not raise a pane, or null. Rendered beneath the
+  /// rows rather than replacing them: the list is still true, and the user
+  /// may well want to try the same row again.
+  final String? focusError;
+
+  final Future<void> Function(TerminalSession, AgentStatus) onFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -287,13 +360,17 @@ class _AgentsSection extends StatelessWidget {
                   ValueListenableBuilder<SessionVitality>(
                     valueListenable: activeSession.sessionVitalityNotifier,
                     builder: (context, vitality, _) =>
-                        _buildSnapshot(snapshot, vitality),
+                        _buildSnapshot(activeSession, snapshot, vitality),
                   ),
             ),
     );
   }
 
-  Widget _buildSnapshot(AgentSnapshot snapshot, SessionVitality vitality) {
+  Widget _buildSnapshot(
+    TerminalSession activeSession,
+    AgentSnapshot snapshot,
+    SessionVitality vitality,
+  ) {
     return switch (snapshot) {
       AgentsNotProbed() => const _EmptyHint(
         text: 'Not connected — agent state unknown',
@@ -340,7 +417,12 @@ class _AgentsSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final agent in _byUrgency(agents))
-            AgentRow(key: ValueKey(agent.target), agent: agent),
+            AgentRow(
+              key: ValueKey(agent.target),
+              agent: agent,
+              onTap: () => onFocus(activeSession, agent),
+            ),
+          if (focusError != null) _FocusError(message: focusError!),
         ],
       ),
     };
@@ -535,6 +617,46 @@ class _QuickActionsRow extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Focus error ────────────────────────────────────────────────────────────
+
+/// Why the last tap did not reach its agent.
+///
+/// Deliberately louder than [_EmptyHint]: a hint explains an absence
+/// nobody asked about, while this answers a gesture the user just made and
+/// is still waiting on. Red is free on this surface — the tab strip's
+/// connection dot, which [AgentStateStyle] avoids colliding with, is not
+/// in the drawer — and it is the same red the drawer already spends on
+/// Delete.
+class _FocusError extends StatelessWidget {
+  const _FocusError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: 14,
+            color: Color(0xFFF85149),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Color(0xFFF85149), fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }
