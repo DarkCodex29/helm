@@ -23,6 +23,7 @@ import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
+import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:xterm/xterm.dart';
 
@@ -72,6 +73,19 @@ typedef FileServiceFactory = SftpFileService Function(SSHClient client);
 
 SftpFileService _defaultFileServiceFactory(SSHClient client) =>
     SftpFileService(client);
+
+/// Builds the [SftpDownloadService] used to fetch a remote file onto the
+/// device, bound to an already-connected [SSHClient].
+///
+/// A THIRD factory beside [HostRunnerFactory] and [FileServiceFactory]
+/// rather than a capability added to the second, because the two services
+/// deliberately do not share a channel: the download service opens its own
+/// SFTP session per transfer so a large file cannot stall the browser that
+/// started it. See [SftpDownloadService].
+typedef DownloadServiceFactory = SftpDownloadService Function(SSHClient client);
+
+SftpDownloadService _defaultDownloadServiceFactory(SSHClient client) =>
+    SftpDownloadService(client);
 
 /// Fallback [MultiplexerAdapter] for the window before the probe has run.
 ///
@@ -377,6 +391,7 @@ class TerminalSession {
     HostProber hostProber = const HostProber(),
     HostRunnerFactory? hostRunnerFactory,
     FileServiceFactory? fileServiceFactory,
+    DownloadServiceFactory? downloadServiceFactory,
   }) : _sshService = sshService,
        _muxAdapterOverride = muxAdapter,
        _muxAdapter = muxAdapter ?? TmuxAdapter(_UnconnectedHostCommandRunner()),
@@ -384,6 +399,8 @@ class TerminalSession {
        _hostProber = hostProber,
        _hostRunnerFactory = hostRunnerFactory ?? _defaultHostRunnerFactory,
        _fileServiceFactory = fileServiceFactory ?? _defaultFileServiceFactory,
+       _downloadServiceFactory =
+           downloadServiceFactory ?? _defaultDownloadServiceFactory,
        terminal = terminal ?? Terminal(maxLines: 5000) {
     // Wired HERE, not in _bridgeIO, and this is the whole fix for the
     // remote drawing wider than the screen.
@@ -424,6 +441,7 @@ class TerminalSession {
   final HostProber _hostProber;
   final HostRunnerFactory _hostRunnerFactory;
   final FileServiceFactory _fileServiceFactory;
+  final DownloadServiceFactory _downloadServiceFactory;
   final HostAdvisor _advisor = const HostAdvisor();
 
   /// True once [dispose] has run. Guards the fire-and-forget advisory
@@ -434,6 +452,7 @@ class TerminalSession {
   SSHSession? _session;
   HostCommandRunner? _hostRunner;
   SftpFileService? _fileService;
+  SftpDownloadService? _downloadService;
   HostReport? _hostReport;
   MultiplexerSelection? _multiplexerSelection;
 
@@ -551,6 +570,13 @@ class TerminalSession {
   /// actually lists a directory — so a session nobody browses pays
   /// nothing for this.
   SftpFileService? get fileService => _fileService;
+
+  /// Downloads a remote file onto the device, or null when not connected.
+  ///
+  /// Holds no session of its own between transfers — each [download] opens
+  /// and closes one — so unlike [fileService] there is nothing to close in
+  /// teardown, only a reference to drop.
+  SftpDownloadService? get downloadService => _downloadService;
 
   /// Exposes the active [SSHClient] for one-shot command execution.
   /// Returns null if not connected.
@@ -806,6 +832,7 @@ class TerminalSession {
       _client = result.client;
       _hostRunner = _hostRunnerFactory(result.client);
       _fileService = _fileServiceFactory(result.client);
+      _downloadService = _downloadServiceFactory(result.client);
 
       final sessionRef = tmuxSessionName;
       if (sessionRef != null) {
@@ -1052,6 +1079,12 @@ class TerminalSession {
   /// stop owning, and keeping the reference would hand a later caller a
   /// browser onto a dead transport.
   Future<void> _closeFileService() async {
+    // Dropped in the same teardown, for the same reason: it is bound to a
+    // client this session is about to stop owning. Nothing to close —
+    // [SftpDownloadService] holds no session between transfers — so this
+    // is only the reference going away.
+    _downloadService = null;
+
     final service = _fileService;
     _fileService = null;
     if (service == null) return;

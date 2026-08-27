@@ -6,14 +6,20 @@
 // let the second read as the first. Every case below therefore asserts
 // both the panel that MUST be present and, explicitly, that the other one
 // is absent.
+import 'dart:io';
+
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/features/files/data/external_viewer.dart';
+import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
+import 'package:helm/features/files/presentation/providers/file_download_provider.dart';
 
 import '../../../helpers/fake_sftp_session.dart';
 
@@ -21,15 +27,72 @@ Finder _byId(String identifier) => find.byWidgetPredicate(
   (w) => w is Semantics && w.properties.identifier == identifier,
 );
 
-Future<void> _pumpSheet(WidgetTester tester, SftpFileService service) async {
+/// Where a downloading test's bytes land. Replaced per test.
+late Directory _staging;
+
+/// What the platform viewer answers. Replaced per test; the real one goes
+/// over a method channel that does not exist here.
+late ExternalViewer _viewer;
+
+/// Pumps the sheet and returns the container driving it, so a test can
+/// reach the download notifier directly.
+///
+/// That reach-in is needed for the TERMINAL download states and only for
+/// them. `pumpAndSettle` advances the binding's fake clock, which never
+/// completes a real `dart:io` write — so a test that taps a row and then
+/// settles asserts on a transfer still in flight. See [_runDownload].
+Future<ProviderContainer> _pumpSheet(
+  WidgetTester tester,
+  SftpFileService service, {
+  SftpDownloadService? downloadService,
+}) async {
+  final container = ProviderContainer();
+  addTearDown(container.dispose);
+  container.read(fileDownloadProvider.notifier).debugUseViewer(
+    (file) => _viewer(file),
+  );
+
   await tester.pumpWidget(
-    ProviderScope(
-      child: MaterialApp(home: Scaffold(body: FileBrowserSheet(service: service))),
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: Scaffold(
+          body: FileBrowserSheet(
+            service: service,
+            downloadService: downloadService ?? _downloadService(),
+          ),
+        ),
+      ),
     ),
   );
   // One pump for the post-frame `open`, one for the listing it awaits.
   await tester.pumpAndSettle();
+  return container;
 }
+
+/// Runs a download to COMPLETION against the real filesystem, then paints.
+///
+/// [WidgetTester.runAsync] is the only place a widget test may await real
+/// I/O: outside it the binding's clock is fake, so `openWrite`, `close`
+/// and `rename` never finish and the sheet stays stuck on "downloading".
+Future<void> _runDownload(
+  WidgetTester tester,
+  ProviderContainer container,
+  SftpDownloadService service,
+  RemoteEntry entry,
+) async {
+  await tester.runAsync(
+    () => container.read(fileDownloadProvider.notifier).start(service, entry),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// The entry a listing would produce for a plain file at [path].
+RemoteEntry _fileEntry(String path) => RemoteEntry(
+  name: path.split('/').last,
+  path: path,
+  kind: RemoteEntryKind.file,
+);
 
 SftpFileService _service({
   Map<String, List<SftpName>> directories = const {},
@@ -49,7 +112,28 @@ SftpFileService _service({
   );
 }
 
+SftpDownloadService _downloadService({
+  Map<String, FakeRemoteFile> files = const {},
+  Set<String> deniedPaths = const {},
+  Duration idleTimeout = const Duration(seconds: 30),
+}) {
+  return SftpDownloadService.withOpener(
+    () async => FakeSftpSession(files: files, deniedPaths: deniedPaths),
+    directory: () async => _staging,
+    idleTimeout: idleTimeout,
+  );
+}
+
 void main() {
+  setUp(() {
+    _staging = Directory.systemTemp.createTempSync('helm_sheet_test');
+    _viewer = (_) async => ViewerOutcome.opened;
+  });
+
+  tearDown(() {
+    if (_staging.existsSync()) _staging.deleteSync(recursive: true);
+  });
+
   group('listing outcomes', () {
     testWidgets('an empty directory says so, and shows no error', (tester) async {
       await _pumpSheet(tester, _service(directories: {'/home/gian': const []}));
@@ -295,6 +379,209 @@ void main() {
       );
 
       expect(describeRemoteEntry(entry), 'Link');
+    });
+  });
+
+  group('downloading a file', () {
+    /// A directory holding one tappable file, plus the transfer service
+    /// that serves its bytes.
+    SftpFileService browserWithOneFile() => _service(
+      directories: {
+        '/home/gian': [
+          fakeSftpName('report.docx', mode: FakeSftpModes.file, size: 4096),
+        ],
+      },
+    );
+
+    testWidgets('tapping a file starts a transfer and shows its progress', (
+      tester,
+    ) async {
+      await _pumpSheet(
+        tester,
+        browserWithOneFile(),
+        downloadService: _downloadService(
+          files: {
+            '/home/gian/report.docx': FakeRemoteFile(
+              List<int>.filled(8 * SftpDownloadService.chunkSize, 7),
+              chunkGap: const Duration(milliseconds: 20),
+            ),
+          },
+        ),
+      );
+
+      await tester.tap(find.text('report.docx'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 30));
+
+      expect(_byId(FilesSemantics.downloadStatus), findsOneWidget);
+      expect(find.textContaining('Downloading report.docx'), findsOneWidget);
+      expect(_byId(FilesSemantics.downloadCancelButton), findsOneWidget);
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('the strip is absent until something is downloaded', (
+      tester,
+    ) async {
+      await _pumpSheet(tester, browserWithOneFile());
+
+      expect(_byId(FilesSemantics.downloadStatus), findsNothing);
+    });
+
+    testWidgets('cancelling reports it as cancelled, never as finished', (
+      tester,
+    ) async {
+      final service = _downloadService(
+        files: {
+          '/home/gian/report.docx': FakeRemoteFile(
+            List<int>.filled(20 * SftpDownloadService.chunkSize, 7),
+            chunkGap: const Duration(milliseconds: 10),
+          ),
+        },
+      );
+      final container = await _pumpSheet(
+        tester,
+        browserWithOneFile(),
+        downloadService: service,
+      );
+      final downloads = container.read(fileDownloadProvider.notifier);
+
+      // Cancelled from the SAME callback the UI would cancel from — the
+      // progress tick that first tells the user there is a transfer to
+      // stop.
+      await tester.runAsync(() async {
+        container.listen(fileDownloadProvider, (_, next) {
+          if (next.percent > 0) downloads.cancel();
+        });
+        await downloads.start(service, _fileEntry('/home/gian/report.docx'));
+      });
+      await tester.pumpAndSettle();
+
+      expect(find.text('Download cancelled.'), findsOneWidget);
+      expect(_byId(FilesSemantics.downloadNoViewer), findsNothing);
+      expect(find.textContaining('Downloading'), findsNothing);
+    });
+
+    testWidgets('a refused file explains why, and offers a way out', (
+      tester,
+    ) async {
+      await _pumpSheet(
+        tester,
+        browserWithOneFile(),
+        downloadService: _downloadService(
+          files: {
+            '/home/gian/report.docx': FakeRemoteFile(const [1, 2, 3]),
+          },
+          deniedPaths: {'/home/gian/report.docx'},
+        ),
+      );
+
+      await tester.tap(find.text('report.docx'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('You do not have permission to read this file.'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byTooltip('Dismiss'));
+      await tester.pumpAndSettle();
+      expect(_byId(FilesSemantics.downloadStatus), findsNothing);
+    });
+
+    testWidgets('"no app can open this" is its own panel, not an error', (
+      tester,
+    ) async {
+      _viewer = (_) async => ViewerOutcome.noViewer;
+      final service = _downloadService(
+        files: {
+          '/home/gian/report.docx': FakeRemoteFile(List<int>.filled(4096, 7)),
+        },
+      );
+      final container = await _pumpSheet(
+        tester,
+        browserWithOneFile(),
+        downloadService: service,
+      );
+
+      await _runDownload(
+        tester,
+        container,
+        service,
+        _fileEntry('/home/gian/report.docx'),
+      );
+
+      expect(_byId(FilesSemantics.downloadNoViewer), findsOneWidget);
+      expect(
+        find.textContaining('no app on this device can open it'),
+        findsOneWidget,
+      );
+      // The user is told where to go next rather than left at a dead end.
+      expect(find.textContaining('saved on the device'), findsOneWidget);
+    });
+
+    testWidgets('a download that opens leaves no strip to dismiss', (
+      tester,
+    ) async {
+      final service = _downloadService(
+        files: {
+          '/home/gian/report.docx': FakeRemoteFile(List<int>.filled(4096, 7)),
+        },
+      );
+      final container = await _pumpSheet(
+        tester,
+        browserWithOneFile(),
+        downloadService: service,
+      );
+
+      await _runDownload(
+        tester,
+        container,
+        service,
+        _fileEntry('/home/gian/report.docx'),
+      );
+
+      // The viewer is on screen in front of the user; a banner saying
+      // "done" would be a second receipt for the same event.
+      expect(_byId(FilesSemantics.downloadStatus), findsNothing);
+      expect(
+        container.read(fileDownloadProvider).status,
+        FileDownloadStatus.opened,
+      );
+    });
+
+    testWidgets('a socket is neither entered nor downloaded', (tester) async {
+      await _pumpSheet(
+        tester,
+        _service(
+          directories: {
+            '/home/gian': [
+              fakeSftpName('daemon.sock', mode: FakeSftpModes.socket),
+            ],
+          },
+        ),
+      );
+
+      await tester.tap(find.text('daemon.sock'));
+      await tester.pumpAndSettle();
+
+      expect(_byId(FilesSemantics.downloadStatus), findsNothing);
+    });
+  });
+
+  group('describeDownloadFailure', () {
+    test('never reports a stall as a generic failure', () {
+      expect(
+        describeDownloadFailure(DownloadFailure.stalled),
+        'The download stopped receiving data and was abandoned.',
+      );
+    });
+
+    test('has a sentence for a reason that never arrived', () {
+      expect(
+        describeDownloadFailure(null),
+        contains('did not say why'),
+      );
     });
   });
 }

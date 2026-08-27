@@ -265,7 +265,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       valueListenable: session.statusNotifier,
       builder: (context, status, _) {
         final service = session.fileService;
-        if (status != ConnectionStatus.connected || service == null) {
+        final downloads = session.downloadService;
+        if (status != ConnectionStatus.connected ||
+            service == null ||
+            downloads == null) {
           return const SizedBox.shrink();
         }
         return Semantics(
@@ -278,7 +281,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ).colorScheme.onSurface.withValues(alpha: 0.7),
             ),
             tooltip: 'Browse files',
-            onPressed: () => FileBrowserSheet.show(context, service: service),
+            onPressed: () => FileBrowserSheet.show(
+              context,
+              service: service,
+              downloadService: downloads,
+            ),
           ),
         );
       },

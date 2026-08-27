@@ -173,6 +173,13 @@ class _RecordingSftpSession implements SftpSession {
   @override
   Future<String> absolute(String path) async => '/home/gian';
 
+  /// This session is only ever used for browsing, so an attempt to
+  /// transfer through it is a wiring mistake worth failing loudly on
+  /// rather than answering with an empty file.
+  @override
+  Future<SftpReadHandle> openRead(String path) async =>
+      throw UnsupportedError('This fake does not serve transfers');
+
   @override
   Future<void> close() async => closed = true;
 }

@@ -1,4 +1,47 @@
+import 'dart:typed_data';
+
 import 'package:dartssh2/dartssh2.dart';
+
+/// One remote file opened for reading.
+///
+/// A SECOND seam beside [SftpSession], and it has to be: [SftpFile]'s only
+/// constructor takes the private handle bytes an `SSH_FXP_OPEN` reply
+/// carried (`sftp_file.dart:10`), so a test cannot build one any more than
+/// it can build an [SftpClient]. [SftpFileReadHandle] adapts a real one in
+/// production.
+///
+/// Deliberately NARROWER than [SftpFile]: this slice downloads, so the
+/// write half of that class — `write`, `writeBytes`, `setStat` — is not
+/// reachable from here. A future upload slice widens the seam rather than
+/// this one quietly carrying the capability in the meantime.
+abstract interface class SftpReadHandle {
+  /// The attributes of the OPEN HANDLE, which is what makes this method
+  /// worth having beside [SftpSession.stat].
+  ///
+  /// `SSH_FXP_FSTAT` against the handle, not `SSH_FXP_STAT` against the
+  /// path: the size read here describes the bytes this download is
+  /// actually reading, and cannot be a different file that took the same
+  /// name between the listing and the transfer.
+  Future<SftpFileAttrs> stat();
+
+  /// Streams the file's bytes in offset order.
+  ///
+  /// Both pipeline knobs are REQUIRED rather than defaulted, and that is
+  /// the point of restating them here. dartssh2's own defaults for the
+  /// download path are `_kDownloadChunkSize` 64 KiB and
+  /// `_kDownloadMaxPendingRequests` 128 (`sftp_client.dart:32-33`) — 8 MiB
+  /// of file resident in memory before a single byte reaches the disk.
+  /// Making them required means no call site can reach that by omission;
+  /// see [SftpDownloadService.pipelineBytesInFlight] for what this app
+  /// asks for instead.
+  Stream<Uint8List> read({
+    required int chunkSize,
+    required int maxPendingRequests,
+  });
+
+  /// Closes the remote file handle.
+  Future<void> close();
+}
 
 /// The subset of an open SFTP session that [SftpFileService] needs to
 /// browse a remote filesystem.
@@ -35,6 +78,13 @@ abstract interface class SftpSession {
   /// Resolves [path] to an absolute path on the server.
   Future<String> absolute(String path);
 
+  /// Opens [path] for reading.
+  ///
+  /// The caller owns the returned handle and must close it, including on
+  /// failure — a leaked handle stays open on the server until the whole
+  /// session ends.
+  Future<SftpReadHandle> openRead(String path);
+
   /// Ends the session and the SSH channel underneath it.
   Future<void> close();
 }
@@ -58,6 +108,10 @@ class SftpClientSession implements SftpSession {
   @override
   Future<String> absolute(String path) => _client.absolute(path);
 
+  @override
+  Future<SftpReadHandle> openRead(String path) async =>
+      SftpFileReadHandle(await _client.open(path));
+
   /// Closes the SFTP session AND its channel.
   ///
   /// In dartssh2 2.16.0 this was a `void` that left the channel open, so
@@ -68,4 +122,38 @@ class SftpClientSession implements SftpSession {
   /// therefore both meaningful and safe to repeat.
   @override
   Future<void> close() => _client.close();
+}
+
+/// Adapts a real [SftpFile] to [SftpReadHandle].
+///
+/// [SftpFile.read] rather than any of the three `download*` conveniences,
+/// and the choice is load-bearing rather than stylistic:
+///
+///  * `downloadTo` and `SftpClient.download` take a [StreamSink] and pump
+///    it themselves (`sftp_file.dart:250-261`), which puts the loop that
+///    has to notice a stall, a cancellation and a byte count on the far
+///    side of the library.
+///  * `downloadToRandomAccess` writes chunks at their own offsets as they
+///    land (`:410-411`), so a transfer abandoned midway leaves a file with
+///    HOLES rather than a short prefix — bytes that would pass a
+///    length check while missing their middle.
+///
+/// [read] hands back an offset-ORDERED stream (`:43`) and nothing else, so
+/// this app keeps the loop and a partial file is always a true prefix.
+class SftpFileReadHandle implements SftpReadHandle {
+  SftpFileReadHandle(this._file);
+
+  final SftpFile _file;
+
+  @override
+  Future<SftpFileAttrs> stat() => _file.stat();
+
+  @override
+  Stream<Uint8List> read({
+    required int chunkSize,
+    required int maxPendingRequests,
+  }) => _file.read(chunkSize: chunkSize, maxPendingRequests: maxPendingRequests);
+
+  @override
+  Future<void> close() => _file.close();
 }

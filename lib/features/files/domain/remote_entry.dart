@@ -95,4 +95,21 @@ class RemoteEntry with _$RemoteEntry {
       kind == RemoteEntryKind.directory ||
       (kind == RemoteEntryKind.symlink &&
           linkTarget == RemoteEntryKind.directory);
+
+  /// Whether tapping this entry should download it.
+  ///
+  /// The exact complement of [isNavigable] over the kinds this app acts
+  /// on, and built the same way: a symlink qualifies only once its target
+  /// has been RESOLVED to a regular file.
+  ///
+  /// [RemoteEntryKind.other] is excluded on purpose, and that exclusion is
+  /// the reason that kind exists. It covers sockets, pipes and devices —
+  /// which have no length to download and would hang or fail a read — but
+  /// ALSO an entry the server described in a way this app could not read.
+  /// Offering to download the second group would mean guessing that an
+  /// undescribed entry is a file, which is precisely the fabricated answer
+  /// [RemoteEntryKind.other] was introduced to avoid.
+  bool get isDownloadable =>
+      kind == RemoteEntryKind.file ||
+      (kind == RemoteEntryKind.symlink && linkTarget == RemoteEntryKind.file);
 }

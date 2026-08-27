@@ -148,6 +148,27 @@ class FilesSemantics {
 
   /// The panel shown when a directory was read and held nothing.
   static const emptyDirectory = 'helm.files.empty_directory';
+
+  /// The strip along the bottom of the sheet that reports a transfer.
+  ///
+  /// One identifier over every phase — running, cancelled, failed, and
+  /// "nothing can open this" — for the same reason [listing] covers all of
+  /// its states: a flow asserts on what the strip SAYS, not on its
+  /// presence, which is the same in all four.
+  static const downloadStatus = 'helm.files.download_status';
+
+  /// The action that stops a running transfer.
+  static const downloadCancelButton = 'helm.files.download_cancel_button';
+
+  /// The panel shown when a file downloaded but nothing installed can open
+  /// it.
+  ///
+  /// Deliberately distinct from a failure, and the pair must never be
+  /// asserted interchangeably — the same rule [listingError] follows. The
+  /// transfer SUCCEEDED here; only the hand-off found no taker, and a
+  /// shared identifier would let a test pass while the sheet told the user
+  /// their download had failed.
+  static const downloadNoViewer = 'helm.files.download_no_viewer';
 }
 
 /// Identifiers on `SettingsScreen`.

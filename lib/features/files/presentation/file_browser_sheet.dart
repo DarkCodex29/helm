@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_listing.dart';
 import 'package:helm/features/files/presentation/providers/file_browser_provider.dart';
+import 'package:helm/features/files/presentation/providers/file_download_provider.dart';
 
 // The drawer's palette, repeated rather than imported because this app has
 // no token file yet and every surface spells these out — see
@@ -25,24 +28,40 @@ const _danger = Color(0xFFF85149);
 /// connection through a URL would mean either a global lookup or a route
 /// that can be deep-linked into a session that no longer exists.
 ///
-/// This slice reads only. There is no download, no upload, no rename and
-/// no delete — tapping a file selects it and shows what the listing
-/// already knows about it, and nothing leaves the host.
+/// This slice reads and DOWNLOADS. Tapping a file fetches it onto the
+/// device and hands it to whatever can view it; there is still no upload,
+/// no rename and no delete, and nothing is ever written to the host.
+///
+/// Where the bytes go is deliberately temporary — a staging directory the
+/// app sweeps on a 24-hour retention, see
+/// [SftpDownloadService.defaultDownloadDirectory]. Saving somewhere the
+/// user chooses is the next slice.
 class FileBrowserSheet extends ConsumerStatefulWidget {
-  const FileBrowserSheet({required this.service, super.key});
+  const FileBrowserSheet({
+    required this.service,
+    required this.downloadService,
+    super.key,
+  });
 
   final SftpFileService service;
+
+  /// Fetches a file onto the device. A SEPARATE service from [service] and
+  /// deliberately so — see [SftpDownloadService] for why a transfer must
+  /// not share the browse session's channel.
+  final SftpDownloadService downloadService;
 
   /// Opens the browser over the current route.
   static Future<void> show(
     BuildContext context, {
     required SftpFileService service,
+    required SftpDownloadService downloadService,
   }) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => FileBrowserSheet(service: service),
+      builder: (_) =>
+          FileBrowserSheet(service: service, downloadService: downloadService),
     );
   }
 
@@ -67,10 +86,15 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
   /// outlives this sheet.
   late final FileBrowserNotifier _browser;
 
+  /// Captured for the same reason as [_browser]: the tap that starts a
+  /// download runs outside a build, where `ref` is off-limits.
+  late final FileDownloadNotifier _downloads;
+
   @override
   void initState() {
     super.initState();
     _browser = ref.read(fileBrowserProvider.notifier);
+    _downloads = ref.read(fileDownloadProvider.notifier);
     // Deferred to the first frame: `open` writes to the provider, and a
     // provider must not be mutated while the widget tree is still
     // building.
@@ -94,9 +118,22 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
   // sheet therefore never renders the previous session's directory, which
   // is the only thing the teardown was protecting.
 
+  /// Starts a download, unless one is already moving bytes.
+  ///
+  /// Refusing while [FileDownloadState.isRunning] rather than replacing:
+  /// the strip shows one transfer, and silently abandoning the one the
+  /// user is watching because they brushed another row is worse than
+  /// doing nothing.
+  Future<void> _download(RemoteEntry entry) async {
+    if (ref.read(fileDownloadProvider).isRunning) return;
+    setState(() => _selected = null);
+    await _downloads.start(widget.downloadService, entry);
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(fileBrowserProvider);
+    final download = ref.watch(fileDownloadProvider);
     final notifier = _browser;
 
     return Semantics(
@@ -131,12 +168,25 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
                         await notifier.enter(entry);
                         return;
                       }
+                      if (entry.isDownloadable) {
+                        await _download(entry);
+                        return;
+                      }
+                      // Everything left is something this app can neither
+                      // enter nor fetch — a socket, a device, a broken
+                      // link. Tapping selects it so its description is
+                      // readable, which is all there is to offer.
                       setState(
                         () => _selected = _selected == entry ? null : entry,
                       );
                     },
                   ),
                 ),
+              ),
+              _DownloadStatusBar(
+                state: download,
+                onCancel: _downloads.cancel,
+                onDismiss: _downloads.dismiss,
               ),
             ],
           ),
@@ -145,6 +195,242 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     );
   }
 }
+
+// ── Transfer strip ─────────────────────────────────────────────────────────
+
+/// Reports the one transfer the sheet can have in flight.
+///
+/// Rendered as nothing at all when idle, so the listing keeps the full
+/// height it had before this slice existed.
+///
+/// Every non-idle state is ACTIONABLE, which is the requirement that
+/// shapes this widget: a running transfer offers cancel, and each of the
+/// three endings that need acknowledging offers dismiss. There is no state
+/// here the user can only stare at.
+class _DownloadStatusBar extends StatelessWidget {
+  const _DownloadStatusBar({
+    required this.state,
+    required this.onCancel,
+    required this.onDismiss,
+  });
+
+  final FileDownloadState state;
+  final VoidCallback onCancel;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.status == FileDownloadStatus.idle) {
+      return const SizedBox.shrink();
+    }
+    // A finished-and-opened transfer needs no acknowledgement: the viewer
+    // is already on screen in front of the user, which is the receipt.
+    if (state.status == FileDownloadStatus.opened) {
+      return const SizedBox.shrink();
+    }
+
+    return Semantics(
+      identifier: FilesSemantics.downloadStatus,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
+        decoration: const BoxDecoration(
+          color: _raised,
+          border: Border(top: BorderSide(color: _border)),
+        ),
+        child: switch (state.status) {
+          FileDownloadStatus.downloading => _RunningRow(
+            state: state,
+            onCancel: onCancel,
+          ),
+          FileDownloadStatus.noViewer => _NoViewerRow(
+            state: state,
+            onDismiss: onDismiss,
+          ),
+          FileDownloadStatus.cancelled => _EndingRow(
+            icon: Icons.block,
+            color: _mutedText,
+            message: 'Download cancelled.',
+            onDismiss: onDismiss,
+          ),
+          FileDownloadStatus.failed => _EndingRow(
+            icon: Icons.error_outline,
+            color: _danger,
+            message: describeDownloadFailure(state.failure),
+            onDismiss: onDismiss,
+          ),
+          // Both handled above; listed so a new status is a compile error
+          // here rather than a blank strip.
+          FileDownloadStatus.idle ||
+          FileDownloadStatus.opened => const SizedBox.shrink(),
+        },
+      ),
+    );
+  }
+}
+
+class _RunningRow extends StatelessWidget {
+  const _RunningRow({required this.state, required this.onCancel});
+
+  final FileDownloadState state;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Downloading ${state.entry?.name ?? ''} · ${state.percent}%',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _primaryText, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              // Determinate from the first frame: the size is known before
+              // any byte is read, so an indeterminate bar would be hiding
+              // information the app already has.
+              LinearProgressIndicator(
+                value: state.percent / 100,
+                minHeight: 3,
+                backgroundColor: _border,
+                valueColor: const AlwaysStoppedAnimation(_accent),
+              ),
+            ],
+          ),
+        ),
+        Semantics(
+          identifier: FilesSemantics.downloadCancelButton,
+          child: TextButton(
+            onPressed: onCancel,
+            style: TextButton.styleFrom(foregroundColor: _mutedText),
+            child: const Text('Cancel'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The file arrived, and nothing on the device claimed it.
+///
+/// Says WHERE the file is rather than only that it could not be opened.
+/// That is the difference between a dead end and a next step: the user can
+/// reach it from their file manager, or from the Files app on iOS, and the
+/// message has to tell them it is worth looking.
+class _NoViewerRow extends StatelessWidget {
+  const _NoViewerRow({required this.state, required this.onDismiss});
+
+  final FileDownloadState state;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      identifier: FilesSemantics.downloadNoViewer,
+      child: Row(
+        children: [
+          const Icon(Icons.help_outline, size: 18, color: _accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${state.entry?.name ?? 'The file'} downloaded, but no app '
+                  'on this device can open it.',
+                  style: const TextStyle(color: _primaryText, fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'It is saved on the device. Install an app that reads this '
+                  'kind of file, then tap it again.',
+                  style: TextStyle(
+                    color: _mutedText.withValues(alpha: 0.9),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            color: _mutedText,
+            tooltip: 'Dismiss',
+            onPressed: onDismiss,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EndingRow extends StatelessWidget {
+  const _EndingRow({
+    required this.icon,
+    required this.color,
+    required this.message,
+    required this.onDismiss,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            message,
+            style: TextStyle(color: color, fontSize: 12),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close, size: 16),
+          color: _mutedText,
+          tooltip: 'Dismiss',
+          onPressed: onDismiss,
+        ),
+      ],
+    );
+  }
+}
+
+/// One sentence per reason a download stopped.
+///
+/// Public so a widget test can assert on the exact string without reaching
+/// into a private widget, matching [describeRemoteEntry].
+///
+/// Written from the [DownloadFailure] alone and never from the underlying
+/// message: [DownloadFailed.detail] carries whatever the server said, and
+/// a server-supplied string must not become UI copy.
+String describeDownloadFailure(DownloadFailure? failure) => switch (failure) {
+  DownloadFailure.permissionDenied =>
+    'You do not have permission to read this file.',
+  DownloadFailure.notFound => 'This file no longer exists on the host.',
+  DownloadFailure.disconnected =>
+    'The connection dropped before the file finished downloading.',
+  DownloadFailure.stalled =>
+    'The download stopped receiving data and was abandoned.',
+  DownloadFailure.unknownSize =>
+    'The host would not say how large this file is, so it was not downloaded.',
+  DownloadFailure.sizeMismatch =>
+    'The file arrived incomplete and was discarded.',
+  DownloadFailure.storage =>
+    'There was not enough room on this device to save the file.',
+  DownloadFailure.unknown || null =>
+    'The file could not be downloaded, and the host did not say why.',
+};
 
 // ── Chrome ─────────────────────────────────────────────────────────────────
 
