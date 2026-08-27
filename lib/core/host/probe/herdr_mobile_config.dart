@@ -1,3 +1,34 @@
+/// UNVERIFIED AGAINST A RUNNING SERVER — read this before relying on it.
+///
+/// This plumbing sets `HERDR_CONFIG_PATH` on the attach command so the phone
+/// can carry its own herdr config while the desktop keeps `config.toml`. The
+/// variable itself is real and honoured: measured with a control on herdr
+/// 0.8.2, a valid file answers `config: ok` and an invalid enum answers
+/// `unknown variant`, so herdr genuinely parses the file it is pointed at.
+///
+/// What was NOT established is whether it changes anything when the server
+/// for that session is ALREADY RUNNING. Tried on device against a live
+/// session, herdr's chrome did not change, and herdr's own documentation
+/// points at server-side rendering: `herdr server reload-config` "applies
+/// most UI settings", the window title "renders on the Herdr server", and
+/// `hostname`/`datetime`/`command` tab-bar entries "resolve on the Herdr
+/// server". If the server owns the config, a client pointed elsewhere
+/// changes nothing and this whole path is inert for its stated purpose.
+///
+/// It was not proven either way, because the only decisive experiments —
+/// reloading config or starting a second server — move the owner's screen
+/// while he is working in it. So the code stays and the claim does not: it
+/// is documented as an open question rather than reverted on a hypothesis
+/// or left asserting something nobody measured.
+///
+/// The fallback is separately proven and is what makes leaving it safe: no
+/// file, an unrunnable probe, a truncated probe, an empty value, and a
+/// non-herdr multiplexer each emit the previous command byte for byte.
+///
+/// To settle it: restart herdr, attach from the phone, and see whether the
+/// sidebar and tab row differ from the desktop's.
+library;
+
 import 'package:helm/core/host/probe/host_report.dart';
 
 /// `env` key the probe uses to report a herdr mobile config file.
