@@ -83,6 +83,9 @@ class FakeWaitingAgentAdapter
   AgentAwareMultiplexer? get agents => this;
 
   @override
+  PaneAwareMultiplexer? get panes => null;
+
+  @override
   Future<MuxAgentsResult> listAgents() async {
     listAgentsCalls++;
     return agentList;

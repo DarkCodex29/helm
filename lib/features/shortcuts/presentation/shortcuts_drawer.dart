@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/host/session_vitality.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/shortcuts/domain/quick_action.dart';
@@ -282,12 +283,17 @@ class _AgentsSection extends StatelessWidget {
           ? const _EmptyHint(text: 'No active session')
           : ValueListenableBuilder<AgentSnapshot>(
               valueListenable: activeSession.agentsNotifier,
-              builder: (context, snapshot, _) => _buildSnapshot(snapshot),
+              builder: (context, snapshot, _) =>
+                  ValueListenableBuilder<SessionVitality>(
+                    valueListenable: activeSession.sessionVitalityNotifier,
+                    builder: (context, vitality, _) =>
+                        _buildSnapshot(snapshot, vitality),
+                  ),
             ),
     );
   }
 
-  Widget _buildSnapshot(AgentSnapshot snapshot) {
+  Widget _buildSnapshot(AgentSnapshot snapshot, SessionVitality vitality) {
     return switch (snapshot) {
       AgentsNotProbed() => const _EmptyHint(
         text: 'Not connected — agent state unknown',
@@ -303,6 +309,30 @@ class _AgentsSection extends StatelessWidget {
       AgentsUnreachable() => const _EmptyHint(
         text: "Could not reach herdr's agent server — agent state unknown",
       ),
+      // An empty agent list is where BOTH stories land, and where the user
+      // actually looks when nothing is happening — so this is the one
+      // branch the second fact gets to speak in. A session that came back
+      // as bare shells and a session the user simply has not started yet
+      // are indistinguishable from the agent list alone; only
+      // [SessionVitality] tells them apart.
+      //
+      // The VIRGIN wording REPLACES the neutral line rather than joining
+      // it. Both would be true at once, but two hints read as two separate
+      // findings about the same emptiness, and the specific one already
+      // implies the general one.
+      AgentsKnown(:final agents)
+          when agents.isEmpty &&
+              vitality is SessionVitalityKnown &&
+              vitality.shape == SessionShape.virgin =>
+        const _EmptyHint(
+          text: 'Session restored empty — every pane is a fresh shell at home',
+        ),
+      // Every other vitality variant falls through to here on purpose,
+      // including [SessionVitalityIndeterminate] and
+      // [SessionVitalityUnreachable]. Saying "restored empty" for a verdict
+      // nobody reached would be a positive claim about the host built on
+      // nothing — the rule `mostUrgentAgentState` already enforces for the
+      // tab badge, applied to the second fact.
       AgentsKnown(:final agents) when agents.isEmpty => const _EmptyHint(
         text: 'No agents running right now',
       ),

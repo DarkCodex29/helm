@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/host/session_vitality.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
@@ -49,12 +50,16 @@ class _FixedTabsNotifier extends TabsNotifier {
 /// disconnected session, so the drawer's open-time refresh is inert, and
 /// agent polling is never enabled — so this harness cannot leave a timer
 /// pending behind a widget test.
-TerminalSession _sessionShowing(AgentSnapshot snapshot) {
+TerminalSession _sessionShowing(
+  AgentSnapshot snapshot, {
+  SessionVitality vitality = const SessionVitalityNotProbed(),
+}) {
   final session = TerminalSession(
     profile: _profile,
     sshService: FakeSSHService(),
   );
   session.agentsNotifier.value = snapshot;
+  session.sessionVitalityNotifier.value = vitality;
   return session;
 }
 
@@ -79,13 +84,16 @@ String _agentsSectionText(WidgetTester tester) {
 Future<TerminalSession?> _pumpDrawer(
   WidgetTester tester, {
   required AgentSnapshot? snapshot,
+  SessionVitality vitality = const SessionVitalityNotProbed(),
 }) async {
   // Tear the previous tree down first. Pumping a second drawer into a live
   // tree reuses the Scaffold element and keeps the ORIGINAL notifier, so a
   // loop over several snapshots would silently re-read the first one.
   await tester.pumpWidget(const SizedBox.shrink());
 
-  final session = snapshot == null ? null : _sessionShowing(snapshot);
+  final session = snapshot == null
+      ? null
+      : _sessionShowing(snapshot, vitality: vitality);
   final tabs = session == null
       ? const TabsState()
       : TabsState(
@@ -183,6 +191,87 @@ void main() {
 
         expect(find.text('No agents running right now'), findsOneWidget);
         expect(find.byType(AgentRow), findsNothing);
+
+        await session?.dispose();
+      },
+    );
+
+    testWidgets(
+      'a VIRGIN verdict on an empty agent list says the session came back '
+      'empty — the whole point of the second fact',
+      (tester) async {
+        final session = await _pumpDrawer(
+          tester,
+          snapshot: const AgentsKnown([]),
+          vitality: const SessionVitalityKnown(SessionShape.virgin),
+        );
+
+        expect(find.textContaining('restored empty'), findsOneWidget);
+        // It must REPLACE the neutral wording, not sit beside it: two
+        // hints would read as two separate facts about the same thing.
+        expect(find.text('No agents running right now'), findsNothing);
+        expect(find.byType(AgentRow), findsNothing);
+
+        await session?.dispose();
+      },
+    );
+
+    testWidgets(
+      'a LIVED-IN verdict on an empty agent list keeps the neutral wording: '
+      'the user simply has not started anything yet',
+      (tester) async {
+        final session = await _pumpDrawer(
+          tester,
+          snapshot: const AgentsKnown([]),
+          vitality: const SessionVitalityKnown(SessionShape.livedIn),
+        );
+
+        expect(find.text('No agents running right now'), findsOneWidget);
+        expect(find.textContaining('restored empty'), findsNothing);
+
+        await session?.dispose();
+      },
+    );
+
+    // A claim about the host that nobody measured is exactly what
+    // `mostUrgentAgentState` refuses to draw a badge for. The same rule
+    // applies here: these three variants MUST NOT produce the alarm.
+    for (final vitality in const <SessionVitality>[
+      SessionVitalityNotProbed(),
+      SessionVitalityUnreachable(),
+      SessionVitalityIndeterminate(),
+      SessionVitalityUnsupported(MultiplexerId.tmux),
+    ]) {
+      testWidgets(
+        'an unmeasured verdict (${vitality.runtimeType}) draws no claim at '
+        'all — silence is the only honest output',
+        (tester) async {
+          final session = await _pumpDrawer(
+            tester,
+            snapshot: const AgentsKnown([]),
+            vitality: vitality,
+          );
+
+          expect(find.textContaining('restored empty'), findsNothing);
+          expect(find.text('No agents running right now'), findsOneWidget);
+
+          await session?.dispose();
+        },
+      );
+    }
+
+    testWidgets(
+      'a VIRGIN verdict never overrides live agents — a session with an '
+      'agent in it is being worked in, whatever else was measured',
+      (tester) async {
+        final session = await _pumpDrawer(
+          tester,
+          snapshot: AgentsKnown([_agent(AgentState.working, 'a')]),
+          vitality: const SessionVitalityKnown(SessionShape.virgin),
+        );
+
+        expect(find.byType(AgentRow), findsOneWidget);
+        expect(find.textContaining('restored empty'), findsNothing);
 
         await session?.dispose();
       },

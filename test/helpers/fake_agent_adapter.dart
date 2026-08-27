@@ -64,6 +64,12 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   @override
   AgentAwareMultiplexer? get agents => this;
 
+  /// Null by default: this fake exists to drive AGENT branches, and a
+  /// consumer that reads pane state from it must say so by using
+  /// [FakePaneAwareAdapter] instead.
+  @override
+  PaneAwareMultiplexer? get panes => null;
+
   @override
   Future<MuxAgentsResult> listAgents() async {
     listAgentsCalls++;
@@ -131,6 +137,9 @@ class FakeAgentlessAdapter implements MultiplexerAdapter {
   AgentAwareMultiplexer? get agents => null;
 
   @override
+  PaneAwareMultiplexer? get panes => null;
+
+  @override
   Future<MuxDetection> detect() async =>
       const MuxDetection.installed(absPath: 'fake', version: 'fake 1.0');
 
@@ -143,4 +152,79 @@ class FakeAgentlessAdapter implements MultiplexerAdapter {
 
   @override
   String attachCommand(String sessionName) => 'fake-attach $sessionName';
+}
+
+/// Scripted [MultiplexerAdapter] that advertises BOTH agent state and pane
+/// listing — what `HerdrAdapter` genuinely is.
+///
+/// Extends [FakeAgentAdapter] so a vitality test can script the agent list
+/// and the pane list independently, which is the point: the two facts are
+/// independent, and a test that could not disagree with itself about them
+/// would not be testing that independence.
+class FakePaneAwareAdapter extends FakeAgentAdapter
+    implements PaneAwareMultiplexer {
+  /// How many times [listPanes] has been entered.
+  int listPanesCalls = 0;
+
+  MuxPanesResult? _paneResult;
+  Object? _paneError;
+  Completer<void>? _paneGate;
+
+  /// Next [listPanes] answers with [result].
+  void whenPanes(MuxPanesResult result) {
+    _resetPanes();
+    _paneResult = result;
+  }
+
+  /// Next [listPanes] throws [error].
+  void whenPanesThrow(Object error) {
+    _resetPanes();
+    _paneError = error;
+  }
+
+  /// Next [listPanes] never completes until [releasePanes] is called, so a
+  /// consumer's own `.timeout(...)` has to fire.
+  void whenPanesHang() {
+    _resetPanes();
+    _paneGate = Completer<void>();
+  }
+
+  void releasePanes() {
+    final gate = _paneGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  void _resetPanes() {
+    _paneResult = null;
+    _paneError = null;
+    _paneGate = null;
+  }
+
+  @override
+  Set<MuxCapability> get capabilities => const {
+    MuxCapability.agentState,
+    MuxCapability.paneListing,
+  };
+
+  @override
+  PaneAwareMultiplexer? get panes => this;
+
+  @override
+  Future<MuxPanesResult> listPanes() async {
+    listPanesCalls++;
+    final gate = _paneGate;
+    if (gate != null) {
+      await gate.future;
+      return const MuxPanesAvailable([]);
+    }
+    final error = _paneError;
+    if (error != null) throw error;
+    final result = _paneResult;
+    if (result == null) {
+      throw StateError(
+        'FakePaneAwareAdapter: listPanes() called with nothing scripted',
+      );
+    }
+    return result;
+  }
 }

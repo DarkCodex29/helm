@@ -140,6 +140,12 @@ void main() {
     });
   });
 
+  group('panes capability', () {
+    test('is null — ZellijAdapter cannot report pane revision or cwd', () {
+      expect(adapter.panes, isNull);
+    });
+  });
+
   group('detect', () {
     test(
       'reports installed and the version when the binary is found',

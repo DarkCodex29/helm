@@ -56,7 +56,39 @@ import '../../../helpers/fake_host_command_runner.dart';
 //   semantics.
 const _agentListCommand = 'herdr agent list';
 const _sessionListCommand = 'herdr session list --json';
+const _paneListCommand = 'herdr pane list';
 const _detectCommand = 'command -v herdr >/dev/null 2>&1 && herdr --version';
+
+String _paneListSuccess(List<Map<String, Object?>> panes) => jsonEncode({
+  'id': 'cli:pane:list',
+  'result': {'panes': panes, 'type': 'pane_list'},
+});
+
+/// One `pane list` entry in the exact shape a RESURRECTED-EMPTY session
+/// reported on the real host — including the fields helm does not read.
+/// The three that matter: `revision` is 1 (never touched), `cwd` is $HOME,
+/// and `agent_status` is "unknown".
+const _virginPaneInfo = {
+  'agent_status': 'unknown',
+  'cwd': '/home/deployer',
+  'focused': true,
+  'foreground_cwd': '/home/deployer',
+  'pane_id': 'w1:p1',
+  'revision': 1,
+  'scroll': {'offset': 0, 'viewport': 24},
+  'tab_id': 'w1:t1',
+  'terminal_id': 'term_659ab3dc3a8541',
+  'terminal_title': 'deployer@vmi2862525: ~',
+  'terminal_title_stripped': 'deployer@vmi2862525: ~',
+  'workspace_id': 'w1',
+};
+
+/// `pane list` is socket-backed, so it fails exactly the way `agent list`
+/// does when no server is up.
+const _paneListNoServer =
+    '{"id":"cli:pane:list","error":{"code":"server_not_running",'
+    '"message":"no herdr server is running at socket; run `herdr` to '
+    'start or attach it"}}';
 
 String _agentListSuccess(List<Map<String, Object?>> agents) => jsonEncode({
   'id': 'cli:agent:list',
@@ -451,9 +483,209 @@ void main() {
           MuxCapability.agentState,
           MuxCapability.agentWait,
           MuxCapability.structuredOutput,
+          MuxCapability.paneListing,
         });
       },
     );
+  });
+
+  // CONFIRMED against the real host, from the resurrected-empty session
+  // this capability exists to detect:
+  //
+  //   herdr pane list --session default
+  //   → {"id":"cli:pane:list","result":{"panes":[...],"type":"pane_list"}}
+  //
+  // Every pane carried: pane_id, tab_id, workspace_id, terminal_id,
+  // revision (int), cwd, foreground_cwd, focused (bool), agent_status,
+  // terminal_title, terminal_title_stripped, scroll (object). This adapter
+  // reads only pane_id, revision and cwd — the three the verdict rests on.
+  //
+  // `pane list` is SOCKET-backed like `agent list`, not directory-backed
+  // like `session list --json`: it reports live pane state, so it uses the
+  // `{id, result}` / `{id, error: {code, message}}` envelope and fails with
+  // `server_not_running` when no server is up.
+  group('listPanes', () {
+    test('parses the three fields the vitality verdict rests on', () async {
+      runner.whenRun(
+        _paneListCommand,
+        HostCommandResult(
+          stdout: _paneListSuccess(const [_virginPaneInfo]),
+          exitCode: 0,
+        ),
+      );
+
+      final result = await adapter.listPanes();
+
+      expect(result, isA<MuxPanesAvailable>());
+      final panes = (result as MuxPanesAvailable).panes;
+      expect(panes.single.paneId, 'w1:p1');
+      expect(panes.single.revision, 1);
+      expect(panes.single.cwd, '/home/deployer');
+    });
+
+    test('reads every pane, not just the first', () async {
+      runner.whenRun(
+        _paneListCommand,
+        HostCommandResult(
+          stdout: _paneListSuccess([
+            _virginPaneInfo,
+            {..._virginPaneInfo, 'pane_id': 'w1:p2', 'revision': 12},
+          ]),
+          exitCode: 0,
+        ),
+      );
+
+      final result = await adapter.listPanes();
+
+      expect((result as MuxPanesAvailable).panes.map((p) => p.revision), [
+        1,
+        12,
+      ]);
+    });
+
+    test(
+      'a live server with genuinely zero panes is AVAILABLE-but-empty, not '
+      'a failure',
+      () async {
+        runner.whenRun(
+          _paneListCommand,
+          HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+        );
+
+        final result = await adapter.listPanes();
+
+        expect(result, isA<MuxPanesAvailable>());
+        expect((result as MuxPanesAvailable).panes, isEmpty);
+      },
+    );
+
+    test(
+      'a dead server reports MuxPaneServerNotRunning, never an empty list — '
+      'an empty list here would read as "this session has no panes"',
+      () async {
+        runner.whenRun(
+          _paneListCommand,
+          HostCommandResult(stderr: _paneListNoServer, exitCode: 1),
+        );
+
+        final result = await adapter.listPanes();
+
+        expect(result, isA<MuxPaneServerNotRunning>());
+        expect(result, isNot(isA<MuxPanesAvailable>()));
+      },
+    );
+
+    test(
+      'an unrecognized error code is surfaced loudly, never collapsed into '
+      'the expected server_not_running state',
+      () async {
+        runner.whenRun(
+          _paneListCommand,
+          HostCommandResult(
+            stderr:
+                '{"id":"cli:pane:list","error":{"code":"session_not_found",'
+                '"message":"no such session"}}',
+            exitCode: 1,
+          ),
+        );
+
+        await expectLater(adapter.listPanes(), throwsStateError);
+      },
+    );
+
+    test('stderr that is not the JSON envelope at all also throws', () async {
+      runner.whenRun(
+        _paneListCommand,
+        HostCommandResult(stderr: 'Segmentation fault', exitCode: 139),
+      );
+
+      await expectLater(adapter.listPanes(), throwsStateError);
+    });
+  });
+
+  group('listPanes command shape', () {
+    test('is socket-backed, so it is scoped to the session', () async {
+      const expected = "herdr --session 'helm-0' pane list";
+      final scopedRunner = FakeHostCommandRunner()
+        ..whenRun(
+          expected,
+          HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+        );
+      final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+
+      await scoped.listPanes();
+
+      expect(scopedRunner.runCalls, [expected]);
+    });
+
+    test(
+      'the --session flag precedes the subcommand, never trails it — the '
+      'trailing spelling is rejected outright by the real binary',
+      () async {
+        final scopedRunner = FakeHostCommandRunner();
+        final scoped = HerdrAdapter(scopedRunner, sessionRef: 'helm-0');
+        scopedRunner.whenRun(
+          "herdr --session 'helm-0' pane list",
+          HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+        );
+
+        await scoped.listPanes();
+
+        final emitted = scopedRunner.runCalls.single;
+        expect(emitted.indexOf('--session'), lessThan(emitted.indexOf('pane')));
+      },
+    );
+
+    test('an adapter built without a session emits no --session flag', () async {
+      runner.whenRun(
+        _paneListCommand,
+        HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+      );
+
+      await adapter.listPanes();
+
+      expect(runner.runCalls.single, isNot(contains('--session')));
+    });
+
+    test('uses the probe-resolved absolute path, not a bare name', () async {
+      const absPath = '/home/deployer/.local/bin/herdr';
+      const expected = "$absPath --session 'helm-0' pane list";
+      final scopedRunner = FakeHostCommandRunner()
+        ..whenRun(
+          expected,
+          HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+        );
+      final scoped = HerdrAdapter(
+        scopedRunner,
+        absPath: absPath,
+        sessionRef: 'helm-0',
+      );
+
+      await scoped.listPanes();
+
+      expect(scopedRunner.runCalls, [expected]);
+    });
+
+    test('shell-quotes a hostile session ref', () async {
+      const name = 'x; rm -rf ~';
+      final expected = 'herdr --session ${shellQuote(name)} pane list';
+      final scopedRunner = FakeHostCommandRunner()
+        ..whenRun(
+          expected,
+          HostCommandResult(stdout: _paneListSuccess(const []), exitCode: 0),
+        );
+      final scoped = HerdrAdapter(scopedRunner, sessionRef: name);
+
+      await scoped.listPanes();
+
+      expect(scopedRunner.runCalls, [expected]);
+    });
+  });
+
+  group('panes capability', () {
+    test('is non-null — HerdrAdapter can report pane state', () {
+      expect(adapter.panes, isNotNull);
+    });
   });
 
   group('waitForAgent — a REAL blocking wait on herdr agent wait', () {

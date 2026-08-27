@@ -5,6 +5,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
+import 'package:helm/core/host/session_vitality.dart';
 import 'package:helm/core/host/host_advisor.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/host/host_command_runner.dart';
@@ -232,6 +233,17 @@ const kAgentWaitWindow = Duration(minutes: 5);
 /// answers, or when the transport is torn down by `dispose`/`reconnect`,
 /// whichever comes first.
 const kAgentListTimeout = Duration(seconds: 8);
+
+/// Ceiling on the single pane query before the session's vitality is
+/// treated as unreachable.
+///
+/// Same value and same reasoning as [kAgentListTimeout] — `listPanes` takes
+/// no timeout parameter either, so a wedged host would otherwise park the
+/// query forever. The leak it bounds is smaller: this query runs at most
+/// ONCE per connection (see [TerminalSession.refreshSessionVitality]), so
+/// the ceiling on abandoned channels is one per session by construction
+/// rather than one per poll interval.
+const kPaneListTimeout = Duration(seconds: 8);
 
 /// Ceiling on how long [TerminalSession.connect] waits for an attached view
 /// to report its first real size.
@@ -539,6 +551,21 @@ class TerminalSession {
         },
       );
 
+  /// Whether the multiplexer session this is attached to has been WORKED
+  /// IN, or came back as a restored-but-empty shell.
+  ///
+  /// A SECOND, INDEPENDENT fact from [agentsNotifier] — see
+  /// [SessionVitality] for the incident and for why an empty agent list
+  /// must not be overloaded to carry it. Starts, and returns to,
+  /// [SessionVitalityNotProbed].
+  final ValueNotifier<SessionVitality> sessionVitalityNotifier = ValueNotifier(
+    const SessionVitalityNotProbed(),
+  );
+
+  /// Guards against overlapping pane queries. Released by the query's own
+  /// completion, never by a timeout — see [refreshSessionVitality].
+  bool _vitalityQueryInFlight = false;
+
   /// Pending re-entry into [_trackAgents] when tracking could not be
   /// event-driven this cycle. Non-null only while a retry is genuinely
   /// owed — see [_scheduleAgentRetry].
@@ -839,6 +866,7 @@ class TerminalSession {
     advisoriesNotifier.dispose();
     dismissedAdvisoriesNotifier.dispose();
     agentsNotifier.dispose();
+    sessionVitalityNotifier.dispose();
   }
 
   /// Probes the host and swaps in the adapter the result selects.
@@ -930,6 +958,12 @@ class TerminalSession {
     // rather than to an empty list. Reached only past the guard above, so
     // it can never write to a notifier `dispose` already tore down.
     agentsNotifier.value = const AgentsNotProbed();
+    // Same reasoning, for the second fact: a VIRGIN verdict left on screen
+    // would keep telling the user their session came back empty long after
+    // helm stopped being able to check. It also re-arms the one-shot
+    // trigger, so a reconnect asks again rather than trusting a verdict
+    // about the previous attach.
+    sessionVitalityNotifier.value = const SessionVitalityNotProbed();
     terminal.write(_disconnectMessageFor(outcome));
     _publishAdvisories();
   }
@@ -1237,11 +1271,105 @@ class TerminalSession {
         MuxAgentsAvailable(:final agents) => AgentsKnown(agents),
         MuxAgentServerNotRunning() => const AgentsUnreachable(),
       };
+      _maybeJudgeSessionVitality();
     } catch (e) {
       _log.w('Agent refresh failed for ${profile.name}: $e');
       if (_disposed) return;
       if (statusNotifier.value != ConnectionStatus.connected) return;
       agentsNotifier.value = const AgentsUnreachable();
+    }
+  }
+
+  /// Asks for the vitality verdict the first time an AUTHORITATIVE agent
+  /// snapshot makes one reachable.
+  ///
+  /// Gated on [AgentsKnown] because a VIRGIN verdict requires the absence
+  /// of agents to have been MEASURED — see [judgeSessionVitality]. Any
+  /// other snapshot could only ever produce
+  /// [SessionVitalityIndeterminate], so spending a host round-trip on it
+  /// would buy nothing.
+  ///
+  /// Gated on [SessionVitalityNotProbed] because this is a ONE-SHOT
+  /// question, and that is what keeps the agent poll from becoming a pane
+  /// poll. A session does not become virgin while you are connected to it:
+  /// the verdict describes how the session came back, which is settled
+  /// before helm ever attaches. Re-asking every ten seconds would hammer a
+  /// host the user is also working on — the constraint
+  /// [kAgentPollInterval] was written about — to re-derive a constant.
+  ///
+  /// KNOWN LIMIT, stated rather than hidden: a query that fails publishes
+  /// [SessionVitalityUnreachable] and is never retried for the life of the
+  /// connection. The UI draws nothing for that variant, so the cost is a
+  /// missing signal rather than a wrong one — which is the correct side to
+  /// fail on for a claim this loud.
+  void _maybeJudgeSessionVitality() {
+    if (agentsNotifier.value is! AgentsKnown) return;
+    if (sessionVitalityNotifier.value is! SessionVitalityNotProbed) return;
+    unawaited(refreshSessionVitality());
+  }
+
+  /// Asks the host once whether this session has been worked in, and
+  /// publishes the verdict on [sessionVitalityNotifier].
+  ///
+  /// Never throws and never rejects. Every failure degrades to a variant
+  /// that says we could not find out; it never degrades to
+  /// [SessionVitalityKnown], which is the only variant the UI speaks from.
+  Future<void> refreshSessionVitality() async {
+    if (_disposed || _vitalityQueryInFlight) return;
+    if (statusNotifier.value != ConnectionStatus.connected) return;
+
+    final paneApi = _muxAdapter.panes;
+    if (paneApi == null) {
+      sessionVitalityNotifier.value = SessionVitalityUnsupported(
+        _muxAdapter.id,
+      );
+      return;
+    }
+
+    // Checked BEFORE the round-trip, not inside the judge. Home comes from
+    // the probe, which already ran for this connection — if it is missing
+    // now it will still be missing later, so the panes could only ever
+    // feed an indeterminate verdict. Asking anyway would spend a channel
+    // to learn nothing.
+    final home = _hostReport?.env['home'];
+    if (home == null) {
+      sessionVitalityNotifier.value = const SessionVitalityIndeterminate();
+      return;
+    }
+
+    _vitalityQueryInFlight = true;
+    final query = paneApi.listPanes();
+    // Released when the QUERY settles, not when this call stops waiting —
+    // the discipline [kAgentListTimeout] documents. `.timeout` abandons the
+    // Future without closing the remote channel, so releasing on
+    // abandonment would let a later call stack a second channel on top of
+    // one nobody closed.
+    unawaited(
+      query
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() => _vitalityQueryInFlight = false),
+    );
+
+    try {
+      final result = await query.timeout(kPaneListTimeout);
+      // The session can be torn down during the round-trip — closing a tab
+      // disposes it while this is still in flight, and writing to a
+      // disposed ValueNotifier throws.
+      if (_disposed) return;
+      if (statusNotifier.value != ConnectionStatus.connected) return;
+      sessionVitalityNotifier.value = switch (result) {
+        MuxPanesAvailable(:final panes) => judgeSessionVitality(
+          panes: panes,
+          agents: agentsNotifier.value,
+          homeDirectory: home,
+        ),
+        MuxPaneServerNotRunning() => const SessionVitalityUnreachable(),
+      };
+    } catch (e) {
+      _log.w('Session vitality check failed for ${profile.name}: $e');
+      if (_disposed) return;
+      if (statusNotifier.value != ConnectionStatus.connected) return;
+      sessionVitalityNotifier.value = const SessionVitalityUnreachable();
     }
   }
 

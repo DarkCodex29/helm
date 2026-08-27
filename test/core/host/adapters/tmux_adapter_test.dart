@@ -87,6 +87,16 @@ void main() {
     );
   });
 
+  group('panes capability', () {
+    test('is null — TmuxAdapter cannot report pane revision or cwd', () {
+      expect(adapter.panes, isNull);
+    });
+
+    test('does not advertise paneListing', () {
+      expect(adapter.capabilities, isNot(contains(MuxCapability.paneListing)));
+    });
+  });
+
   group('detect', () {
     test('reports installed and the version when the binary is found', () async {
       runner.whenRun(

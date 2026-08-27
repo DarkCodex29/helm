@@ -28,6 +28,14 @@ class TmuxAdapter implements MultiplexerAdapter {
   @override
   AgentAwareMultiplexer? get agents => null;
 
+  /// Always null. `display-message -p '#{pane_current_path}'` would give a
+  /// pane's cwd, but tmux has no per-pane revision counter, so it cannot
+  /// tell a pane that was worked in apart from one that was recreated —
+  /// half the evidence is not a weaker answer, it is no answer. See
+  /// [MuxPane].
+  @override
+  PaneAwareMultiplexer? get panes => null;
+
   @override
   Future<MuxDetection> detect() async {
     final result = await _runner.run(

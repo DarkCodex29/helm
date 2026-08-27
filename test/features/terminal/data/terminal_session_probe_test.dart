@@ -606,6 +606,9 @@ class _StubAdapter implements MultiplexerAdapter {
   AgentAwareMultiplexer? get agents => null;
 
   @override
+  PaneAwareMultiplexer? get panes => null;
+
+  @override
   Future<MuxDetection> detect() async => const MuxDetection.notInstalled();
 
   @override

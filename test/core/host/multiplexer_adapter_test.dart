@@ -31,6 +31,9 @@ class _FakeAgentCapableAdapter implements MultiplexerAdapter {
   AgentAwareMultiplexer? get agents => _agentsImpl;
 
   @override
+  PaneAwareMultiplexer? get panes => null;
+
+  @override
   Future<MuxDetection> detect() async => const MuxDetection.notInstalled();
 
   @override

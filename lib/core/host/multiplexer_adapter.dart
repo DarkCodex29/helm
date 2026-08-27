@@ -30,6 +30,15 @@ enum MuxCapability {
   structuredOutput,
   sessionWorkingDirectory,
   deadSessionResurrection,
+
+  /// The adapter can enumerate the session's panes with enough detail to
+  /// tell a pane that has been WORKED IN apart from one that was merely
+  /// recreated — see [MuxPane].
+  ///
+  /// Advertised by `HerdrAdapter` only. tmux can report a pane's current
+  /// path but has no per-pane revision counter, so it cannot answer the
+  /// question this capability exists for and does not advertise it.
+  paneListing,
 }
 
 /// Install state of a multiplexer, reported by [MultiplexerAdapter.detect].
@@ -138,6 +147,68 @@ final class MuxAgentServerNotRunning extends MuxAgentsResult {
   const MuxAgentServerNotRunning();
 }
 
+/// One pane reported by [PaneAwareMultiplexer.listPanes].
+///
+/// Deliberately THREE fields out of the twelve herdr sends. This type is
+/// consumed by exactly one question — has this pane been worked in, or was
+/// it merely recreated? — and only these three answer it:
+///
+/// * [revision] is the multiplexer's own per-pane change counter. A pane
+///   that has never been written to sits at its initial value; anything
+///   past 1 is the host's own record that something happened there.
+/// * [cwd] compared against the user's home directory distinguishes a
+///   shell someone navigated somewhere from one that opened at its
+///   default.
+/// * [paneId] identifies which pane a verdict is about.
+///
+/// Parsing `foreground_cwd`, `scroll`, `terminal_title` and the rest would
+/// be storing fields no caller reads, and every stored field is a field a
+/// future reader has to work out whether they may trust.
+typedef MuxPane = ({String paneId, int revision, String cwd});
+
+/// Result of [PaneAwareMultiplexer.listPanes].
+///
+/// Mirrors [MuxSessionsResult] and [MuxAgentsResult] for the third time and
+/// for the same reason, which is not ceremony: an empty pane list is a
+/// CLAIM — "this session has no panes" — and a caller about to tell a user
+/// their session came back empty must not be able to reach that conclusion
+/// from a query that simply failed. See the
+/// multiplexer-abstraction spec's "Explicit State on List Failure, Never an
+/// Empty List" requirement.
+sealed class MuxPanesResult {
+  const MuxPanesResult();
+}
+
+/// Panes were successfully enumerated.
+///
+/// [panes] may itself be empty when the server IS running and the session
+/// genuinely has no panes — a different, valid case from
+/// [MuxPaneServerNotRunning].
+final class MuxPanesAvailable extends MuxPanesResult {
+  const MuxPanesAvailable(this.panes);
+
+  final List<MuxPane> panes;
+}
+
+/// The adapter's server or daemon process is not reachable, so nothing is
+/// known about this session's panes.
+///
+/// MUST NOT be confused with [MuxPanesAvailable] carrying an empty list.
+final class MuxPaneServerNotRunning extends MuxPanesResult {
+  const MuxPaneServerNotRunning();
+}
+
+/// Execution surface for adapters that advertise [MuxCapability.paneListing].
+///
+/// Reachable only through [MultiplexerAdapter.panes], for the same
+/// type-enforcement reason [AgentAwareMultiplexer] is reachable only
+/// through [MultiplexerAdapter.agents]: a caller cannot enumerate panes
+/// without first proving, via a null check, that the multiplexer can
+/// report them. See design.md AD-2.
+abstract interface class PaneAwareMultiplexer {
+  Future<MuxPanesResult> listPanes();
+}
+
 /// Result of [AgentAwareMultiplexer.waitForAgent].
 ///
 /// THREE variants because a nullable [AgentStatus] cannot keep the two
@@ -241,6 +312,14 @@ abstract interface class MultiplexerAdapter {
   /// forces a null check before agent-state methods are reachable, so a
   /// caller cannot skip the check and still compile. See AD-2.
   AgentAwareMultiplexer? get agents;
+
+  /// Non-null only when [MuxCapability.paneListing] is advertised.
+  ///
+  /// Same execution guard as [agents], for a second, INDEPENDENT fact: a
+  /// multiplexer that can list agents is not thereby able to say whether
+  /// its panes have been worked in. Keeping the two accessors separate is
+  /// what stops one capability being read as evidence for the other.
+  PaneAwareMultiplexer? get panes;
 
   Future<MuxDetection> detect();
 

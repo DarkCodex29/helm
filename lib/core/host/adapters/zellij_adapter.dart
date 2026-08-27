@@ -46,6 +46,11 @@ class ZellijAdapter implements MultiplexerAdapter {
   @override
   AgentAwareMultiplexer? get agents => null;
 
+  /// Always null. zellij exposes no per-pane revision counter, so it
+  /// cannot say whether a pane has been worked in — see [MuxPane].
+  @override
+  PaneAwareMultiplexer? get panes => null;
+
   @override
   Future<MuxDetection> detect() async {
     final result = await _runner.run(

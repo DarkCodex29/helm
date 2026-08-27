@@ -28,7 +28,8 @@ import 'package:helm/core/host/shell_quote.dart';
 /// See `test/core/host/adapters/herdr_adapter_test.dart`'s header comment
 /// for exactly which facts are CONFIRMED versus this adapter's own
 /// disclosed assumptions.
-class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
+class HerdrAdapter
+    implements MultiplexerAdapter, AgentAwareMultiplexer, PaneAwareMultiplexer {
   HerdrAdapter(this._runner, {String absPath = 'herdr', String? sessionRef})
     : _absPath = absPath,
       _sessionRef = sessionRef;
@@ -71,6 +72,10 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
     // [waitForAgent] for the live measurements this rests on.
     MuxCapability.agentWait,
     MuxCapability.structuredOutput,
+    // herdr is the only multiplexer with a per-pane revision counter, which
+    // is the one field that makes "worked in" versus "merely recreated"
+    // answerable at all. See [listPanes].
+    MuxCapability.paneListing,
   };
 
   /// Always non-null: herdr is the only multiplexer that advertises
@@ -78,6 +83,10 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   /// [AgentAwareMultiplexer] itself. See AD-2.
   @override
   AgentAwareMultiplexer? get agents => this;
+
+  /// Always non-null, for the same reason [agents] is.
+  @override
+  PaneAwareMultiplexer? get panes => this;
 
   @override
   Future<MuxDetection> detect() async {
@@ -169,6 +178,47 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
         (envelope['result'] as Map<String, dynamic>)['agents'] as List;
     return MuxAgentsAvailable(
       agentsJson.cast<Map<String, dynamic>>().map(_parseAgentInfo).toList(),
+    );
+  }
+
+  /// Enumerates the scoped session's panes via `herdr pane list`.
+  ///
+  /// SOCKET-backed, like [listAgents] and unlike [listSessions]: it reports
+  /// LIVE pane state rather than reading the session directory, so it uses
+  /// herdr's `{id, result}` / `{id, error: {code, message}}` envelope and
+  /// fails with `server_not_running` when no server is up. The response
+  /// carries `{"panes": [...], "type": "pane_list"}`.
+  ///
+  /// Each pane object carries twelve fields — `pane_id`, `tab_id`,
+  /// `workspace_id`, `terminal_id`, `revision`, `cwd`, `foreground_cwd`,
+  /// `focused`, `agent_status`, `terminal_title`,
+  /// `terminal_title_stripped`, `scroll` — and this reads THREE. See
+  /// [MuxPane] for why the other nine are deliberately dropped.
+  ///
+  /// Error handling is [listAgents]', not a variation on it: the only
+  /// recognized failure is `server_not_running`, and any other
+  /// machine-readable code — or stderr that is not the JSON envelope at
+  /// all — is thrown rather than collapsed into it. Collapsing here would
+  /// be worse than it is for agents: this result feeds a verdict the user
+  /// reads as "your session came back empty", and a misclassified failure
+  /// would be the evidence for that claim.
+  @override
+  Future<MuxPanesResult> listPanes() async {
+    final result = await _runner.run(_paneListCommand);
+    if (result.exitCode != 0) {
+      final code = _parseErrorCode(result.stderr);
+      if (code == 'server_not_running') return const MuxPaneServerNotRunning();
+      throw StateError(
+        'herdr pane list failed with an unrecognized error '
+        '(exit code ${result.exitCode}): '
+        '${code ?? 'no machine-readable error.code in stderr'}',
+      );
+    }
+    final envelope = jsonDecode(result.stdout) as Map<String, dynamic>;
+    final panesJson =
+        (envelope['result'] as Map<String, dynamic>)['panes'] as List;
+    return MuxPanesAvailable(
+      panesJson.cast<Map<String, dynamic>>().map(_parsePaneInfo).toList(),
     );
   }
 
@@ -279,6 +329,17 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
   /// list` succeeds and the trailing-flag spellings are rejected outright.
   String get _agentListCommand => '$_absPath${_sessionScope}agent list';
 
+  /// Scoped for the same MEASURED reason [_agentListCommand] is: each herdr
+  /// session owns its own api socket, and a socket-backed query answers
+  /// only for the socket it connects to. An unscoped `pane list` would
+  /// describe the DEFAULT session's panes while the verdict was published
+  /// against the attached one.
+  ///
+  /// `--session` precedes the subcommand because it is a GLOBAL option —
+  /// verified against the real binary, where the trailing spellings are
+  /// rejected outright. See [_agentListCommand].
+  String get _paneListCommand => '$_absPath${_sessionScope}pane list';
+
   /// Deliberately NOT scoped. `session list --json` enumerates every herdr
   /// session by reading the config directory (see [listSessions]); pinning
   /// it to one session would be asking a global question through a local
@@ -349,6 +410,18 @@ class HerdrAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
       state: _parseAgentState(json['agent_status'] as String),
     );
   }
+
+  /// Parses one `pane list` entry into a [MuxPane].
+  ///
+  /// `revision` is read as an `int` rather than coerced from `num`: herdr
+  /// emits it as a JSON integer, and a silent `.toInt()` would hide a wire
+  /// contract that had changed underneath the one comparison the verdict
+  /// depends on.
+  MuxPane _parsePaneInfo(Map<String, dynamic> json) => (
+    paneId: json['pane_id'] as String,
+    revision: json['revision'] as int,
+    cwd: json['cwd'] as String,
+  );
 
   /// Maps a herdr `agent_status` string to [AgentState]. Unrecognized
   /// values map to [AgentState.unknown] rather than throwing, matching the
