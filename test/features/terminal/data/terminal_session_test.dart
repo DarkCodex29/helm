@@ -212,8 +212,10 @@ void main() {
         await session.connect('key');
 
         // The attach command is quoted per design.md AD-3 and reaches the
-        // multiplexer as part of the exec+pty request itself.
-        expect(openedCommands, ["tmux new-session -A -s 'mysession'"]);
+        // multiplexer as part of the exec+pty request itself. This profile
+        // records no multiplexer and the host is unprobeable, so the
+        // command is the host default's — herdr, under a bare binary name.
+        expect(openedCommands, ["herdr session attach 'mysession'"]);
         expect(openedPtyConfigs, hasLength(1));
         // Nothing is ever written into the shell session that
         // connectAndOpenShell opened — that channel is never the target

@@ -4,16 +4,26 @@ import 'package:helm/core/host/probe/host_report.dart';
 /// Order the host default falls through when a profile records no explicit
 /// multiplexer choice.
 ///
-/// tmux is first deliberately: before the probe existed, every session
-/// attached through a hardcoded [MultiplexerId.tmux] adapter. Any host that
-/// worked before this wiring landed has tmux, so tmux-first means this
-/// change never silently moves an existing user onto a different
-/// multiplexer. Reordering this list is a user-visible behavior change, not
-/// a cosmetic edit.
+/// herdr is first deliberately: it is the only adapter that advertises
+/// [MuxCapability.agentState], and that capability is the entire reason the
+/// agent inbox exists. Leading with anything else means a host that HAS
+/// herdr installed still attaches through a multiplexer that cannot report
+/// what an agent is doing, so the feature would only ever reach users who
+/// found the setting and opted in by hand.
+///
+/// tmux and zellij follow, in that order, as degraded fallbacks for hosts
+/// without herdr. They still attach and still persist sessions across a
+/// dropped connection; they simply cannot answer agent-state queries, which
+/// [AgentSupport.resolve] reports honestly rather than reading as "no
+/// agents are working".
+///
+/// Reordering this list is a user-visible behavior change, not a cosmetic
+/// edit: it moves every profile that recorded no explicit choice onto a
+/// different multiplexer on its next attach.
 const _hostDefaultPreference = [
+  MultiplexerId.herdr,
   MultiplexerId.tmux,
   MultiplexerId.zellij,
-  MultiplexerId.herdr,
 ];
 
 /// Outcome of matching a profile's persisted multiplexer choice against

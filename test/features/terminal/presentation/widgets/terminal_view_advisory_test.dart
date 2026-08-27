@@ -98,17 +98,40 @@ void main() {
     expect(find.byType(HostAdvisoryCard), findsNothing);
   });
 
-  testWidgets('the card can be dismissed without leaving the session', (
-    tester,
-  ) async {
-    final session = await _connectedSession(multiplexer: 'zellij');
+  testWidgets(
+    'a row can be dismissed without hiding the other findings or leaving '
+    'the session',
+    (tester) async {
+      final session = await _connectedSession(multiplexer: 'zellij');
 
-    await tester.pumpWidget(_host(session));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Dismiss'));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(_host(session));
+      await tester.pump();
 
-    expect(find.text('zellij is not installed'), findsNothing);
-    expect(session.status, ConnectionStatus.connected);
-  });
+      // This host raises two findings at once, because the substitution
+      // lands on herdr and this host's herdr is off the login PATH.
+      // Dismissal is keyed by advisory id precisely so closing one does not
+      // take an unrelated one with it.
+      expect(find.text('zellij is not installed'), findsOneWidget);
+      expect(find.text('herdr is not on the login PATH'), findsOneWidget);
+
+      // Each row carries its own Dismiss button, so the tap has to name the
+      // row it means rather than whichever one happens to be first.
+      await tester.tap(
+        find.descendant(
+          of: find
+              .ancestor(
+                of: find.text('zellij is not installed'),
+                matching: find.byType(Row),
+              )
+              .first,
+          matching: find.byTooltip('Dismiss'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('zellij is not installed'), findsNothing);
+      expect(find.text('herdr is not on the login PATH'), findsOneWidget);
+      expect(session.status, ConnectionStatus.connected);
+    },
+  );
 }

@@ -95,11 +95,15 @@ void main() {
         selection,
         isA<MultiplexerSubstituted>()
             .having((s) => s.requested, 'requested', MultiplexerId.zellij)
-            .having((s) => s.id, 'id', MultiplexerId.tmux)
-            .having((s) => s.absPath, 'absPath', '/usr/bin/tmux')
+            .having((s) => s.id, 'id', MultiplexerId.herdr)
+            .having(
+              (s) => s.absPath,
+              'absPath',
+              '/home/deployer/.local/bin/herdr',
+            )
             .having((s) => s.available, 'available', [
-              MultiplexerId.tmux,
               MultiplexerId.herdr,
+              MultiplexerId.tmux,
             ]),
       );
     });
@@ -147,10 +151,75 @@ void main() {
   });
 
   group('resolveMultiplexer — host default (no persisted choice)', () {
-    test('prefers tmux when present, preserving pre-probe behavior', () {
+    test('prefers herdr when present, even off the inherited PATH', () {
       final selection = resolveMultiplexer(
         requested: null,
         report: _realHostReport(),
+      );
+
+      expect(
+        selection,
+        isA<MultiplexerVerified>().having(
+          (s) => s.id,
+          'id',
+          MultiplexerId.herdr,
+        ),
+      );
+    });
+
+    test('selects herdr when every supported multiplexer is installed', () {
+      // The contract the ordering exists for: herdr is the only adapter
+      // that advertises agent-state capability, so a host carrying all
+      // three must attach through herdr rather than a degraded fallback.
+      //
+      // The records are listed herdr-LAST on purpose. Preference order, not
+      // the order the probe happened to emit, is what decides this.
+      final selection = resolveMultiplexer(
+        requested: null,
+        report: HostReport(
+          status: HostReportStatus.ok,
+          mux: [
+            _mux('tmux', absPath: '/usr/bin/tmux', version: 'tmux 3.4'),
+            _mux(
+              'zellij',
+              absPath: '/usr/bin/zellij',
+              version: 'zellij 0.44.3',
+            ),
+            _mux(
+              'herdr',
+              absPath: '/usr/local/bin/herdr',
+              version: 'herdr 0.8.0',
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        selection,
+        isA<MultiplexerVerified>()
+            .having((s) => s.id, 'id', MultiplexerId.herdr)
+            .having((s) => s.absPath, 'absPath', '/usr/local/bin/herdr'),
+      );
+    });
+
+    test('falls to tmux, not zellij, when herdr is absent', () {
+      // tmux and zellij are both fallbacks, but they are ORDERED fallbacks.
+      // Listing zellij first in the report proves the preference list is
+      // what breaks the tie.
+      final selection = resolveMultiplexer(
+        requested: null,
+        report: HostReport(
+          status: HostReportStatus.ok,
+          mux: [
+            _mux(
+              'zellij',
+              absPath: '/usr/bin/zellij',
+              version: 'zellij 0.44.3',
+            ),
+            _mux('tmux', absPath: '/usr/bin/tmux', version: 'tmux 3.4'),
+            _mux('herdr', found: false, onInheritedPath: false),
+          ],
+        ),
       );
 
       expect(
@@ -159,12 +228,19 @@ void main() {
       );
     });
 
-    test('falls to the next preferred multiplexer when tmux is absent', () {
+    test('falls through to zellij when herdr and tmux are both absent', () {
       final selection = resolveMultiplexer(
         requested: null,
         report: const HostReport(
           status: HostReportStatus.ok,
           mux: [
+            (
+              id: 'herdr',
+              found: false,
+              absPath: '',
+              version: '',
+              onInheritedPath: false,
+            ),
             (
               id: 'tmux',
               found: false,
@@ -264,7 +340,7 @@ void main() {
         isA<MultiplexerUnverified>().having(
           (s) => s.id,
           'id',
-          MultiplexerId.tmux,
+          MultiplexerId.herdr,
         ),
       );
     });
@@ -326,6 +402,20 @@ void main() {
       );
 
       expect(selection, isA<MultiplexerSubstituted>());
+    });
+  });
+
+  group('multiplexerSelectionNotice', () {
+    test('names the host default preference order it actually searched', () {
+      // The only place the preference list becomes user-visible copy.
+      // Reordering the list without updating this expectation would ship a
+      // sentence that misreports what the probe looked for, and in what
+      // order it would have accepted them.
+      final notice = multiplexerSelectionNotice(
+        const MultiplexerNoneFound(requested: null, id: MultiplexerId.herdr),
+      );
+
+      expect(notice, contains('looked for herdr, tmux, zellij'));
     });
   });
 }

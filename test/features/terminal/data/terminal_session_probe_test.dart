@@ -241,14 +241,20 @@ void main() {
       );
 
       // It still attaches — refusing would leave the user with nothing —
-      // but it says so, and names both sides.
-      expect(result.commands.single, startsWith('/usr/bin/tmux'));
+      // but it says so, and names both sides. The stand-in is herdr, the
+      // top of the host default preference, reached through the absolute
+      // path the probe resolved rather than a bare name this host's
+      // non-interactive PATH cannot find.
+      expect(
+        result.commands.single,
+        startsWith('/home/deployer/.local/bin/herdr'),
+      );
       final notice = terminal.writes.firstWhere(
         (w) => w.contains('zellij'),
         orElse: () => '',
       );
       expect(notice, contains('not installed'));
-      expect(notice, contains('tmux'));
+      expect(notice, contains('herdr'));
       expect(
         result.session.multiplexerSelection,
         isA<MultiplexerSubstituted>(),
@@ -296,7 +302,9 @@ void main() {
       // script, standing in for a transport that drops mid-probe.
       final result = await _connect(runner: FakeHostCommandRunner());
 
-      expect(result.commands, ["tmux new-session -A -s 'helm-0'"]);
+      // No probe answer and no persisted choice, so the host default leads:
+      // herdr, under a bare binary name because nothing was resolved.
+      expect(result.commands, ["herdr session attach 'helm-0'"]);
       expect(result.session.status.name, 'connected');
     });
 
