@@ -34,9 +34,18 @@ class HerdrAdapter
         AgentAwareMultiplexer,
         PaneAwareMultiplexer,
         WorkspaceAwareMultiplexer {
-  HerdrAdapter(this._runner, {String absPath = 'herdr', String? sessionRef})
-    : _absPath = absPath,
-      _sessionRef = sessionRef;
+  HerdrAdapter(
+    this._runner, {
+    String absPath = 'herdr',
+    String? sessionRef,
+    String? mobileConfigPath,
+  }) : _absPath = absPath,
+       _sessionRef = sessionRef,
+       // Normalized once, here, so [attachCommand] can never emit an
+       // empty assignment however it is constructed.
+       _mobileConfigPath = (mobileConfigPath?.isEmpty ?? true)
+           ? null
+           : mobileConfigPath;
 
   final HostCommandRunner _runner;
 
@@ -65,6 +74,24 @@ class HerdrAdapter
   /// Null keeps the pre-existing command byte-for-byte, so a caller that
   /// never had a session to scope to is no worse off than before.
   final String? _sessionRef;
+
+  /// Host-side path to a herdr config that suppresses herdr's in-terminal
+  /// chrome, or null when the host reported none.
+  ///
+  /// herdr draws a collapsed sidebar and a tab row inside the terminal. On
+  /// a desktop that is orientation; on a phone it is roughly a sixth of
+  /// the viewport restating what helm's own drawer already shows. herdr
+  /// reads `HERDR_CONFIG_PATH` to override its config file, so a per-host
+  /// mobile config is how that chrome is dropped for one client without
+  /// touching the desktop's own `config.toml`.
+  ///
+  /// Populated only from a probe that positively found the file — see
+  /// [herdrMobileConfigPath], which owns the discipline that keeps a
+  /// truncated or empty report from ever reaching here.
+  ///
+  /// Null keeps the pre-existing command byte-for-byte, exactly as
+  /// [_sessionRef] does.
+  final String? _mobileConfigPath;
 
   @override
   MultiplexerId get id => MultiplexerId.herdr;
@@ -151,9 +178,39 @@ class HerdrAdapter
     };
   }
 
+  /// The command that attaches to [sessionName], optionally under the
+  /// host's herdr mobile config.
+  ///
+  /// The assignment goes through `env` rather than being written as a bare
+  /// `VAR=value cmd` prefix. MEASURED locally, both directions:
+  ///
+  /// ```text
+  /// /bin/csh  -c "FOO=bar printenv FOO"     -> FOO=bar: Command not found.
+  /// /bin/tcsh -c "FOO=bar printenv FOO"     -> FOO=bar: Command not found.
+  /// /bin/csh  -c "env FOO=bar printenv FOO" -> bar
+  /// ```
+  ///
+  /// A bare prefix is POSIX shell syntax, and this string does NOT reach a
+  /// POSIX shell by construction: the attach runs through
+  /// `SSHClient.execute`, so sshd invokes it as `$SHELL -c '<command>'`
+  /// with the user's OWN login shell. `docs/host-contract/v1.md` already
+  /// documents fish/csh login shells as a supported reality — it is why
+  /// the probe is delivered to `/bin/sh -s` instead of being run as the
+  /// exec string. A bare prefix would therefore not merely fail to set the
+  /// variable on such a host, it would break the attach outright. `env` is
+  /// a POSIX-mandated utility invoked as an ordinary command, so every
+  /// shell runs it identically.
+  ///
+  /// When no config was reported this returns exactly what it returned
+  /// before the feature existed — the prefix is purely additive.
   @override
   String attachCommand(String sessionName) {
-    return '$_absPath session attach ${shellQuote(sessionName)}';
+    final attach = '$_absPath session attach ${shellQuote(sessionName)}';
+    final configPath = _mobileConfigPath;
+    if (configPath == null) return attach;
+    // shellQuote, not interpolation: the path comes from the host's own
+    // $HOME and is not helm's to trust. See AD-3.
+    return 'env HERDR_CONFIG_PATH=${shellQuote(configPath)} $attach';
   }
 
   @override

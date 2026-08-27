@@ -12,6 +12,7 @@ import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_factory.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
+import 'package:helm/core/host/probe/herdr_mobile_config.dart';
 import 'package:helm/core/host/probe/host_prober.dart';
 import 'package:helm/core/host/probe/host_report.dart';
 import 'package:helm/core/host/session_reference.dart';
@@ -948,10 +949,15 @@ class TerminalSession {
     // session this class is actually attaching to. Measured on a real host:
     // without it, `agent list` answers for herdr's DEFAULT session and
     // reports zero agents while the attached session has one running.
+    // The mobile config is read off the SAME report the selection came
+    // from — the probe that already runs on connect, not a second round
+    // trip. A host that does not have one, or a report that never
+    // finished, yields null and leaves the attach command untouched.
     _muxAdapter = buildMultiplexerAdapter(
       selection,
       runner,
       sessionRef: tmuxSessionName,
+      herdrMobileConfigPath: herdrMobileConfigPath(report),
     );
 
     _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');

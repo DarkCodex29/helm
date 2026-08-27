@@ -75,6 +75,19 @@ _probe_mux() {
 }
 
 _probe_mux herdr herdr
+
+# herdr's mobile config, reported ONLY when the file is really there.
+#
+# `-f`, never `-e`: a directory at that path is not a config herdr could
+# read. The resolved path is emitted rather than a 0/1 flag so the client
+# never has to guess $HOME or reconstruct the location it did not test.
+# Emitting nothing when it is missing IS the client's inert fallback --
+# nothing downstream can act on a fact that was never reported.
+_HERDR_MOBILE_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.mobile.toml"
+if [ -f "$_HERDR_MOBILE_CFG" ]; then
+  _emit env herdr_mobile_config "$_HERDR_MOBILE_CFG"
+fi
+
 _probe_mux tmux tmux
 TMUX_FOUND=$MUX_FOUND
 TMUX_ABS=$MUX_ABS

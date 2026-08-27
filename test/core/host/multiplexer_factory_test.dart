@@ -191,4 +191,64 @@ void main() {
       },
     );
   });
+
+  group('buildMultiplexerAdapter — the herdr mobile config path', () {
+    const herdrSelection = MultiplexerVerified(
+      id: MultiplexerId.herdr,
+      absPath: '/home/deployer/.local/bin/herdr',
+      onInheritedPath: false,
+    );
+    const configPath = '/home/deployer/.config/herdr/config.mobile.toml';
+
+    test('reaches the herdr adapter and prefixes its attach command', () {
+      final adapter = buildMultiplexerAdapter(
+        herdrSelection,
+        FakeHostCommandRunner(),
+        herdrMobileConfigPath: configPath,
+      );
+
+      expect(
+        adapter.attachCommand('helm-0'),
+        "env HERDR_CONFIG_PATH='$configPath' "
+        "/home/deployer/.local/bin/herdr session attach 'helm-0'",
+      );
+    });
+
+    test('omitting it leaves the herdr attach command untouched', () {
+      // The inert fallback at the factory seam: a host that reported no
+      // mobile config is byte-for-byte where it was before this existed.
+      final adapter = buildMultiplexerAdapter(
+        herdrSelection,
+        FakeHostCommandRunner(),
+      );
+
+      expect(
+        adapter.attachCommand('helm-0'),
+        "/home/deployer/.local/bin/herdr session attach 'helm-0'",
+      );
+    });
+
+    test(
+      'a config path is inert for multiplexers that cannot use it — tmux '
+      'and zellij never grow an env prefix',
+      () {
+        // herdr owns HERDR_CONFIG_PATH. Leaking it onto another
+        // multiplexer would set a variable its binary never reads while
+        // changing a command line that was previously correct.
+        for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
+          final adapter = buildMultiplexerAdapter(
+            MultiplexerUnverified(id: id),
+            FakeHostCommandRunner(),
+            herdrMobileConfigPath: configPath,
+          );
+
+          expect(adapter.attachCommand('helm-0'), startsWith(id.name));
+          expect(
+            adapter.attachCommand('helm-0'),
+            isNot(contains('HERDR_CONFIG_PATH')),
+          );
+        }
+      },
+    );
+  });
 }
