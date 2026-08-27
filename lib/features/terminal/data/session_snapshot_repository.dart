@@ -84,25 +84,25 @@ class TabSnapshot {
   );
 }
 
-/// Persiste y recupera el snapshot de tabs abiertas para detección de crash.
+/// Persists and recovers the snapshot of open tabs, for crash detection.
 ///
-/// Flujo (lifecycle-based):
-/// - En `paused` (app va a background): se guarda snapshot + timestamp.
-/// - En `resumed` (app vuelve sin crash): se limpia el snapshot.
-/// - Al iniciar: si hay snapshot con timestamp > 5s de antigüedad → crash real.
-///   Si tiene menos de 5s, fue un resume rápido (Flutter llama paused+resumed
-///   en ciertos dispositivos), se ignora.
+/// Lifecycle-driven flow:
+/// - On `paused` (app backgrounded): snapshot + timestamp are stored.
+/// - On `resumed` (app came back without crashing): the snapshot is cleared.
+/// - On launch: a snapshot older than 5s means a real crash. Anything more
+///   recent was a fast resume — some devices make Flutter emit `paused`
+///   immediately followed by `resumed` — and is ignored.
 class SessionSnapshotRepository {
   static final _log = HelmLogger('SessionSnapshotRepository');
 
-  /// Key privada para el timestamp del snapshot (ms desde epoch).
+  /// Private key for the snapshot timestamp (ms since epoch).
   static const _timestampKey = 'helm_session_snapshot_ts';
 
-  /// Umbral mínimo en ms para considerar un snapshot como crash real.
+  /// Minimum age in ms before a snapshot counts as a real crash.
   static const _crashThresholdMs = 5000;
 
-  /// Marca la sesión como "sucia" y persiste el snapshot de tabs actuales
-  /// junto con el timestamp actual.
+  /// Marks the session dirty and stores the current tabs alongside the
+  /// current timestamp.
   Future<void> markDirty(List<TabSnapshot> tabs) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -116,7 +116,7 @@ class SessionSnapshotRepository {
     }
   }
 
-  /// Limpia el flag dirty, el snapshot y el timestamp.
+  /// Clears the dirty flag, the snapshot and the timestamp.
   Future<void> markClean() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -129,19 +129,19 @@ class SessionSnapshotRepository {
     }
   }
 
-  /// Retorna `null` si no hay sesión sucia pendiente de recuperar.
-  /// Retorna la lista de [TabSnapshot] si hay un crash real pendiente.
+  /// Returns `null` when no dirty session is waiting to be recovered, or
+  /// the list of [TabSnapshot] when a real crash is pending.
   ///
-  /// Un crash es "real" si el snapshot tiene más de [_crashThresholdMs] ms
-  /// de antigüedad. Snapshots más recientes se ignoran para evitar falsos
-  /// positivos cuando Flutter emite `paused` + `resumed` rápidamente.
+  /// A crash counts as real once the snapshot is older than
+  /// [_crashThresholdMs]. More recent ones are ignored to avoid false
+  /// positives when Flutter emits `paused` + `resumed` in quick succession.
   Future<List<TabSnapshot>?> getPendingRecovery() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final isDirty = prefs.getBool(AppConstants.sessionDirtyKey) ?? false;
       if (!isDirty) return null;
 
-      // Verificar antigüedad del snapshot para descartar resumes rápidos.
+      // Check the snapshot's age to rule out fast resumes.
       final ts = prefs.getInt(_timestampKey) ?? 0;
       final age = DateTime.now().millisecondsSinceEpoch - ts;
       if (age < _crashThresholdMs) {

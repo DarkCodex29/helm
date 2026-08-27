@@ -222,11 +222,11 @@ class TabsNotifier extends Notifier<TabsState> {
     return decision;
   }
 
-  /// Persiste el snapshot de la sesión actual al storage.
+  /// Persists a snapshot of the current session to storage.
   ///
-  /// Llamado por [HomeScreen] cuando la app pasa a `paused` (background).
-  /// Si no hay tabs abiertas → limpia el snapshot.
-  /// Si hay tabs → guarda snapshot + timestamp para detección de crash.
+  /// Called by [HomeScreen] when the app goes `paused` (backgrounded).
+  /// No open tabs -> clears the snapshot.
+  /// Open tabs -> stores snapshot + timestamp for crash detection.
   Future<void> saveSnapshot() async {
     final repo = ref.read(sessionSnapshotRepoProvider);
     if (state.tabs.isEmpty) {

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 
-/// Banner que se muestra en HomeScreen cuando hay una sesión pendiente
-/// de recuperar (crash anterior detectado via flag dirty).
+/// Banner shown on HomeScreen when a previous session is waiting to be
+/// recovered (an earlier crash, detected through the dirty flag).
 ///
-/// Es un widget puramente presentacional — recibe callbacks y no accede
-/// directamente a ningún provider.
+/// Purely presentational — it takes callbacks and reaches for no provider
+/// of its own.
 class SessionRecoveryBanner extends StatelessWidget {
   const SessionRecoveryBanner({
     super.key,
@@ -33,17 +33,15 @@ class SessionRecoveryBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Ícono bolt
           const Icon(Icons.bolt, color: Color(0xFF58A6FF), size: 22),
           const SizedBox(width: 12),
-          // Textos
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Sesión anterior encontrada',
+                  'Previous session found',
                   style: TextStyle(
                     color: Color(0xFFE6EDF3),
                     fontWeight: FontWeight.w600,
@@ -52,7 +50,7 @@ class SessionRecoveryBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Tenías abierto: $profileNames',
+                  'You had open: $profileNames',
                   style: const TextStyle(
                     color: Color(0xFFB1BAC4),
                     fontSize: 12,
@@ -64,16 +62,23 @@ class SessionRecoveryBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Botones
+          // Both buttons carry a full 48dp tap target.
+          //
+          // They previously combined `minimumSize: Size.zero` with
+          // `MaterialTapTargetSize.shrinkWrap`, which strips the padding
+          // Material adds for exactly this reason and left the hit area at
+          // the text's own height — measured on a Galaxy S22 Ultra, roughly
+          // 24dp, half the documented minimum. These are the two buttons a
+          // user meets on a cold start, one of which discards recovered
+          // work, so a mis-tap here is expensive.
           TextButton(
             onPressed: onDiscard,
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFFB1BAC4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: const Size(48, 48),
             ),
-            child: const Text('Descartar', style: TextStyle(fontSize: 13)),
+            child: const Text('Discard', style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 4),
           ElevatedButton(
@@ -81,15 +86,14 @@ class SessionRecoveryBanner extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF58A6FF),
               foregroundColor: const Color(0xFF0D1117),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              minimumSize: const Size(64, 48),
               textStyle: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            child: const Text('Retomar'),
+            child: const Text('Resume'),
           ),
         ],
       ),

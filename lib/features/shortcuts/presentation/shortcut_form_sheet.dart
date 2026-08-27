@@ -121,7 +121,7 @@ class _ProjectShortcutFormSheetState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('No hay sesión activa')));
+      ).showSnackBar(const SnackBar(content: Text('No active session')));
       return;
     }
 
@@ -130,7 +130,7 @@ class _ProjectShortcutFormSheetState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('No hay sesión activa')));
+      ).showSnackBar(const SnackBar(content: Text('No active session')));
       return;
     }
 
@@ -228,7 +228,7 @@ class _ProjectShortcutFormSheetState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('No hay sesión activa')));
+      ).showSnackBar(const SnackBar(content: Text('No active session')));
       return;
     }
 
@@ -237,7 +237,7 @@ class _ProjectShortcutFormSheetState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('No hay sesión activa')));
+      ).showSnackBar(const SnackBar(content: Text('No active session')));
       return;
     }
 
