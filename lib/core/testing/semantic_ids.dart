@@ -169,6 +169,26 @@ class FilesSemantics {
   /// shared identifier would let a test pass while the sheet told the user
   /// their download had failed.
   static const downloadNoViewer = 'helm.files.download_no_viewer';
+
+  /// The line reporting where a finished download was filed.
+  ///
+  /// Covers every publish outcome worth saying — saved, not yet
+  /// configured, and each way it can fail — for the same reason [listing]
+  /// covers all of its states: a flow asserts on what it SAYS.
+  ///
+  /// Deliberately NOT folded into [downloadStatus], even though both live
+  /// in the same strip. They report independent facts about one transfer,
+  /// and can be on screen together: a download can open successfully AND
+  /// have failed to reach the user's folder. One identifier over both
+  /// would make that pair impossible to assert.
+  static const downloadPublish = 'helm.files.download_publish';
+
+  /// The control that chooses, changes or clears the download folder.
+  ///
+  /// Reachable with NO transfer in flight — a setting the user can only
+  /// find mid-download is a setting they cannot find. Absent on platforms
+  /// with no folder to choose, where its absence is the correct assertion.
+  static const downloadFolderButton = 'helm.files.download_folder_button';
 }
 
 /// Identifiers on `SettingsScreen`.

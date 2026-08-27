@@ -53,6 +53,19 @@ dependencies:
   path_provider: ^2.1.6
   open_filex: ^4.7.0
 
+  # Storage Access Framework, for saving a download into a folder the user
+  # picks. PINNED EXACTLY, not `^`, and the reason is the toolchain: 3.0.0
+  # of both raised their floor to Dart `^3.12.0` / Flutter `>=3.44.0`, and
+  # this app builds on 3.41.7 / Dart 3.11.5. These two are the last
+  # versions that resolve here, so a caret would silently stop resolving
+  # the moment either publishes again.
+  #
+  # `saf_util` picks the folder and holds the persisted grant;
+  # `saf_stream` does the copy into it. Both are needed: the picker cannot
+  # write and the writer cannot pick.
+  saf_util: 2.2.0
+  saf_stream: 2.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

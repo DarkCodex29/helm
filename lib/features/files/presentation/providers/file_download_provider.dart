@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/features/files/data/external_viewer.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
+import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
+import 'package:helm/features/files/presentation/providers/download_destination_provider.dart';
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ class FileDownloadState {
     this.percent = 0,
     this.failure,
     this.file,
+    this.publish,
   });
 
   /// What is being, or was last, downloaded. Null only in [idle].
@@ -74,14 +77,48 @@ class FileDownloadState {
   /// was downloaded and where it went.
   final File? file;
 
+  /// What happened to the copy into the user's folder, once there was a
+  /// file to copy. Null until a transfer completes, and on every ending
+  /// that produced no file.
+  ///
+  /// A SEPARATE FIELD FROM [status], and that separation is the load-
+  /// bearing decision of this slice. The two describe independent facts
+  /// about the same transfer — [status] says what became of the bytes and
+  /// the hand-off, this says whether they were also filed where the user
+  /// asked — and folding a failure here into [FileDownloadStatus.failed]
+  /// would tell somebody their download failed while they are looking at
+  /// the document it produced.
+  ///
+  /// So a publish failure NEVER changes [status]. The pair
+  /// `opened` + [PublishFailed] is a normal, expressible state, and it is
+  /// the honest one: the file arrived, it opened, and it is not in the
+  /// folder they wanted.
+  final PublishOutcome? publish;
+
   /// Whether a transfer is running and can still be stopped.
   bool get isRunning => status == FileDownloadStatus.downloading;
 
   /// Whether this state is something the user has to dismiss.
+  ///
+  /// Includes every publish outcome worth saying out loud, which is why
+  /// [FileDownloadStatus.opened] can now need acknowledging: the viewer is
+  /// still the receipt for the DOWNLOAD, but it says nothing at all about
+  /// where the file was filed, and "saved to Helm" is the answer to the
+  /// question this whole slice exists to answer.
   bool get needsAcknowledgement =>
       status == FileDownloadStatus.failed ||
       status == FileDownloadStatus.noViewer ||
-      status == FileDownloadStatus.cancelled;
+      status == FileDownloadStatus.cancelled ||
+      publishNeedsReporting;
+
+  /// Whether [publish] has anything to tell the user.
+  ///
+  /// [PublishNotNeeded] is the one that does not: it means this platform
+  /// already stores downloads where the user can reach them, so there is
+  /// no news. Reporting it would put a permanent, meaningless line under
+  /// every iOS download.
+  bool get publishNeedsReporting =>
+      publish != null && publish is! PublishNotNeeded;
 }
 
 // ── Notifier ───────────────────────────────────────────────────────────────
@@ -157,7 +194,7 @@ class FileDownloadNotifier extends Notifier<FileDownloadState> {
         );
 
       case DownloadCompleted(:final file):
-        await _handOff(entry, file);
+        await _handOff(entry, file, await _publish(file));
     }
   }
 
@@ -177,7 +214,47 @@ class FileDownloadNotifier extends Notifier<FileDownloadState> {
 
   // ── Private ──────────────────────────────────────────────────────────────
 
-  Future<void> _handOff(RemoteEntry entry, File file) async {
+  /// Copies the finished download into the user's folder.
+  ///
+  /// Runs BEFORE the viewer hand-off, and the ordering is deliberate. The
+  /// hand-off sends the user into another app, so anything this app still
+  /// has to say has to be said first or it is said to an empty screen.
+  /// Nothing is lost by going first: the viewer opens the app-local staged
+  /// copy either way — `open_filex` cannot take a `content://` URI at all,
+  /// since its availability check is `File(path).exists()`, which is
+  /// permanently false for one — so the published copy was never what it
+  /// was going to open.
+  ///
+  /// Never throws: [DownloadDestinationService.publish] reports every
+  /// ending as a value, and an exception escaping here is precisely how a
+  /// publish failure would become a failed download. The catch is belt and
+  /// braces over that contract.
+  Future<PublishOutcome> _publish(File file) async {
+    final PublishOutcome outcome;
+    try {
+      outcome = await ref
+          .read(downloadDestinationServiceProvider)
+          .publish(file);
+    } catch (error) {
+      return PublishFailed(PublishFailure.unknown, detail: '$error');
+    }
+
+    // A publish can DISCARD the stored folder — when its grant is gone or
+    // the folder itself was deleted — which leaves anything showing that
+    // folder stale. Refreshed on any failure rather than only on those
+    // two: re-reading is cheap, and the alternative is duplicating the
+    // service's forget-it rule here where the two could drift apart.
+    if (outcome is PublishFailed) {
+      await ref.read(downloadDestinationProvider.notifier).refresh();
+    }
+    return outcome;
+  }
+
+  Future<void> _handOff(
+    RemoteEntry entry,
+    File file,
+    PublishOutcome publish,
+  ) async {
     final ViewerOutcome outcome;
     try {
       outcome = await _viewer(file);
@@ -190,6 +267,7 @@ class FileDownloadNotifier extends Notifier<FileDownloadState> {
         status: FileDownloadStatus.failed,
         percent: 100,
         file: file,
+        publish: publish,
       );
       return;
     }
@@ -198,6 +276,7 @@ class FileDownloadNotifier extends Notifier<FileDownloadState> {
       entry: entry,
       percent: 100,
       file: file,
+      publish: publish,
       status: switch (outcome) {
         ViewerOutcome.opened => FileDownloadStatus.opened,
         ViewerOutcome.noViewer => FileDownloadStatus.noViewer,

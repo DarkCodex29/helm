@@ -51,6 +51,15 @@ class AppConstants {
   /// host/port/type triples can produce the same key.
   static const String knownHostV2StorageKeyPrefix = 'helm_known_host_v2_';
   static const String profilesStorageKey = 'helm_connection_profiles';
+
+  /// The folder the user chose for downloads to be kept in, as a JSON
+  /// `{uri, name}` record.
+  ///
+  /// Alongside the profiles rather than in secure storage, and
+  /// [DownloadDestinationStore] explains why: the value names a permission
+  /// the OS holds for this package, so it is a preference rather than a
+  /// credential.
+  static const String downloadDestinationKey = 'helm_download_destination';
   static const String sessionDirtyKey = 'helm_session_dirty';
   static const String sessionSnapshotKey = 'helm_session_snapshot';
 
