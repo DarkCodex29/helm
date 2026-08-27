@@ -63,6 +63,33 @@ class HostAdvisory {
   /// What the user could do about it, or null when there is nothing
   /// actionable. Never executed — see the class doc comment.
   final String? remediationCopy;
+
+  /// Identity of this finding, for keying a dismissal that has to outlive
+  /// the widget showing it.
+  ///
+  /// Advisories are rebuilt from the probe on EVERY connect and never
+  /// reused as objects, so a dismissal cannot be held against an
+  /// instance. It is held against this string instead.
+  ///
+  /// Deliberately NOT just [id]. The id names which check fired, not what
+  /// it found: reconnecting after changing the profile's multiplexer
+  /// raises [HostAdvisoryId.multiplexerSubstituted] again about a
+  /// different multiplexer, and that is news the user has not seen. Every
+  /// field the user actually read is therefore part of the key — change
+  /// any of them and the finding is new, and shows.
+  ///
+  /// Fields are NUL-separated because no field's own text can contain a
+  /// NUL, so ('ab','c') and ('a','bc') cannot collapse into one key.
+  String get dismissalKey => [
+    id.name,
+    severity.name,
+    title,
+    detail,
+    // Distinguishes a null remediation from an empty one: a check with
+    // nothing actionable to say is not the same finding as one that was
+    // given a blank instruction.
+    remediationCopy ?? '\u0001',
+  ].join('\u0000');
 }
 
 /// Derives every advisory a [MultiplexerSelection] justifies on its own,

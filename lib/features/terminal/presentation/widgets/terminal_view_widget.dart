@@ -4,6 +4,7 @@ import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
+import 'package:helm/features/terminal/domain/advisory_surface_bounds.dart';
 import 'package:helm/features/terminal/presentation/widgets/host_advisory_card.dart';
 import 'package:xterm/xterm.dart';
 
@@ -63,6 +64,43 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
 
   @override
   Widget build(BuildContext context) {
+    // The Stack's own height is what bounds the advisory surface, and a
+    // Positioned child cannot see it — its vertical constraint is
+    // unbounded, which is precisely how the card grew to 931pt unnoticed.
+    // Reading it here is what makes the cap a real number.
+    return LayoutBuilder(
+      builder: (context, constraints) =>
+          _buildStack(context, constraints.maxHeight),
+    );
+  }
+
+  /// The advisory surface, wired to the session that owns both the
+  /// findings and the record of which ones the user dismissed.
+  ///
+  /// Shared by both call sites deliberately. They render in different
+  /// places — one over a live terminal, one inside the failure overlay —
+  /// but they are the same surface showing the same findings, and a
+  /// dismissal on either must mean the same thing. Two hand-wired copies
+  /// is how they would drift.
+  Widget _advisorySurface({required double maxHeight}) {
+    return ValueListenableBuilder<List<HostAdvisory>>(
+      valueListenable: widget.session.advisoriesNotifier,
+      builder: (context, advisories, _) {
+        if (advisories.isEmpty) return const SizedBox.shrink();
+        return ValueListenableBuilder<Set<String>>(
+          valueListenable: widget.session.dismissedAdvisoriesNotifier,
+          builder: (context, dismissed, _) => HostAdvisoryCard(
+            advisories: advisories,
+            dismissed: dismissed,
+            maxHeight: maxHeight,
+            onDismiss: widget.session.dismissAdvisory,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStack(BuildContext context, double areaHeight) {
     return Stack(
       children: [
         // No LayoutBuilder, and no hand-computed column/row count.
@@ -98,31 +136,35 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
         ),
         // Host findings on a session that is otherwise working.
         //
-        // Pinned to the top rather than shown in the failure overlay
-        // below, because the overlay only exists while disconnected. A
+        // Shown here rather than only in the failure overlay below,
+        // because that overlay exists only while disconnected. A
         // substitution on a session that connects fine would otherwise
         // never be seen: it is written to the terminal too, but the
         // multiplexer clears the screen as it attaches — verified against
         // a real tmux host.
-        ValueListenableBuilder<ConnectionStatus>(
-          valueListenable: widget.session.statusNotifier,
-          builder: (context, status, _) {
-            if (status != ConnectionStatus.connected) {
-              return const SizedBox.shrink();
-            }
-            return ValueListenableBuilder<List<HostAdvisory>>(
-              valueListenable: widget.session.advisoriesNotifier,
-              builder: (context, advisories, _) {
-                if (advisories.isEmpty) return const SizedBox.shrink();
-                return Positioned(
-                  top: 8,
-                  left: 0,
-                  right: 0,
-                  child: HostAdvisoryCard(advisories: advisories),
-                );
-              },
-            );
-          },
+        //
+        // Anchored to the BOTTOM, not the top, and that is a fix rather
+        // than a preference. herdr draws its own status bar on the
+        // terminal's first two rows — captured from the live host: row 1
+        // is the workspace/tab line and row 2 reads `1 blocked` when an
+        // agent is blocked, which `pane list` corroborates by reporting 18
+        // viewport rows out of 20. `top: 8` therefore put this card
+        // squarely over the agent state helm exists to surface. The shell
+        // itself flows downward from row 3, so the bottom edge is the one
+        // place a fixed overlay covers least at rest.
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 8,
+          child: ValueListenableBuilder<ConnectionStatus>(
+            valueListenable: widget.session.statusNotifier,
+            builder: (context, status, _) {
+              if (status != ConnectionStatus.connected) {
+                return const SizedBox.shrink();
+              }
+              return _advisorySurface(maxHeight: advisorySurfaceMaxHeight(areaHeight));
+            },
+          ),
         ),
         ValueListenableBuilder(
           valueListenable: widget.session.statusNotifier,
@@ -252,20 +294,18 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                               // the failure the user is already looking at.
                               // Absent entirely when there is nothing to
                               // report, which is the healthy case.
-                              ValueListenableBuilder<List<HostAdvisory>>(
-                                valueListenable:
-                                    widget.session.advisoriesNotifier,
-                                builder: (context, advisories, _) {
-                                  if (advisories.isEmpty) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  return Padding(
-                                    padding: const EdgeInsets.only(top: 24),
-                                    child: HostAdvisoryCard(
-                                      advisories: advisories,
-                                    ),
-                                  );
-                                },
+                              Padding(
+                                padding: const EdgeInsets.only(top: 24),
+                                // Bounded by the same rule as the
+                                // connected surface. This one already sits
+                                // in a scroll view, so it cannot clip —
+                                // but an uncapped card here would push the
+                                // reconnect button off the top of a short
+                                // terminal, which is the same failure
+                                // wearing a different hat.
+                                child: _advisorySurface(
+                                  maxHeight: advisorySurfaceMaxHeight(areaHeight),
+                                ),
                               ),
                             ],
                           ],

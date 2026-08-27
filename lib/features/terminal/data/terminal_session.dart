@@ -487,6 +487,42 @@ class TerminalSession {
     const [],
   );
 
+  /// [HostAdvisory.dismissalKey]s the user has dismissed on this session.
+  ///
+  /// Held HERE, not in the card's `State`, and that placement is the fix
+  /// for a defect verified on a real device: the card unmounts and
+  /// remounts on every reconnect — [connect] clears [advisoriesNotifier]
+  /// and [_resolveMultiplexer] repopulates it — so widget state handed the
+  /// user back every advisory they had already dealt with, on every drop.
+  /// This notifier is untouched by that cycle; only [dispose] ends it.
+  ///
+  /// Scoped to the session deliberately. It is not persisted and does not
+  /// outlive the tab: closing a tab and opening a new one is the user
+  /// asking to look at the host again, and a fresh look should report what
+  /// it finds. Surviving a RECONNECT is the promise; surviving forever is
+  /// not.
+  ///
+  /// Keyed on [HostAdvisory.dismissalKey] rather than on the advisory
+  /// object because advisories are rebuilt from the probe every connect
+  /// and are never the same instances twice — and rather than on
+  /// [HostAdvisoryId], which would let one dismissal silence a later,
+  /// genuinely different finding from the same check.
+  final ValueNotifier<Set<String>> dismissedAdvisoriesNotifier = ValueNotifier(
+    const {},
+  );
+
+  /// Records that the user dismissed [advisory], for as long as this
+  /// session lives. Idempotent.
+  ///
+  /// Assigns a NEW set rather than mutating in place: [ValueNotifier] only
+  /// notifies when the value's identity changes, so mutating the existing
+  /// set would record the dismissal and never tell the card to redraw.
+  void dismissAdvisory(HostAdvisory advisory) {
+    final current = dismissedAdvisoriesNotifier.value;
+    if (current.contains(advisory.dismissalKey)) return;
+    dismissedAdvisoriesNotifier.value = {...current, advisory.dismissalKey};
+  }
+
   /// What this session last learned about the AI agents inside the
   /// multiplexer session it is attached to.
   ///
@@ -801,6 +837,7 @@ class TerminalSession {
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
     advisoriesNotifier.dispose();
+    dismissedAdvisoriesNotifier.dispose();
     agentsNotifier.dispose();
   }
 

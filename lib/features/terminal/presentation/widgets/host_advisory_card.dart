@@ -20,24 +20,60 @@ import 'package:helm/core/testing/semantic_ids.dart';
 /// the display-only rule this inherits from `HostDiagnostics`, which
 /// matters most for the Tailscale case, where the remediation would cut
 /// the very connection it ran over.
-class HostAdvisoryCard extends StatefulWidget {
-  const HostAdvisoryCard({super.key, required this.advisories});
+///
+/// ### Why [maxHeight] is required, and dismissal is not held here
+///
+/// Both are fixes for a defect measured on a real device. Two advisories
+/// co-occur on the verified host — a substitution plus the substituted-in
+/// binary being off the login PATH — and at 320pt wide that content is
+/// 931pt tall against the 509.78pt of terminal an iPhone 17 Pro has with
+/// the keyboard shown. With no cap and no scroll, the surplus painted past
+/// the terminal Stack and was silently CLIPPED: the lower rows and their
+/// dismiss buttons were unreachable, so the user could not get rid of the
+/// thing covering their terminal.
+///
+/// [maxHeight] is therefore required rather than optional. An unbounded
+/// advisory surface is not a configuration this widget offers, so no
+/// future call site can reintroduce that layout by omission.
+///
+/// Dismissal is likewise NOT state here. This widget used to own a
+/// `Set<HostAdvisoryId> _dismissed`, and it unmounts on every reconnect —
+/// `TerminalSession.connect()` clears `advisoriesNotifier` and
+/// `_resolveMultiplexer` repopulates it — so each drop resurrected every
+/// advisory the user had already dealt with. [dismissed] and [onDismiss]
+/// hand that decision to something that outlives the widget; see
+/// `TerminalSession.dismissedAdvisoriesNotifier`. That also makes the
+/// class doc above literally true again: it now decides nothing.
+class HostAdvisoryCard extends StatelessWidget {
+  const HostAdvisoryCard({
+    super.key,
+    required this.advisories,
+    required this.dismissed,
+    required this.onDismiss,
+    required this.maxHeight,
+  });
 
+  /// Every finding the host reported, dismissed or not. Filtering is done
+  /// here against [dismissed] rather than by the caller so both advisory
+  /// surfaces cannot disagree about what "dismissed" means.
   final List<HostAdvisory> advisories;
 
-  @override
-  State<HostAdvisoryCard> createState() => _HostAdvisoryCardState();
-}
+  /// [HostAdvisory.dismissalKey]s the user has already dismissed.
+  final Set<String> dismissed;
 
-class _HostAdvisoryCardState extends State<HostAdvisoryCard> {
-  /// Ids the user has dismissed. Keyed by id rather than by a single flag
-  /// so a later, different finding is not hidden by an earlier dismissal.
-  final Set<HostAdvisoryId> _dismissed = {};
+  /// Reports that the user dismissed an advisory. This widget does not act
+  /// on it — the next build reflects it only once it appears in
+  /// [dismissed], so the store stays the single source of truth.
+  final ValueChanged<HostAdvisory> onDismiss;
+
+  /// Hard ceiling on this card's height. Content taller than this scrolls
+  /// inside it; nothing is ever clipped out of reach.
+  final double maxHeight;
 
   @override
   Widget build(BuildContext context) {
-    final visible = widget.advisories
-        .where((a) => !_dismissed.contains(a.id))
+    final visible = advisories
+        .where((a) => !dismissed.contains(a.dismissalKey))
         .toList();
     if (visible.isEmpty) return const SizedBox.shrink();
 
@@ -46,22 +82,29 @@ class _HostAdvisoryCardState extends State<HostAdvisoryCard> {
       container: true,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 24),
-        constraints: const BoxConstraints(maxWidth: 420),
+        // maxHeight caps the box; the scroll view inside still sizes to
+        // its content when the content is shorter, so a lone one-line
+        // finding is capped, never padded out to fill the ceiling.
+        constraints: BoxConstraints(maxWidth: 420, maxHeight: maxHeight),
         decoration: BoxDecoration(
           color: const Color(0xFF21262D),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFF30363D)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final advisory in visible)
-              _AdvisoryRow(
-                advisory: advisory,
-                onDismiss: () =>
-                    setState(() => _dismissed.add(advisory.id)),
-              ),
-          ],
+        // Clips the rows to the rounded border, so a mid-scroll row does
+        // not paint over the card's own edge.
+        clipBehavior: Clip.antiAlias,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final advisory in visible)
+                _AdvisoryRow(
+                  advisory: advisory,
+                  onDismiss: () => onDismiss(advisory),
+                ),
+            ],
+          ),
         ),
       ),
     );

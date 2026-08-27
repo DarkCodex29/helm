@@ -4,6 +4,10 @@
 // host_advisory.dart already decided. These tests therefore cover only
 // presentation contract: show/hide, dismissal, and that remediation copy
 // reaches the screen intact rather than being summarised away.
+//
+// Bounding and reachability live in `host_advisory_card_bounds_test.dart`;
+// the dismissal store the callback feeds lives in
+// `terminal_session_advisory_dismissal_test.dart`.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/host_advisory.dart';
@@ -24,9 +28,38 @@ const _info = HostAdvisory(
   detail: 'herdr is installed at /home/deployer/.local/bin/herdr.',
 );
 
-Widget _host(List<HostAdvisory> advisories) => MaterialApp(
-  home: Scaffold(body: HostAdvisoryCard(advisories: advisories)),
-);
+/// Stands in for the session that owns dismissal in the real app, so
+/// these tests exercise the same controlled contract the widget ships
+/// with rather than a convenience shape only tests use.
+class _Harness extends StatefulWidget {
+  const _Harness({required this.advisories});
+
+  final List<HostAdvisory> advisories;
+
+  @override
+  State<_Harness> createState() => _HarnessState();
+}
+
+class _HarnessState extends State<_Harness> {
+  final Set<String> dismissed = {};
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    home: Scaffold(
+      body: HostAdvisoryCard(
+        advisories: widget.advisories,
+        dismissed: dismissed,
+        // Well above anything these fixtures render, so nothing here is
+        // measuring the cap by accident.
+        maxHeight: 2000,
+        onDismiss: (a) => setState(() => dismissed.add(a.dismissalKey)),
+      ),
+    ),
+  );
+}
+
+Widget _host(List<HostAdvisory> advisories) =>
+    _Harness(advisories: advisories);
 
 void main() {
   testWidgets('renders nothing when there is nothing to report', (
