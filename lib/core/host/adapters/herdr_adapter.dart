@@ -558,13 +558,18 @@ class HerdrAdapter
   /// herdr this app has been measured against.
   ///
   /// This comment used to claim the trailing spellings were "rejected
-  /// outright". That was recorded as CONFIRMED and is no longer true:
-  /// re-measured against live herdr 0.8.0 and 0.8.2, `herdr agent list
-  /// --session <name>`, `herdr pane list --session <name>` and `herdr
-  /// session list --session <name>` all exit 0, and on 0.8.2 the trailing
-  /// form demonstrably reaches the scoped socket. Either herdr's argument
-  /// parsing relaxed, or the original check generalised from a narrower
-  /// observation; there is no evidence to choose between those.
+  /// outright". That was recorded as CONFIRMED and is no longer true.
+  /// Re-measured against live herdr 0.8.0 and 0.8.2, every one of these
+  /// exits 0 on both, with the session name in place of NAME:
+  ///
+  ///     herdr agent list --session NAME
+  ///     herdr pane list --session NAME
+  ///     herdr session list --session NAME
+  ///
+  /// On 0.8.2 the trailing form demonstrably reaches the scoped socket.
+  /// Either herdr's argument parsing relaxed, or the original check
+  /// generalised from a narrower observation; there is no evidence to
+  /// choose between those.
   ///
   /// The emitted command does NOT change. Leading placement works on both
   /// versions, so it stays as the single spelling. What changed is the
