@@ -45,9 +45,41 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
   /// still perfectly fine.
   bool _focusing = false;
 
+  /// Why the last tab tap did not switch the host, or null.
+  ///
+  /// Kept SEPARATE from [_focusError] even though both are drawer-level
+  /// focus failures: the two sections answer different gestures, and one
+  /// message rendered under the other's rows would explain a tap the user
+  /// did not make.
+  String? _tabFocusError;
+
+  /// True while a tab focus is in flight, so a second tap is dropped before
+  /// it reaches the session. See [_focusing] for why this is not the
+  /// channel budget — the session enforces that on its own.
+  bool _tabFocusing = false;
+
+  /// The one workspace-tree read for this opening of the drawer.
+  ///
+  /// Held in State rather than created in [build] because a rebuild —
+  /// which every focus failure causes — must not re-ask the host. Null
+  /// when there was nothing to ask: no session, or one that is not
+  /// connected. Those two are told apart at render time, since a single
+  /// null cannot say which.
+  Future<MuxWorkspaceTreeResult>? _workspaceTree;
+
   @override
   void initState() {
     super.initState();
+
+    // Read HERE rather than in a post-frame callback, unlike the agent
+    // refresh below. This one publishes nothing synchronously — it returns
+    // a Future and touches no ValueNotifier — so there is no mid-build
+    // notification to defer, and asking now means the tree is already in
+    // flight while the drawer paints its first frame.
+    final session = ref.read(tabsProvider).activeTab?.session;
+    if (session != null && session.isConnected) {
+      _workspaceTree = session.refreshWorkspaceTree();
+    }
     // The session already polls on its own, so the list is at worst
     // kAgentPollInterval stale — but "at worst 10 seconds stale" is
     // exactly wrong at the instant somebody opens the drawer to look. One
@@ -96,6 +128,21 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                       session: activeTab?.session,
                       focusError: _focusError,
                       onFocus: _focusAgent,
+                    ),
+
+                    const SizedBox(height: 8),
+                    const Divider(color: Color(0xFF30363D), height: 1),
+
+                    // WORKSPACES section — the host's own structure: the
+                    // owner's clients, and the projects inside each. Above
+                    // PROJECTS because these are where work actually IS,
+                    // while a shortcut is only a way to start some.
+                    const _SectionHeader(label: 'WORKSPACES'),
+                    _WorkspaceTreeSection(
+                      session: activeTab?.session,
+                      tree: _workspaceTree,
+                      focusError: _tabFocusError,
+                      onFocus: _focusTab,
                     ),
 
                     const SizedBox(height: 8),
@@ -197,6 +244,45 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
     });
 
     if (result is MuxAgentFocused) navigator.pop();
+  }
+
+  /// Switches the host to [tab] and, only if that worked, closes the
+  /// drawer.
+  ///
+  /// The ORDER is the same contract [_focusAgent] states: closing the
+  /// drawer is the success report — it tells the user they are now looking
+  /// at that project — so it happens after the host has confirmed, never
+  /// before and never regardless.
+  Future<void> _focusTab(MuxTab tab) async {
+    if (_tabFocusing) return;
+    final session = ref.read(tabsProvider).activeTab?.session;
+    if (session == null) return;
+    // Captured before the await: this State can be torn down while the
+    // host round-trip is in flight.
+    final navigator = Navigator.of(context);
+    setState(() {
+      _tabFocusing = true;
+      _tabFocusError = null;
+    });
+
+    final result = await session.focusTab(tab.tabId);
+    if (!mounted) return;
+
+    setState(() {
+      _tabFocusing = false;
+      _tabFocusError = switch (result) {
+        MuxTabFocused() => null,
+        // A fact about helm's own screen: the row the user just tapped
+        // describes a project that is no longer open.
+        MuxTabFocusTargetNotFound() =>
+          '${tab.label} is gone — this tree is out of date',
+        // A fact about the host: nothing is known, including whether the
+        // tab is still there. It must not read like the line above.
+        MuxTabFocusFailed() => 'Could not switch to ${tab.label} on the host',
+      };
+    });
+
+    if (result is MuxTabFocused) navigator.pop();
   }
 
   void _showProjectForm(BuildContext context, ProjectShortcut? existing) {
@@ -435,6 +521,256 @@ class _AgentsSection extends StatelessWidget {
     return [...agents]..sort(
       (a, b) => agentStateUrgency(b.state).compareTo(agentStateUrgency(a.state)),
     );
+  }
+}
+
+// ── Workspace tree ─────────────────────────────────────────────────────────
+
+/// Renders the host's own structure: the owner's clients as workspaces,
+/// their projects as the tabs beneath.
+///
+/// Covered by
+/// `test/features/shortcuts/presentation/shortcuts_drawer_workspaces_test.dart`.
+///
+/// The branches below keep five things apart that a naive implementation
+/// would draw identically as "nothing here":
+///
+///  * no session at all,
+///  * a session that is not connected,
+///  * a multiplexer with no workspaces (tmux, zellij),
+///  * a host we could not read the tree from,
+///  * a reachable host that genuinely has no workspaces.
+///
+/// Only the last is allowed to say the host has none. A sixth case is the
+/// worst of them and cannot occur by construction: workspace headers drawn
+/// with no tabs under them, which reads as "every client has no projects".
+/// [MuxWorkspaceTreeResult] is one result for both halves of the tree
+/// precisely so that this widget cannot compose that claim out of one
+/// successful query and one failed one.
+class _WorkspaceTreeSection extends StatelessWidget {
+  const _WorkspaceTreeSection({
+    required this.session,
+    required this.tree,
+    required this.focusError,
+    required this.onFocus,
+  });
+
+  final TerminalSession? session;
+
+  /// The one read for this opening of the drawer, or null when there was
+  /// nothing to ask. [session] is what says WHICH nothing.
+  final Future<MuxWorkspaceTreeResult>? tree;
+
+  /// Why the last tap did not switch the host, or null. Rendered beneath
+  /// the rows rather than replacing them: the tree is still true, and the
+  /// user may well want to try another row.
+  final String? focusError;
+
+  final Future<void> Function(MuxTab) onFocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeSession = session;
+    if (activeSession == null) {
+      // Names its own subject rather than repeating the AGENTS section's
+      // bare "No active session" verbatim. Two sections printing one
+      // identical sentence reads as a duplicated widget rather than as two
+      // surfaces each explaining itself — and it is the wording pattern
+      // this drawer already uses ("Not connected — agent state unknown").
+      return const _EmptyHint(
+        text: 'No active session — the workspace tree is unknown',
+      );
+    }
+    final pending = tree;
+    if (pending == null) {
+      // Never "could not reach the host": helm never opened a connection
+      // to reach it over, which is a different thing to tell the user.
+      return const _EmptyHint(
+        text: 'Not connected — the workspace tree is unknown',
+      );
+    }
+
+    return FutureBuilder<MuxWorkspaceTreeResult>(
+      future: pending,
+      builder: (context, snapshot) {
+        final result = snapshot.data;
+        // Not "no workspaces": the answer is still in flight, and helm
+        // genuinely does not know yet.
+        if (result == null) return const _EmptyHint(text: 'Asking the host…');
+        return _buildTree(result);
+      },
+    );
+  }
+
+  Widget _buildTree(MuxWorkspaceTreeResult result) {
+    return switch (result) {
+      // Names the multiplexer instead of saying "unsupported": the user
+      // chose it, and the actionable fact is that THIS one has no
+      // workspaces, not that helm failed.
+      MuxWorkspaceTreeUnsupported(:final muxId) => _EmptyHint(
+        text: '${muxId.name} has no workspaces',
+      ),
+      MuxWorkspaceTreeUnreachable() => const _EmptyHint(
+        text: "Could not read herdr's workspaces — the tree is unknown",
+      ),
+      MuxWorkspaceTreeAvailable(:final workspaces) when workspaces.isEmpty =>
+        const _EmptyHint(text: 'No workspaces on this host'),
+      MuxWorkspaceTreeAvailable(:final workspaces, :final tabs) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final workspace in workspaces) ...[
+            _WorkspaceHeader(workspace: workspace),
+            for (final tab in _tabsOf(tabs, workspace.workspaceId))
+              _TabRow(
+                key: ValueKey(tab.tabId),
+                tab: tab,
+                onTap: () => onFocus(tab),
+              ),
+          ],
+          if (focusError != null) _FocusError(message: focusError!),
+        ],
+      ),
+    };
+  }
+
+  /// [workspaceId]'s tabs, in TAB-BAR order.
+  ///
+  /// Sorted here rather than taken as delivered because herdr's order is
+  /// MEASURED to move: against the live host, one workspace's tabs arrived
+  /// 5,1,2,3,4,6 with the focused tab hoisted to the front. Rendering that
+  /// would reshuffle the list under the user's thumb every time they tapped
+  /// a row — and the row they tapped is the one that would jump. Sorting a
+  /// copy leaves the result's own list untouched, so the adapter still
+  /// reports what the host said.
+  List<MuxTab> _tabsOf(List<MuxTab> tabs, String workspaceId) =>
+      tabs.where((t) => t.workspaceId == workspaceId).toList()
+        ..sort((a, b) => a.number.compareTo(b.number));
+}
+
+/// One workspace's name and its agent roll-up.
+///
+/// A header, not a row: workspaces are not tappable in this slice, and a
+/// surface with nothing to act on must not look pressable — the rule
+/// [AgentRow] states for its own null [AgentRow.onTap].
+class _WorkspaceHeader extends StatelessWidget {
+  const _WorkspaceHeader({required this.workspace});
+
+  final MuxWorkspace workspace;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              workspace.label,
+              style: const TextStyle(
+                color: Color(0xFFB1BAC4),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          _StateGlyph(state: workspace.agentState),
+        ],
+      ),
+    );
+  }
+}
+
+/// One project, tappable to bring it to the front on the host.
+///
+/// Deliberately built like [AgentRow] — same InkWell, same padding, same
+/// 48dp floor on the CARD rather than on the InkWell — because the two sit
+/// in one drawer and a user should not have to learn two row shapes. The
+/// 48 is load-bearing for the same reason it is there: this is a phone held
+/// one-handed, and the row below belongs to a different project.
+class _TabRow extends StatelessWidget {
+  const _TabRow({super.key, required this.tab, required this.onTap});
+
+  final MuxTab tab;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        // Indented past [_WorkspaceHeader]'s 16 so the nesting is legible
+        // as nesting rather than as a flat list with occasional captions.
+        padding: const EdgeInsets.fromLTRB(16, 2, 12, 2),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF21262D),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: tab.focused
+                  ? const Color(0xFF58A6FF)
+                  : const Color(0xFF30363D),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tab.label,
+                  style: const TextStyle(
+                    color: Color(0xFFE6EDF3),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (tab.focused) ...[
+                const SizedBox(width: 8),
+                // IN WORDS, not only in the border colour. A colour-only
+                // marker is no marker at all to a screen reader, and this
+                // is the one row in the tree that does not need tapping.
+                const Text(
+                  'current',
+                  style: TextStyle(color: Color(0xFF58A6FF), fontSize: 11),
+                ),
+              ],
+              const SizedBox(width: 8),
+              _StateGlyph(state: tab.agentState),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The agent-state icon for a workspace or tab, or nothing at all.
+///
+/// Draws NOTHING for [AgentState.unknown], which is the same rule the tab
+/// strip already follows — see [AgentBadge], "only ever built for a state
+/// somebody measured". Against the live host, 8 of 11 tabs report
+/// `unknown`, so a glyph there would either repeat "helm does not know" on
+/// most of the tree or, read the other way, assert "no agent here", which
+/// helm did not measure. An absent badge already means "nothing to report"
+/// everywhere else in this app.
+///
+/// Colours come from [AgentStateStyle] so the drawer and the tab strip can
+/// never disagree about what a state looks like.
+class _StateGlyph extends StatelessWidget {
+  const _StateGlyph({required this.state});
+
+  final AgentState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == AgentState.unknown) return const SizedBox.shrink();
+    final style = AgentStateStyle.of(state);
+    return Icon(style.icon, size: 14, color: style.color);
   }
 }
 
