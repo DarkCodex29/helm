@@ -110,6 +110,46 @@ class TerminalSemantics {
       'helm.terminal.host_key_type_authorization';
 }
 
+/// Identifiers on `FileBrowserSheet`.
+class FilesSemantics {
+  const FilesSemantics._();
+
+  /// The AppBar action on Home that opens the browser. Present only while
+  /// a connected tab exists, so its absence on a dead session is itself
+  /// the correct assertion.
+  static const browseButton = 'helm.files.browse_button';
+
+  /// The sheet root.
+  static const sheet = 'helm.files.sheet';
+
+  /// The bar naming the directory currently shown.
+  static const pathBar = 'helm.files.path_bar';
+
+  /// The "go to the containing directory" action.
+  static const upButton = 'helm.files.up_button';
+
+  /// The entry list AND every one of its "nothing to show" states.
+  ///
+  /// One identifier over all of them on purpose, mirroring
+  /// [ShortcutsSemantics.agentsSection]: a flow asserts on the honest
+  /// explanation inside it — empty, refused, or gone — rather than on the
+  /// absence of rows, which all three would otherwise look like.
+  static const listing = 'helm.files.listing';
+
+  /// The panel shown when a listing was REFUSED.
+  ///
+  /// Deliberately distinct from [emptyDirectory]. The two must never be
+  /// asserted interchangeably: one says the directory has nothing in it,
+  /// the other says nothing is known about it, and a shared identifier
+  /// would let a test pass while the browser was telling the user the
+  /// opposite of the truth. This is the same rule
+  /// [TerminalSemantics.hostKeyTypeAuthorization] follows.
+  static const listingError = 'helm.files.listing_error';
+
+  /// The panel shown when a directory was read and held nothing.
+  static const emptyDirectory = 'helm.files.empty_directory';
+}
+
 /// Identifiers on `SettingsScreen`.
 class SettingsSemantics {
   const SettingsSemantics._();

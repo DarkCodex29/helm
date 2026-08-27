@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
+import 'package:helm/features/connection/domain/connection_status.dart';
+import 'package:helm/features/files/presentation/file_browser_sheet.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
+import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
 import 'package:helm/features/terminal/presentation/widgets/session_recovery_banner.dart';
@@ -171,6 +174,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   onPressed: () => _showNewTabDialog(context),
                 ),
               ),
+            _buildBrowseAction(tabsState.activeTab?.session),
             Semantics(
               identifier: HomeSemantics.settingsButton,
               child: IconButton(
@@ -239,6 +243,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// The action that opens the remote file browser for the ACTIVE tab.
+  ///
+  /// Lives on Home's AppBar rather than in the shortcuts drawer, because
+  /// the drawer navigates between SESSIONS — workspaces, tabs, agents,
+  /// project shortcuts — while this browses INSIDE one. Putting it there
+  /// would make a control whose meaning depends on the active tab sit in
+  /// the surface used to change which tab is active.
+  ///
+  /// Rendered as nothing at all unless a session is connected. A browser
+  /// over a dead connection has only one outcome, and offering the tap
+  /// just to answer it with an error is worse than not offering it —
+  /// the same reasoning [TerminalSemantics.hostAdvisory] is built on.
+  Widget _buildBrowseAction(TerminalSession? session) {
+    if (session == null) return const SizedBox.shrink();
+
+    return ValueListenableBuilder<ConnectionStatus>(
+      valueListenable: session.statusNotifier,
+      builder: (context, status, _) {
+        final service = session.fileService;
+        if (status != ConnectionStatus.connected || service == null) {
+          return const SizedBox.shrink();
+        }
+        return Semantics(
+          identifier: FilesSemantics.browseButton,
+          child: IconButton(
+            icon: Icon(
+              Icons.folder_outlined,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+            tooltip: 'Browse files',
+            onPressed: () => FileBrowserSheet.show(context, service: service),
+          ),
+        );
+      },
     );
   }
 

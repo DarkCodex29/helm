@@ -23,6 +23,7 @@ import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
+import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:xterm/xterm.dart';
 
 /// Opens the exec channel used to attach to a multiplexer session,
@@ -59,6 +60,18 @@ typedef HostRunnerFactory = HostCommandRunner Function(SSHClient client);
 
 HostCommandRunner _defaultHostRunnerFactory(SSHClient client) =>
     SshHostCommandRunner(client);
+
+/// Builds the [SftpFileService] used to browse the remote filesystem,
+/// bound to an already-connected [SSHClient].
+///
+/// Mirrors [HostRunnerFactory] exactly, and for the same two reasons: the
+/// service multiplexes a NEW CHANNEL over the existing client rather than
+/// dialing a second connection, and tests inject a scripted opener to
+/// avoid a live transport.
+typedef FileServiceFactory = SftpFileService Function(SSHClient client);
+
+SftpFileService _defaultFileServiceFactory(SSHClient client) =>
+    SftpFileService(client);
 
 /// Fallback [MultiplexerAdapter] for the window before the probe has run.
 ///
@@ -363,12 +376,14 @@ class TerminalSession {
     AttachSessionOpener? attachOpener,
     HostProber hostProber = const HostProber(),
     HostRunnerFactory? hostRunnerFactory,
+    FileServiceFactory? fileServiceFactory,
   }) : _sshService = sshService,
        _muxAdapterOverride = muxAdapter,
        _muxAdapter = muxAdapter ?? TmuxAdapter(_UnconnectedHostCommandRunner()),
        _attachOpener = attachOpener ?? _defaultAttachOpener,
        _hostProber = hostProber,
        _hostRunnerFactory = hostRunnerFactory ?? _defaultHostRunnerFactory,
+       _fileServiceFactory = fileServiceFactory ?? _defaultFileServiceFactory,
        terminal = terminal ?? Terminal(maxLines: 5000) {
     // Wired HERE, not in _bridgeIO, and this is the whole fix for the
     // remote drawing wider than the screen.
@@ -408,6 +423,7 @@ class TerminalSession {
 
   final HostProber _hostProber;
   final HostRunnerFactory _hostRunnerFactory;
+  final FileServiceFactory _fileServiceFactory;
   final HostAdvisor _advisor = const HostAdvisor();
 
   /// True once [dispose] has run. Guards the fire-and-forget advisory
@@ -417,6 +433,7 @@ class TerminalSession {
   SSHClient? _client;
   SSHSession? _session;
   HostCommandRunner? _hostRunner;
+  SftpFileService? _fileService;
   HostReport? _hostReport;
   MultiplexerSelection? _multiplexerSelection;
 
@@ -520,6 +537,20 @@ class TerminalSession {
   /// Exposed so the diagnostics surface can ask the host follow-up
   /// questions on the SAME connection instead of opening its own.
   HostCommandRunner? get hostRunner => _hostRunner;
+
+  /// Browses the remote filesystem over the live connection, or null when
+  /// not connected.
+  ///
+  /// Owned HERE rather than by the browser UI because its lifetime is the
+  /// CONNECTION's, not the sheet's: it holds one long-lived SFTP channel
+  /// over [_client], so whoever owns the client has to be the one who
+  /// closes it. A browser that opened its own would leak a channel every
+  /// time the user dismissed it.
+  ///
+  /// The service itself is lazy — no channel is opened until something
+  /// actually lists a directory — so a session nobody browses pays
+  /// nothing for this.
+  SftpFileService? get fileService => _fileService;
 
   /// Exposes the active [SSHClient] for one-shot command execution.
   /// Returns null if not connected.
@@ -774,6 +805,7 @@ class TerminalSession {
 
       _client = result.client;
       _hostRunner = _hostRunnerFactory(result.client);
+      _fileService = _fileServiceFactory(result.client);
 
       final sessionRef = tmuxSessionName;
       if (sessionRef != null) {
@@ -920,10 +952,16 @@ class TerminalSession {
     // Every one of these is bound to the client being torn down. A runner
     // left pointing at a dead client would hand the diagnostics surface a
     // transport that can only fail, and a stale report would describe a
-    // host state nobody re-verified. connect() repopulates all three.
+    // host state nobody re-verified. connect() repopulates all four.
     _hostRunner = null;
     _hostReport = null;
     _multiplexerSelection = null;
+    // Closed BEFORE the client, and awaited: SftpClient.close() closes its
+    // own SSH channel (sftp_client.dart:261-266), and doing that through a
+    // transport that is already gone leaves the channel half-open on the
+    // server. Its own close() swallows failures, so this cannot break a
+    // reconnect.
+    await _closeFileService();
     if (oldClient != null) {
       await _sshService.disconnect(oldClient);
     }
@@ -982,6 +1020,10 @@ class TerminalSession {
     _stdoutSub = null;
     _stderrSub = null;
 
+    // See reconnect(): the SFTP channel is closed while its transport is
+    // still up, so the server is told rather than left holding it.
+    await _closeFileService();
+
     final client = _client;
     if (client != null) {
       await _sshService.disconnect(client);
@@ -1001,6 +1043,19 @@ class TerminalSession {
     hostKeyAuthorizationNotifier.dispose();
     agentsNotifier.dispose();
     sessionVitalityNotifier.dispose();
+  }
+
+  /// Ends the SFTP session, if one was ever opened, and forgets it.
+  ///
+  /// Nulled out unconditionally, even when the close fails: whatever the
+  /// outcome, the service is bound to a client this session is about to
+  /// stop owning, and keeping the reference would hand a later caller a
+  /// browser onto a dead transport.
+  Future<void> _closeFileService() async {
+    final service = _fileService;
+    _fileService = null;
+    if (service == null) return;
+    await service.close();
   }
 
   /// Probes the host and swaps in the adapter the result selects.
