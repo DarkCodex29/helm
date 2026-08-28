@@ -191,6 +191,22 @@ class FilesSemantics {
   static const downloadFolderButton = 'helm.files.download_folder_button';
 }
 
+/// Identifiers on `SessionHoldAction`.
+class SessionHoldSemantics {
+  const SessionHoldSemantics._();
+
+  /// The AppBar toggle that holds the active session open in the
+  /// background, and releases it again.
+  ///
+  /// One identifier for BOTH states, unlike [FilesSemantics.downloadStatus]
+  /// and [FilesSemantics.downloadPublish]. Those report two independent
+  /// facts that can be true at once; this is one control whose two states
+  /// are mutually exclusive, and splitting it would let a test assert
+  /// "not held" by finding nothing — which is also what an absent control
+  /// looks like.
+  static const toggle = 'helm.session_hold.toggle';
+}
+
 /// Identifiers on `SettingsScreen`.
 class SettingsSemantics {
   const SettingsSemantics._();

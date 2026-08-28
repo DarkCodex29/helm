@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +8,9 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
 import 'package:helm/features/notifications/presentation/pending_session_alert.dart';
+import 'package:helm/features/session_hold/domain/hold_labels.dart';
+import 'package:helm/features/session_hold/presentation/session_hold_action.dart';
+import 'package:helm/features/session_hold/presentation/session_hold_provider.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
@@ -119,6 +124,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(tabsProvider.notifier).saveSnapshot();
       case AppLifecycleState.resumed:
         ref.read(sessionSnapshotRepoProvider).markClean();
+        // The user is back, which is both halves of what a hold needs to
+        // hear: the idle clock restarts, and the belief that a service is
+        // still running gets re-checked against the platform. Nothing
+        // announces an OEM power manager removing a foreground service,
+        // so this is the only moment helm can find out. Unawaited because
+        // a lifecycle callback is synchronous and nothing here can throw
+        // — see `SessionHoldController.onAppResumed`.
+        unawaited(ref.read(sessionHoldControllerProvider).onAppResumed());
         if (_pendingRecovery != null && mounted) {
           setState(() => _pendingRecovery = null);
         }
@@ -201,6 +214,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
             _buildBrowseAction(tabsState.activeTab?.session),
+            _buildHoldAction(tabsState.activeTab?.session),
             Semantics(
               identifier: HomeSemantics.settingsButton,
               child: IconButton(
@@ -269,6 +283,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// The action that keeps the ACTIVE tab attached while helm is away.
+  ///
+  /// Sits beside the browse action rather than in the drawer for the same
+  /// reason it does: both act INSIDE one session, while the drawer moves
+  /// between them. Rendering and the connected-only rule live in
+  /// [SessionHoldAction]; this only supplies the session.
+  ///
+  /// The record is rebuilt every frame, and that is safe on purpose:
+  /// `SessionHoldController` keys "am I already holding this?" on the
+  /// identity of `statusNotifier`, which survives the rebuild, rather than
+  /// on the record's own identity, which does not.
+  Widget _buildHoldAction(TerminalSession? session) {
+    if (session == null) return const SizedBox.shrink();
+
+    return SessionHoldAction(
+      session: holdableSession(
+        multiplexerSessionName: session.tmuxSessionName,
+        profileName: session.profile.name,
+        status: session.statusNotifier,
+      ),
     );
   }
 

@@ -5,6 +5,44 @@
          channel, but that declaration does not reach release or profile
          builds. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- ── Holding a session open in the background ──────────────────────
+
+         All three are NORMAL permissions: granted at install time, with no
+         runtime prompt and no way for the user to revoke them. Nothing
+         here adds a dialog.
+
+         FOREGROUND_SERVICE is the base requirement for any foreground
+         service since Android 9.
+
+         FOREGROUND_SERVICE_CONNECTED_DEVICE is required from Android 14
+         for the `connectedDevice` type declared on the service below.
+         `connectedDevice` rather than the intuitive `dataSync` because
+         Android 15 caps dataSync at six CUMULATIVE hours per 24 and then
+         refuses to start another until the next day — a feature built on
+         it would work, then die every afternoon. `connectedDevice` has no
+         timeout, and its documented scope covers interactions with
+         external devices over "a Bluetooth, NFC, IR, USB, or network
+         connection", which is what an SSH session to a Mac is.
+
+         CHANGE_NETWORK_STATE satisfies `connectedDevice`'s runtime
+         prerequisite, which is an any-of list. The framework
+         (ForegroundServiceTypePolicy.java) accepts CHANGE_NETWORK_STATE,
+         CHANGE_WIFI_STATE, NFC, TRANSMIT_IR, a granted Bluetooth/UWB
+         runtime permission, or a USB device grant. Every alternative
+         either prompts the user or claims hardware helm does not touch,
+         so this is the only honest entry on that list. Without it the
+         start throws ForegroundServiceStartNotAllowedException.
+
+         Deliberately ABSENT: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. Play
+         prohibits it unless the app's core function is adversely affected
+         without it, and it would buy nothing — a running foreground
+         service is already listed as "No restrictions" in Android's
+         power-management table and already pins the app to the Active
+         standby bucket. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <application
         android:label="helm"
         android:name="${applicationName}"
@@ -33,6 +71,30 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Keeps helm's process alive so the SSH connection it already
+             holds survives being backgrounded.
+
+             No `android:process`, and that omission is the whole design.
+             Without it the service runs in the application's DEFAULT
+             process — the one hosting MainActivity, its FlutterEngine,
+             and the isolate that owns the socket — so raising this
+             service's importance raises theirs. Naming a process here
+             would put the service somewhere the connection is not, and
+             force the second-FlutterEngine, second-SSH-connection design
+             that every Flutter background-service plugin has to use.
+
+             `exported="false"`: nothing outside this app has any reason
+             to start it, and an exported foreground service is a way for
+             another app to make this one hold a notification.
+
+             `stopWithTask` is left at its default of false ON PURPOSE.
+             Setting it true kills the service without calling
+             onTaskRemoved, which is where the hold tears itself down and
+             removes its notification — see SessionHoldService. -->
+        <service
+            android:name=".SessionHoldService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"/>
         <!-- Which channel the Firebase SDK draws a backgrounded
              notification on.
 
