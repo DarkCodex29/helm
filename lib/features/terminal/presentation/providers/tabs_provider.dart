@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/session_reference.dart';
@@ -6,6 +8,7 @@ import 'package:helm/features/connection/data/connection_profile_repository.dart
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
+import 'package:helm/features/notifications/presentation/push_notification_provider.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
@@ -147,9 +150,35 @@ class TabsNotifier extends Notifier<TabsState> {
 
     try {
       await session.connect(privateKey);
+      _registerForPushNotifications(session);
     } catch (e) {
       _log.e('Tab connection failed for ${profile.name}', e);
     }
+  }
+
+  /// Tells the host which device to push to, over the connection just
+  /// opened.
+  ///
+  /// Gated on [TerminalSession.tracksAgents] rather than on "connected":
+  /// a session with no multiplexer attached can never produce an agent
+  /// alert, so asking for a notification permission there would spend one
+  /// of Android's few prompts on a capability this host does not have.
+  ///
+  /// NOT awaited, deliberately. This runs on the path that opens a tab,
+  /// and the user is waiting for a terminal, not for a notification
+  /// registration. Nothing inside can throw — every failure is folded
+  /// into a `TokenRegistrationOutcome` — so an unawaited future here
+  /// cannot surface as an unhandled async error either.
+  void _registerForPushNotifications(TerminalSession session) {
+    if (!session.tracksAgents) return;
+    final runner = session.hostRunner;
+    if (runner == null) return;
+
+    unawaited(
+      ref
+          .read(pushNotificationServiceProvider)
+          .onAgentTrackingStarted(runner),
+    );
   }
 
   Future<void> removeTab(String id) async {
@@ -276,6 +305,48 @@ class TabsNotifier extends Notifier<TabsState> {
     }
 
     await repo.markClean();
+  }
+
+  /// Opens the session a push notification asked for.
+  ///
+  /// [sessionName] is the herdr/tmux session name from the notification's
+  /// `session` key — see [SessionAlert] for the full wire contract.
+  ///
+  /// ### Why no profile comes over the wire
+  ///
+  /// The notifier runs on the Mac and knows nothing about helm's
+  /// connection profiles: they are phone-side records with phone-minted
+  /// UUIDs. Asking it to name one would make the payload depend on state
+  /// the sender cannot see, and would break the moment a profile was
+  /// edited. Resolution is this side's job, and it is cheap: a session
+  /// already open is focused wherever it lives, and otherwise the default
+  /// profile is dialled — the same profile launch would have used.
+  ///
+  /// ### Why it goes through [addTab]
+  ///
+  /// [resolveSessionName] already decides whether a name means "attach"
+  /// or "focus the tab that has it", and two tabs on one session render
+  /// the same screen while fighting over the remote PTY size. Routing the
+  /// notification through the same door means that rule cannot be
+  /// bypassed by this path.
+  ///
+  /// DEGRADES QUIETLY. No profile, or a name that survived a malformed
+  /// payload as empty, leaves Home exactly as it was.
+  Future<void> openSessionNamed(String sessionName) async {
+    if (sessionName.isEmpty) {
+      _log.w('Notification named no session; leaving Home as it is');
+      return;
+    }
+
+    final repo = ref.read(connectionProfileRepositoryProvider);
+    final profile = await repo.getDefault();
+    if (profile == null) {
+      _log.w('No profile to open notification session $sessionName with');
+      return;
+    }
+
+    _log.i('Opening session $sessionName from a notification');
+    await addTab(profile, tmuxSessionName: sessionName);
   }
 
   /// Opens a tab for the given [shortcut], navigates to its project path,

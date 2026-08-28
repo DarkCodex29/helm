@@ -33,6 +33,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Which channel the Firebase SDK draws a backgrounded
+             notification on.
+
+             The value must equal `kAgentAlertChannelId` in
+             lib/features/notifications/data/local_notification_presenter.dart,
+             which is the channel the app creates at startup and the one
+             the FOREGROUND path posts on.
+
+             Required rather than cosmetic. Without it the SDK falls back
+             to its own `fcm_fallback_notification_channel`, labelled
+             "Miscellaneous", so one feature would appear as two entries
+             in Android's notification settings — and muting "Agent
+             alerts" would not stop the notifications that arrive while
+             helm is closed, which are the only ones that matter.
+
+             Verified against firebase-messaging-25.0.1.aar: the SDK reads
+             exactly this meta-data name. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="helm_agent_alerts" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

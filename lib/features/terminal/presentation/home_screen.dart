@@ -5,6 +5,7 @@ import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
+import 'package:helm/features/notifications/presentation/pending_session_alert.dart';
 import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
@@ -16,7 +17,17 @@ import 'package:helm/features/terminal/presentation/widgets/terminal_keyboard.da
 import 'package:helm/features/terminal/presentation/widgets/terminal_view_widget.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.requestedSessionName});
+
+  /// The session a push notification asked for, or null on an ordinary
+  /// launch.
+  ///
+  /// Supplied by the `/session/:sessionName` route, already
+  /// percent-decoded by go_router. When set it REPLACES auto-connect:
+  /// the user tapped a notification about one specific session, and
+  /// opening the default profile's session as well would answer a
+  /// question nobody asked.
+  final String? requestedSessionName;
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -59,6 +70,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       if (recoveryPending && mounted) {
         setState(() => _pendingRecovery = pending);
+      }
+
+      // The notification is honoured here, and the pending alert is
+      // cleared HERE and nowhere else. `resolveAuthRedirect` reads it
+      // without clearing — a redirect runs more than once per navigation,
+      // so clearing there would make the result depend on which pass ran
+      // first. This is the single point at which the request is spent.
+      final requested = widget.requestedSessionName;
+      if (requested != null && requested.isNotEmpty) {
+        ref.read(pendingSessionAlertProvider.notifier).take();
+        if (!mounted) return;
+        await ref.read(tabsProvider.notifier).openSessionNamed(requested);
+        // Deliberately returns: auto-connect would open the DEFAULT
+        // profile's session next to the one the user actually asked for.
+        return;
       }
 
       // Auto-connect runs AFTER the recovery question has been answered,

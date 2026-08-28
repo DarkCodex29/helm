@@ -66,6 +66,22 @@ dependencies:
   saf_util: 2.2.0
   saf_stream: 2.0.0
 
+  # Push notifications. PINNED EXACTLY, for the same toolchain reason as
+  # `saf_util`/`saf_stream` above: these three are the newest versions whose
+  # `flutter` constraint still admits 3.41.7 / Dart 3.11.5, and every one of
+  # them declares `sdk: ^3.6.0` today. A caret would resolve fine now and
+  # silently stop resolving the moment any of them publishes a release that
+  # raises its floor, which is exactly how the SAF pair broke.
+  #
+  # `firebase_core` initialises from `lib/firebase_options.dart`;
+  # `firebase_messaging` obtains the token and delivers messages;
+  # `flutter_local_notifications` exists ONLY for the foreground case —
+  # FCM does not draw a tray notification while the app is in front, so
+  # without it a message that arrives mid-session is silently dropped.
+  firebase_core: 4.14.0
+  firebase_messaging: 16.6.0
+  flutter_local_notifications: 22.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

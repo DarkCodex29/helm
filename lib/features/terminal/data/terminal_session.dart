@@ -784,6 +784,21 @@ class TerminalSession {
   /// i.e. asking about agents is meaningful at all.
   bool _agentTrackingEnabled = false;
 
+  /// Whether this session can be told about agents at all.
+  ///
+  /// Exposed for one caller: the push-notification permission prompt.
+  /// This flag is the first honest moment a notification permission has a
+  /// purpose — there is a live connection, attached to a multiplexer that
+  /// reports agent state, so there is finally something that could arrive
+  /// while the phone is in a pocket. Asking earlier spends one of a very
+  /// small, non-renewable supply of Android prompts on someone who has
+  /// not yet seen helm connect to anything.
+  ///
+  /// Deliberately NOT [_agentsObserved]: that one means a widget is
+  /// LOOKING at agent state right now, which is the opposite of the case
+  /// notifications exist for.
+  bool get tracksAgents => _agentTrackingEnabled;
+
   /// True while at least one widget listens to [agentsNotifier].
   bool _agentsObserved = false;
 

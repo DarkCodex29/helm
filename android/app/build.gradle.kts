@@ -1,5 +1,8 @@
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -11,6 +14,14 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by flutter_local_notifications 22.3.0, which fails the
+        // AAR metadata check without it (`checkDebugAarMetadata`). Its own
+        // android/build.gradle:28 enables the same flag, and its README
+        // §"Version 10+" states every consuming app must too — whether or
+        // not it schedules notifications. helm does not schedule any; the
+        // requirement is on the plugin's use of java.time, not on the
+        // feature.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -37,6 +48,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // Version pinned to the one flutter_local_notifications 22.3.0 itself
+    // resolves (its android/build.gradle:45), so the app and the plugin
+    // cannot desugar against two different backports of java.time.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {

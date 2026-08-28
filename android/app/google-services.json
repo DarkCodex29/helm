@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "603698838649",
+    "project_id": "helm-7f49f",
+    "storage_bucket": "helm-7f49f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:603698838649:android:e6249acf8ade974e73a8a8",
+        "android_client_info": {
+          "package_name": "com.darkcodex.helm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWz2MgexITEC_Xh6m-LH-BhuPiAYcjueg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
