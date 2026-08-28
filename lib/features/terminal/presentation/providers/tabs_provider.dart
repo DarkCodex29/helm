@@ -9,6 +9,8 @@ import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/notifications/presentation/push_notification_provider.dart';
+import 'package:helm/features/session_hold/domain/auto_hold_request.dart';
+import 'package:helm/features/session_hold/presentation/session_hold_provider.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
@@ -151,9 +153,53 @@ class TabsNotifier extends Notifier<TabsState> {
     try {
       await session.connect(privateKey);
       _registerForPushNotifications(session);
+      await _holdIfTheProfileAsked(profile, session);
     } catch (e) {
       _log.e('Tab connection failed for ${profile.name}', e);
     }
+  }
+
+  /// Honors the profile editor's background-hold switch.
+  ///
+  /// ### Why here, and only here
+  ///
+  /// This is the single line every way of opening a session runs through
+  /// — launch auto-connect, crash recovery, a push notification, a
+  /// project shortcut and the new-tab sheet all reach the host through
+  /// [addTab]. Putting the rule anywhere else would mean re-deriving it
+  /// per entry point, and one of them would eventually disagree.
+  ///
+  /// ### Why AFTER the connect, inside the try
+  ///
+  /// A foreground service over a connection that was never established is
+  /// a notification about nothing, and Play reads that as exactly the
+  /// abuse the perceptibility rule exists to stop. `connect` throws on
+  /// failure, so a failed dial skips this for free rather than by a flag
+  /// somebody has to remember to check.
+  ///
+  /// ### Why it is awaited
+  ///
+  /// It resolves as fast as a binder call into this app's own process,
+  /// and it cannot throw anything new at the caller: it sits inside the
+  /// same `catch` that already absorbs a failed connect, and
+  /// `PlatformForegroundServiceHost.start` turns a platform refusal into
+  /// `false` rather than an exception. Awaiting buys a deterministic
+  /// ordering — the tab is open and held, or open and not — instead of a
+  /// hold that lands a frame or two after whatever asked for the tab has
+  /// already returned.
+  Future<void> _holdIfTheProfileAsked(
+    ConnectionProfile profile,
+    TerminalSession session,
+  ) async {
+    final request = autoHoldRequest(
+      profileHoldsInBackground: profile.holdInBackground,
+      multiplexerSessionName: session.tmuxSessionName,
+      profileName: profile.name,
+      status: session.statusNotifier,
+    );
+    if (request == null) return;
+
+    await ref.read(sessionHoldControllerProvider).holdOnConnect(request);
   }
 
   /// Tells the host which device to push to, over the connection just

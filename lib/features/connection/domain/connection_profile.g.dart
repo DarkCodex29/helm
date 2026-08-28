@@ -18,6 +18,7 @@ _$ConnectionProfileImpl _$$ConnectionProfileImplFromJson(
   sessionRef: _readSessionRef(json, 'sessionRef') as String?,
   multiplexer: json['multiplexer'] as String?,
   isDefault: json['isDefault'] as bool? ?? false,
+  holdInBackground: json['holdInBackground'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$$ConnectionProfileImplToJson(
@@ -32,4 +33,5 @@ Map<String, dynamic> _$$ConnectionProfileImplToJson(
   'sessionRef': instance.sessionRef,
   'multiplexer': instance.multiplexer,
   'isDefault': instance.isDefault,
+  'holdInBackground': instance.holdInBackground,
 };

@@ -201,4 +201,105 @@ void main() {
       },
     );
   });
+
+  group('Background hold is chosen, never inherited', () {
+    // Captured VERBATIM from the app as it stood BEFORE holdInBackground
+    // existed (commit 831c33c): two ConnectionProfile instances were built
+    // with the unmodified class, .toJson() was called on each, and the
+    // jsonEncode() output was copied here before connection_profile.dart
+    // was touched at all.
+    //
+    // These are the shape of records sitting in SharedPreferences on real
+    // devices right now. If a future change makes either fail to load, fix
+    // the class — never these strings.
+    const preFieldJsonConfigured =
+        '{"id":"abc-123","name":"Mac Studio","host":"192.168.1.10","port":22,'
+        '"username":"gian","tmuxSession":"work","sessionRef":"work",'
+        '"multiplexer":"herdr","isDefault":true}';
+    const preFieldJsonBare =
+        '{"id":"def-456","name":"Contabo VPS","host":"158.220.106.131",'
+        '"port":22,"username":"deployer","tmuxSession":null,'
+        '"sessionRef":null,"multiplexer":null,"isDefault":false}';
+
+    test(
+      'a profile saved before the field existed loads with the hold OFF — '
+      'installing an update must never start a foreground service the user '
+      'was never asked about',
+      () {
+        final profile = ConnectionProfile.fromJson(
+          jsonDecode(preFieldJsonConfigured) as Map<String, dynamic>,
+        );
+
+        expect(profile.holdInBackground, isFalse);
+        // And every field it did carry is still intact.
+        expect(profile.id, 'abc-123');
+        expect(profile.sessionRef, 'work');
+        expect(profile.multiplexer, 'herdr');
+        expect(profile.isDefault, isTrue);
+      },
+    );
+
+    test(
+      'the same is true of a bare profile, including the one that would be '
+      'auto-connected on launch',
+      () {
+        final profile = ConnectionProfile.fromJson(
+          jsonDecode(preFieldJsonBare) as Map<String, dynamic>,
+        );
+
+        expect(profile.holdInBackground, isFalse);
+        expect(profile.username, 'deployer');
+      },
+    );
+
+    test('a profile constructed without an opinion defaults to OFF', () {
+      const profile = ConnectionProfile(
+        id: 'new-1',
+        name: 'New Profile',
+        host: '10.0.0.5',
+        username: 'gian',
+      );
+
+      expect(profile.holdInBackground, isFalse);
+    });
+
+    test(
+      'turning the switch on survives a save and a load — the whole point '
+      'of the preference is that it is chosen once',
+      () {
+        const profile = ConnectionProfile(
+          id: 'held-1',
+          name: 'Mac Studio',
+          host: '192.168.1.10',
+          username: 'gian',
+          holdInBackground: true,
+        );
+
+        final reloaded = ConnectionProfile.fromJson(
+          jsonDecode(jsonEncode(profile.toJson())) as Map<String, dynamic>,
+        );
+
+        expect(reloaded.holdInBackground, isTrue);
+      },
+    );
+
+    test('turning it back off survives the same round trip', () {
+      const profile = ConnectionProfile(
+        id: 'held-1',
+        name: 'Mac Studio',
+        host: '192.168.1.10',
+        username: 'gian',
+        holdInBackground: false,
+      );
+
+      final reloaded = ConnectionProfile.fromJson(
+        jsonDecode(jsonEncode(profile.toJson())) as Map<String, dynamic>,
+      );
+
+      expect(reloaded.holdInBackground, isFalse);
+      // Written out explicitly rather than omitted, so a record on disk
+      // says what it means instead of relying on a reader's default.
+      expect(profile.toJson().containsKey('holdInBackground'), isTrue);
+    });
+  });
 }

@@ -221,4 +221,15 @@ class ProfileEditSemantics {
   static const testConnectionButton =
       'helm.profile_edit.test_connection_button';
   static const multiplexerDropdown = 'helm.profile_edit.multiplexer_dropdown';
+
+  /// The switch that makes this profile hold its sessions in the
+  /// background on connect.
+  ///
+  /// Addressable on its own rather than found by its label, because the
+  /// label is the part most likely to be rewritten: it has to keep naming
+  /// a foreground service, an ongoing notification and a battery cost, and
+  /// a test that matched on that wording would break every time the copy
+  /// got more honest.
+  static const backgroundHoldSwitch =
+      'helm.profile_edit.background_hold_switch';
 }

@@ -39,9 +39,10 @@ void main() {
       final s = _session();
 
       // A session reaching `connected` is the moment a hold BECOMES
-      // possible, and it must not be the moment one starts. Play requires
-      // a foreground service to be user-initiated, and helm connects on
-      // launch — so an automatic hold would be started by the app opening.
+      // possible, and it must not by itself be the moment one starts.
+      // Nothing in this class watches for that transition: the only two
+      // ways in are `hold` (a tap) and `holdOnConnect` (a profile
+      // preference the user set), and a status change is neither.
       s.status.value = ConnectionStatus.connecting;
       s.status.value = ConnectionStatus.connected;
 
@@ -262,7 +263,186 @@ void main() {
     });
   });
 
+  group('holding because the profile asked for it', () {
+    test('a connect the profile asked to hold is held', () async {
+      final s = _session(name: 'helm-deploy', host: 'Mac Studio');
+
+      await controller.holdOnConnect(s.session);
+
+      expect(host.starts, hasLength(1));
+      expect(host.starts.single.sessionName, 'helm-deploy');
+      expect(controller.state, const SessionHoldState.held('helm-deploy'));
+    });
+
+    test('a session that never reached connected is not held', () async {
+      // The connect failed, or is still in flight. The automatic path is
+      // held to exactly the same rule as the manual one: there is nothing
+      // to hold open until there is something open.
+      final s = _session(status: ConnectionStatus.connecting);
+
+      await controller.holdOnConnect(s.session);
+
+      expect(host.starts, isEmpty);
+      expect(controller.state, const SessionHoldState.released());
+    });
+
+    test(
+      'a platform that refuses an automatic hold reports unavailable, and '
+      'never a hold that is not there',
+      () async {
+        host.startSucceeds = false;
+        final s = _session();
+
+        await controller.holdOnConnect(s.session);
+
+        expect(controller.state, const SessionHoldState.unavailable());
+        expect(host.running, isFalse);
+      },
+    );
+
+    test(
+      'a hold the user turned off by hand does not come back for that '
+      'session — the preference decides what happens on the NEXT connect, '
+      'and never overrules the user in the moment',
+      () async {
+        final s = _session();
+
+        await controller.holdOnConnect(s.session);
+        expect(controller.state.isHolding, isTrue);
+
+        await controller.release();
+
+        // The same session, asked for again by the same automatic path.
+        await controller.holdOnConnect(s.session);
+
+        expect(host.starts, hasLength(1));
+        expect(controller.state, const SessionHoldState.released());
+      },
+    );
+
+    test('STOP in the notification refuses further automatic holds too', () async {
+      // The notification's own STOP button is the same gesture as the
+      // toolbar pin, reached through a different surface. Treating it as
+      // weaker would make a control the user can see from outside the app
+      // mean less than one they can only reach inside it.
+      final s = _session();
+      await controller.holdOnConnect(s.session);
+
+      host.tapStopAction();
+      await pumpEventQueue();
+
+      await controller.holdOnConnect(s.session);
+
+      expect(host.starts, hasLength(1));
+      expect(controller.state, const SessionHoldState.released());
+    });
+
+    test(
+      'turning one session off says nothing about another — the refusal is '
+      'per session, not a mode the whole app enters',
+      () async {
+        final first = _session(name: 'helm-one');
+        final second = _session(name: 'helm-two');
+
+        await controller.holdOnConnect(first.session);
+        await controller.release();
+
+        await controller.holdOnConnect(second.session);
+
+        expect(host.starts.map((s) => s.sessionName), ['helm-one', 'helm-two']);
+        expect(controller.state, const SessionHoldState.held('helm-two'));
+      },
+    );
+
+    test(
+      'a hold that ended because the session disconnected is taken again on '
+      'the next connect — a dropped connection is not the user declining',
+      () async {
+        final s = _session();
+
+        await controller.holdOnConnect(s.session);
+        s.status.value = ConnectionStatus.disconnected;
+        await pumpEventQueue();
+        expect(controller.state, const SessionHoldState.released());
+
+        s.status.value = ConnectionStatus.connected;
+        await controller.holdOnConnect(s.session);
+
+        expect(host.starts, hasLength(2));
+        expect(controller.state.isHolding, isTrue);
+      },
+    );
+
+    test(
+      'asking for a hold by hand clears the refusal, so the preference is '
+      'honoured again afterwards',
+      () async {
+        final s = _session();
+
+        await controller.holdOnConnect(s.session);
+        await controller.release();
+
+        // The user changed their mind and tapped the pin back on. That is
+        // the exact opposite of the gesture that set the refusal, so the
+        // refusal must not survive it.
+        await controller.hold(s.session);
+        expect(controller.state.isHolding, isTrue);
+
+        // Torn down by the connection dying, which declines nothing.
+        s.status.value = ConnectionStatus.disconnected;
+        await pumpEventQueue();
+        s.status.value = ConnectionStatus.connected;
+
+        await controller.holdOnConnect(s.session);
+
+        expect(host.starts, hasLength(3));
+        expect(controller.state.isHolding, isTrue);
+      },
+    );
+
+    test('a disposed controller holds nothing on connect', () async {
+      final s = _session();
+      await controller.dispose();
+
+      await controller.holdOnConnect(s.session);
+
+      expect(host.starts, isEmpty);
+    });
+  });
+
   group('idle timeout', () {
+    test('the idle timeout is not restarted by the preference', () {
+      // Constraint the whole feature rests on: an automatic START must
+      // never become an automatic RESTART. The four-hour bound exists
+      // because "the user forgot" has no natural end, and a preference
+      // that re-armed the hold after the bound expired would delete that
+      // bound entirely while looking like it was still there.
+      fakeAsync((async) {
+        final fake = FakeForegroundServiceHost();
+        final held = SessionHoldController(
+          host: fake,
+          idleTimeout: const Duration(hours: 4),
+        );
+        final s = _session();
+
+        held.holdOnConnect(s.session);
+        async.flushMicrotasks();
+        expect(fake.starts, hasLength(1));
+
+        async.elapse(const Duration(hours: 5));
+        async.flushMicrotasks();
+
+        expect(held.state, const SessionHoldState.released());
+        expect(fake.running, isFalse);
+
+        // Nothing started a second service on its own in the meantime.
+        async.elapse(const Duration(hours: 12));
+        async.flushMicrotasks();
+        expect(fake.starts, hasLength(1));
+        expect(fake.running, isFalse);
+      });
+    });
+
     test('a forgotten hold tears itself down', () {
       fakeAsync((async) {
         final fake = FakeForegroundServiceHost();

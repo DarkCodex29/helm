@@ -34,6 +34,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _sessionRefCtrl = TextEditingController();
 
   bool _isDefault = false;
+  bool _holdInBackground = false;
   bool _isSaving = false;
   String? _testStatus;
   bool _testPassed = false;
@@ -68,6 +69,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _sessionRefCtrl.text = profile.sessionRef ?? '';
         _selectedMultiplexer = decodeMultiplexer(profile.multiplexer);
         _isDefault = profile.isDefault;
+        _holdInBackground = profile.holdInBackground;
       });
     }
   }
@@ -216,6 +218,50 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            // Beside "Set as default profile" rather than in a section of
+            // its own: both answer "what should helm do by itself for this
+            // machine?", and both are things the user sets once. A second
+            // pattern for the same kind of setting would only make the
+            // pair harder to read.
+            Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: theme.colorScheme.outline),
+              ),
+              child: Semantics(
+                identifier: ProfileEditSemantics.backgroundHoldSwitch,
+                child: SwitchListTile(
+                  title: Text(
+                    'Hold this session in the background',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  // Says what it starts, what the user will see, what it
+                  // costs and how to stop it. Deliberately not "stay
+                  // connected": that names the benefit and hides the
+                  // price, and a switch whose price is a permanent
+                  // notification and battery drain has to state both for
+                  // the tap to be an informed one — which is exactly what
+                  // makes it the user-initiated action a foreground
+                  // service is allowed to be started by.
+                  subtitle: Text(
+                    'Runs a background service with an ongoing notification '
+                    'on every connect, so the session survives while you are '
+                    'in other apps. Costs battery; stop it any time from that '
+                    'notification or the toolbar pin.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  isThreeLine: true,
+                  value: _holdInBackground,
+                  onChanged: (v) => setState(() => _holdInBackground = v),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
@@ -294,6 +340,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       sessionRef: resolvedSessionRef.sessionRef,
       multiplexer: encodeMultiplexer(_selectedMultiplexer),
       isDefault: _isDefault,
+      holdInBackground: _holdInBackground,
     );
 
     try {

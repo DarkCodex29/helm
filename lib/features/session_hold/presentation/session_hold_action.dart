@@ -17,13 +17,20 @@ import 'package:helm/features/session_hold/presentation/session_hold_provider.da
 /// whose meaning depends on which tab is active does not belong in the
 /// surface used to change which tab is active.
 ///
-/// ## Why it is a toggle and not a switch in Settings
+/// ## Why this toggle still exists now that a profile can ask for a hold
 ///
-/// Play requires a foreground service to be user-initiated, and helm
-/// auto-connects on launch. A persisted "always hold" preference would
-/// therefore start a service because the app opened, which is exactly what
-/// that rule forbids. The hold has to be a decision taken about a session
-/// that is in front of the user, at the moment they take it.
+/// `ConnectionProfile.holdInBackground` answers "what should happen the
+/// next time this machine connects?". This answers "what should happen to
+/// the session in front of me, now?" — and the second must be able to
+/// override the first, or the preference becomes a policy the app enforces
+/// against the user rather than a default they set.
+///
+/// So a tap here that turns a hold OFF is remembered for that session and
+/// stands down the automatic path for it — see
+/// [SessionHoldController.holdOnConnect]. A tap that turns one ON clears
+/// that refusal again. Neither touches what is stored on the profile: this
+/// control is about one session, and editing a profile from a terminal
+/// screen would be a surprise.
 ///
 /// ## Why it renders as nothing when not connected
 ///

@@ -104,6 +104,33 @@ class ConnectionProfile with _$ConnectionProfile {
 
     /// Whether this is the default profile to connect to on launch.
     @Default(false) bool isDefault,
+
+    /// Whether a successful connect on this profile should hold the
+    /// session open in the background.
+    ///
+    /// A hold runs an Android foreground service with an ongoing
+    /// notification (see `SessionHoldService.kt`), which is why this
+    /// carries `@Default(false)` and why that default is load-bearing
+    /// rather than incidental:
+    ///
+    ///  * Every profile already on a device predates this key. freezed's
+    ///    `@Default` makes json_serializable emit
+    ///    `json['holdInBackground'] as bool? ?? false`, so those records
+    ///    deserialize with the hold OFF. Installing an update can
+    ///    therefore never start a service the user was never asked about
+    ///    — see `connection_profile_test.dart`'s
+    ///    "Background hold is chosen, never inherited" group, which asserts
+    ///    this against JSON captured verbatim from the pre-field app.
+    ///  * Turning it ON is the user-initiated action Play's foreground
+    ///    service rules require. That only holds while the switch is
+    ///    honest about what it starts, which is why the editor's copy
+    ///    names the service, the notification and the battery cost rather
+    ///    than promising something vague like "stay connected".
+    ///
+    /// It is deliberately NOT a global setting. Which sessions are worth
+    /// a notification is a per-machine judgement: a long-lived agent host
+    /// is, a box the user opens for one command is not.
+    @Default(false) bool holdInBackground,
   }) = _ConnectionProfile;
 
   factory ConnectionProfile.fromJson(Map<String, dynamic> json) =>

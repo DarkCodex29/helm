@@ -61,6 +61,33 @@ mixin _$ConnectionProfile {
   /// Whether this is the default profile to connect to on launch.
   bool get isDefault => throw _privateConstructorUsedError;
 
+  /// Whether a successful connect on this profile should hold the
+  /// session open in the background.
+  ///
+  /// A hold runs an Android foreground service with an ongoing
+  /// notification (see `SessionHoldService.kt`), which is why this
+  /// carries `@Default(false)` and why that default is load-bearing
+  /// rather than incidental:
+  ///
+  ///  * Every profile already on a device predates this key. freezed's
+  ///    `@Default` makes json_serializable emit
+  ///    `json['holdInBackground'] as bool? ?? false`, so those records
+  ///    deserialize with the hold OFF. Installing an update can
+  ///    therefore never start a service the user was never asked about
+  ///    — see `connection_profile_test.dart`'s
+  ///    "Background hold is chosen, never inherited" group, which asserts
+  ///    this against JSON captured verbatim from the pre-field app.
+  ///  * Turning it ON is the user-initiated action Play's foreground
+  ///    service rules require. That only holds while the switch is
+  ///    honest about what it starts, which is why the editor's copy
+  ///    names the service, the notification and the battery cost rather
+  ///    than promising something vague like "stay connected".
+  ///
+  /// It is deliberately NOT a global setting. Which sessions are worth
+  /// a notification is a per-machine judgement: a long-lived agent host
+  /// is, a box the user opens for one command is not.
+  bool get holdInBackground => throw _privateConstructorUsedError;
+
   /// Serializes this ConnectionProfile to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -88,6 +115,7 @@ abstract class $ConnectionProfileCopyWith<$Res> {
     @JsonKey(readValue: _readSessionRef) String? sessionRef,
     String? multiplexer,
     bool isDefault,
+    bool holdInBackground,
   });
 }
 
@@ -115,6 +143,7 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
     Object? sessionRef = freezed,
     Object? multiplexer = freezed,
     Object? isDefault = null,
+    Object? holdInBackground = null,
   }) {
     return _then(
       _value.copyWith(
@@ -154,6 +183,10 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
                 ? _value.isDefault
                 : isDefault // ignore: cast_nullable_to_non_nullable
                       as bool,
+            holdInBackground: null == holdInBackground
+                ? _value.holdInBackground
+                : holdInBackground // ignore: cast_nullable_to_non_nullable
+                      as bool,
           )
           as $Val,
     );
@@ -179,6 +212,7 @@ abstract class _$$ConnectionProfileImplCopyWith<$Res>
     @JsonKey(readValue: _readSessionRef) String? sessionRef,
     String? multiplexer,
     bool isDefault,
+    bool holdInBackground,
   });
 }
 
@@ -205,6 +239,7 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
     Object? sessionRef = freezed,
     Object? multiplexer = freezed,
     Object? isDefault = null,
+    Object? holdInBackground = null,
   }) {
     return _then(
       _$ConnectionProfileImpl(
@@ -244,6 +279,10 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
             ? _value.isDefault
             : isDefault // ignore: cast_nullable_to_non_nullable
                   as bool,
+        holdInBackground: null == holdInBackground
+            ? _value.holdInBackground
+            : holdInBackground // ignore: cast_nullable_to_non_nullable
+                  as bool,
       ),
     );
   }
@@ -262,6 +301,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     @JsonKey(readValue: _readSessionRef) this.sessionRef,
     this.multiplexer,
     this.isDefault = false,
+    this.holdInBackground = false,
   });
 
   factory _$ConnectionProfileImpl.fromJson(Map<String, dynamic> json) =>
@@ -318,9 +358,38 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
   @JsonKey()
   final bool isDefault;
 
+  /// Whether a successful connect on this profile should hold the
+  /// session open in the background.
+  ///
+  /// A hold runs an Android foreground service with an ongoing
+  /// notification (see `SessionHoldService.kt`), which is why this
+  /// carries `@Default(false)` and why that default is load-bearing
+  /// rather than incidental:
+  ///
+  ///  * Every profile already on a device predates this key. freezed's
+  ///    `@Default` makes json_serializable emit
+  ///    `json['holdInBackground'] as bool? ?? false`, so those records
+  ///    deserialize with the hold OFF. Installing an update can
+  ///    therefore never start a service the user was never asked about
+  ///    — see `connection_profile_test.dart`'s
+  ///    "Background hold is chosen, never inherited" group, which asserts
+  ///    this against JSON captured verbatim from the pre-field app.
+  ///  * Turning it ON is the user-initiated action Play's foreground
+  ///    service rules require. That only holds while the switch is
+  ///    honest about what it starts, which is why the editor's copy
+  ///    names the service, the notification and the battery cost rather
+  ///    than promising something vague like "stay connected".
+  ///
+  /// It is deliberately NOT a global setting. Which sessions are worth
+  /// a notification is a per-machine judgement: a long-lived agent host
+  /// is, a box the user opens for one command is not.
+  @override
+  @JsonKey()
+  final bool holdInBackground;
+
   @override
   String toString() {
-    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, sessionRef: $sessionRef, multiplexer: $multiplexer, isDefault: $isDefault)';
+    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, sessionRef: $sessionRef, multiplexer: $multiplexer, isDefault: $isDefault, holdInBackground: $holdInBackground)';
   }
 
   @override
@@ -341,7 +410,9 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
             (identical(other.multiplexer, multiplexer) ||
                 other.multiplexer == multiplexer) &&
             (identical(other.isDefault, isDefault) ||
-                other.isDefault == isDefault));
+                other.isDefault == isDefault) &&
+            (identical(other.holdInBackground, holdInBackground) ||
+                other.holdInBackground == holdInBackground));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -357,6 +428,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     sessionRef,
     multiplexer,
     isDefault,
+    holdInBackground,
   );
 
   /// Create a copy of ConnectionProfile
@@ -387,6 +459,7 @@ abstract class _ConnectionProfile implements ConnectionProfile {
     @JsonKey(readValue: _readSessionRef) final String? sessionRef,
     final String? multiplexer,
     final bool isDefault,
+    final bool holdInBackground,
   }) = _$ConnectionProfileImpl;
 
   factory _ConnectionProfile.fromJson(Map<String, dynamic> json) =
@@ -440,6 +513,34 @@ abstract class _ConnectionProfile implements ConnectionProfile {
   /// Whether this is the default profile to connect to on launch.
   @override
   bool get isDefault;
+
+  /// Whether a successful connect on this profile should hold the
+  /// session open in the background.
+  ///
+  /// A hold runs an Android foreground service with an ongoing
+  /// notification (see `SessionHoldService.kt`), which is why this
+  /// carries `@Default(false)` and why that default is load-bearing
+  /// rather than incidental:
+  ///
+  ///  * Every profile already on a device predates this key. freezed's
+  ///    `@Default` makes json_serializable emit
+  ///    `json['holdInBackground'] as bool? ?? false`, so those records
+  ///    deserialize with the hold OFF. Installing an update can
+  ///    therefore never start a service the user was never asked about
+  ///    — see `connection_profile_test.dart`'s
+  ///    "Background hold is chosen, never inherited" group, which asserts
+  ///    this against JSON captured verbatim from the pre-field app.
+  ///  * Turning it ON is the user-initiated action Play's foreground
+  ///    service rules require. That only holds while the switch is
+  ///    honest about what it starts, which is why the editor's copy
+  ///    names the service, the notification and the battery cost rather
+  ///    than promising something vague like "stay connected".
+  ///
+  /// It is deliberately NOT a global setting. Which sessions are worth
+  /// a notification is a per-machine judgement: a long-lived agent host
+  /// is, a box the user opens for one command is not.
+  @override
+  bool get holdInBackground;
 
   /// Create a copy of ConnectionProfile
   /// with the given fields replaced by the non-null parameter values.

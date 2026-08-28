@@ -83,6 +83,15 @@ typedef HoldableSession = ({
 /// And one way a hold ends WITHOUT this class being told: the OS takes the
 /// service. [onAppResumed] exists for that, and is why [state] is asked of
 /// the platform rather than remembered.
+///
+/// ## Two ways a hold STARTS, and why they are not one method
+///
+/// [hold] is the user asking, now, about the session in front of them.
+/// [holdOnConnect] is a profile's stored preference being honoured on a
+/// connect that just succeeded. They differ in exactly one rule — the
+/// automatic one stands down for a session the user has turned off by
+/// hand — and collapsing them would either lose that rule or apply it to
+/// the tap that is supposed to override it.
 class SessionHoldController {
   SessionHoldController({
     required ForegroundServiceHost host,
@@ -107,18 +116,57 @@ class SessionHoldController {
   Timer? _idleTimer;
   var _disposed = false;
 
+  /// Sessions the user has turned the hold off on by hand.
+  ///
+  /// ## What this is for
+  ///
+  /// A profile preference says what should happen on the NEXT connect. It
+  /// is not a policy the app gets to enforce against the user in the
+  /// moment: someone who taps the pin off is answering a question about
+  /// the session they are looking at, and an automatic path that put the
+  /// service straight back would make that tap do nothing visible.
+  ///
+  /// ## Why the status listenable is the key
+  ///
+  /// The same reason [hold] compares `identical(_held?.status, ...)`
+  /// rather than session names: a label is not an identity. Two unnamed
+  /// tabs on one profile share a label, so keying on the name would let a
+  /// refusal taken on one silently suppress the other. Every
+  /// `TerminalSession` owns its own `statusNotifier`, so that object's
+  /// identity IS the session's identity — and `ValueNotifier` does not
+  /// override `==`, so this Set compares by identity for free.
+  ///
+  /// ## How long an entry lasts
+  ///
+  /// As long as the session it names. A `TerminalSession` is built once
+  /// per tab and disposed with it, so closing the tab and opening a new
+  /// one produces a new notifier, which is not in here, and the profile
+  /// preference is honoured again — the refusal is scoped to the thing
+  /// the user was actually looking at when they took it. A dropped
+  /// connection is NOT the user declining, so a disconnect clears nothing
+  /// and the next connect on the same session is held again.
+  ///
+  /// Nothing prunes this. Each entry costs one reference to a small
+  /// object and is only ever added by a deliberate tap, so a run of the
+  /// app accumulates a handful at most. The alternative — a second,
+  /// long-lived listener per declined session, kept alive to notice the
+  /// tab closing — would have to solve exactly the disposed-notifier
+  /// ordering problem [_detach] documents, which is a far worse trade
+  /// than a few bytes.
+  final Set<ValueListenable<ConnectionStatus>> _declined = {};
+
   /// The hold, for a widget to render from.
   ValueListenable<SessionHoldState> get stateNotifier => _state;
 
   SessionHoldState get state => _state.value;
 
-  /// Takes a hold on [session]. The ONLY way one starts.
+  /// Takes a hold on [session] because the user asked for it, now.
   ///
-  /// There is deliberately no path from connecting, resuming, or an agent
-  /// arriving. Play requires a foreground service to be user-initiated,
-  /// and helm auto-connects on launch — so a hold started on connect would
-  /// be started by the app opening, which is the definition of what that
-  /// rule forbids.
+  /// There is deliberately no path here from resuming or from an agent
+  /// arriving. The only automatic path is [holdOnConnect], and it exists
+  /// solely to honour a preference the user set on a profile — which is
+  /// the user-initiated action Play's rules are about. Nothing else may
+  /// start a service.
   Future<void> hold(HoldableSession session) async {
     if (_disposed) return;
 
@@ -130,6 +178,13 @@ class SessionHoldController {
       _log.w('Not holding ${session.sessionName}: it is not connected');
       return;
     }
+
+    // Asking for a hold by hand is the exact opposite of the gesture that
+    // recorded a refusal, so it clears one. Without this, a user who
+    // turned the hold off and then changed their mind would keep the
+    // hold they just re-took, but lose it silently on the next connect —
+    // the preference they set would look broken for that session forever.
+    _declined.remove(session.status);
 
     // Identity of the status listenable, NOT equality of the name.
     //
@@ -181,12 +236,43 @@ class SessionHoldController {
     _log.i('Holding ${session.sessionName} on ${session.hostName}');
   }
 
-  /// Drops the hold and stops the service.
-  Future<void> release() async {
-    _detach();
-    await _host.stop();
-    _setState(const SessionHoldState.released());
+  /// Takes a hold because [session]'s profile asked for one on connect.
+  ///
+  /// Call ONLY after a connect has actually succeeded. Everything [hold]
+  /// refuses, this refuses too — a session that is not connected, a
+  /// platform that says no — and it adds one rule of its own: a session
+  /// the user has turned off by hand is left alone. See [_declined] for
+  /// why that refusal is keyed on the session and how long it lasts.
+  ///
+  /// ### Why this is a start and never a restart
+  ///
+  /// Nothing here reacts to a session's status changing, or to the app
+  /// resuming, or to a timer. It runs once, on the connect that just
+  /// completed, and then has no further opinion. That is what keeps
+  /// [kSessionHoldIdleTimeout] meaningful: a hold that re-armed itself
+  /// after the bound expired would have deleted the bound while appearing
+  /// to still have one.
+  Future<void> holdOnConnect(HoldableSession session) async {
+    if (_disposed) return;
+
+    if (_declined.contains(session.status)) {
+      _log.i(
+        'Not holding ${session.sessionName}: the user turned this '
+        'session\'s hold off by hand',
+      );
+      return;
+    }
+
+    await hold(session);
   }
+
+  /// Drops the hold and stops the service at the user's request.
+  ///
+  /// This is the toolbar pin and the notification's STOP action — two
+  /// surfaces for one gesture, so both record the same refusal. A control
+  /// the user can reach from outside the app must not mean less than one
+  /// they can only reach inside it.
+  Future<void> release() => _release(declineFurtherAutoHolds: true);
 
   /// Reconciles this object's belief with the platform's reality.
   ///
@@ -219,6 +305,8 @@ class SessionHoldController {
     _disposed = true;
     await _stopRequests.cancel();
     _detach();
+    // Every entry names a session that is going away with this object.
+    _declined.clear();
     // The process is going away and the service would outlive it as a
     // notification for a session nothing is attached to any more.
     await _host.stop();
@@ -265,7 +353,30 @@ class SessionHoldController {
       'No one returned to helm in $_idleTimeout; releasing '
       'the hold on ${_held?.sessionName}',
     );
-    unawaited(release());
+    // Records NO refusal: nobody declined anything here. helm gave up on
+    // its own because the user was absent, and treating that as a decision
+    // they took would silently disable their profile preference for a
+    // session they never touched.
+    unawaited(_release(declineFurtherAutoHolds: false));
+  }
+
+  /// The one teardown both public stop paths go through.
+  ///
+  /// [declineFurtherAutoHolds] separates "the user said stop" from "helm
+  /// stopped by itself". Only the first may suppress a later automatic
+  /// hold; see [_declined].
+  Future<void> _release({required bool declineFurtherAutoHolds}) async {
+    // Captured BEFORE `_detach` clears it — the refusal has to name the
+    // session that was actually being held.
+    final released = _held;
+
+    _detach();
+    await _host.stop();
+    _setState(const SessionHoldState.released());
+
+    if (declineFurtherAutoHolds && released != null) {
+      _declined.add(released.status);
+    }
   }
 
   /// Stops watching and stops counting. Does NOT touch the service, so it
