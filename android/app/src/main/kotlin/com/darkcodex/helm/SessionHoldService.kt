@@ -142,6 +142,26 @@ class SessionHoldService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+
+        // Dismiss here, not only where a stop was REQUESTED.
+        //
+        // `Launcher.stop` uses `stopService`, which destroys the service
+        // without routing through [stopSelfAndDismiss], and the framework
+        // did not reclaim the notification on its own: measured on a
+        // physical S22 Ultra, the toggle stopped the service while
+        // `dumpsys notification` still listed the id-42 record on the
+        // `helm_session_hold` channel. The user was left reading "Holding
+        // default" about a hold that had ended.
+        //
+        // Attaching the dismissal to destruction rather than to one caller
+        // makes it unconditional: every path that ends this service --
+        // the notification's own STOP action, the AppBar toggle, a swipe
+        // from Recents, and any future one -- removes the notification,
+        // because they all end here. The overlap with [stopSelfAndDismiss]
+        // is deliberate and harmless; stopping a foreground that is
+        // already stopped is a no-op.
+        dismissNotification()
+
         Log.i(TAG, "SessionHoldService destroyed")
         super.onDestroy()
     }
@@ -185,13 +205,42 @@ class SessionHoldService : Service() {
     }
 
     private fun stopSelfAndDismiss() {
+        dismissNotification()
+        stopSelf()
+    }
+
+    /**
+     * Takes the notification down, on every API level this app supports.
+     *
+     * Extracted so [onDestroy] and [stopSelfAndDismiss] cannot drift: the
+     * bug this fixes was exactly one teardown path knowing how to dismiss
+     * and another not.
+     */
+    private fun dismissNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
-        stopSelf()
+
+        // Cancel by id as well, and not as belt-and-braces superstition.
+        //
+        // `stopForeground` only detaches a notification from a service the
+        // framework still considers foregrounded. Reached from [onDestroy]
+        // -- which is the path `Launcher.stop`'s `stopService` takes -- that
+        // is no longer true, so the call silently does nothing and the
+        // notification `startForeground` posted outlives the service that
+        // owned it. Measured on a physical S22 Ultra: after the toggle
+        // stopped the service, `dumpsys activity services` showed no record
+        // while `dumpsys notification` still listed id 42, leaving the user
+        // reading "Holding default" about a hold that had ended.
+        //
+        // `cancel` removes the notification outright, whatever the service's
+        // state, which is the only property this teardown can rely on.
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE)
+            as? NotificationManager
+        manager?.cancel(NOTIFICATION_ID)
     }
 
     private fun createChannel() {
