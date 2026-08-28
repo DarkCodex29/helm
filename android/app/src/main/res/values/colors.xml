@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Colours that have to exist as Android resources rather than in Dart.
+
+    The notification tints are here because the Firebase SDK draws the
+    backgrounded and killed cases from its own service, with no Dart
+    running, and reads its colour from a resource the manifest names. Dart
+    cannot reach that path, so the values are duplicated — and
+    `test/features/notifications/data/local_notification_presenter_test.dart`
+    parses this file and fails if a copy drifts from the Dart constant.
+
+    `ic_launcher_background` is here because an adaptive icon's background
+    layer is a drawable reference, and no Dart is running when a launcher
+    draws it either.
+-->
+<resources>
+    <!--
+        "A human is needed here."
+
+        The same amber `AgentStateStyle` spends on `blocked` in
+        `agent_state_chip.dart`, which is where the decision was argued:
+        it is the one colour on this app's surfaces reserved for an agent
+        waiting on a person, deliberately not the green/red already spent
+        on connection state. A notification IS that statement leaving the
+        app, so it must not arrive in a different colour.
+    -->
+    <color name="helm_notification_accent">#FFD29922</color>
+
+    <!--
+        "Something is running."
+
+        The blue `AgentStateStyle` spends on `working`, used by the session
+        hold. Deliberately NOT the amber above: a hold is a passive status
+        line on an IMPORTANCE_LOW channel that will sit there for hours,
+        and tinting it with the colour reserved for urgency would spend
+        that meaning on the one notification that never needs a response.
+    -->
+    <color name="helm_hold_accent">#FF58A6FF</color>
+
+    <!--
+        The adaptive launcher icon's background layer.
+
+        WRITTEN BY `dart run flutter_launcher_icons`, from
+        `adaptive_icon_background` in pubspec.yaml — it rewrites this entry
+        in place, and appends it if it is missing. Edit it there, not here.
+
+        The value is the near-black every surface in this app already sits
+        on, so the icon and the app it opens are the same object.
+    -->
+    <color name="ic_launcher_background">#0D1117</color>
+</resources>

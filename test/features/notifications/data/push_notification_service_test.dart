@@ -379,6 +379,229 @@ void main() {
     });
   });
 
+  group('one notification per agent, not one for all', () {
+    PushMessage forPane(String paneId, {String session = 'helm-a1b2c3d4'}) =>
+        PushMessage(
+          data: {'session': session, 'pane_id': paneId},
+          title: 'opencode needs you',
+          body: 'OC | something',
+        );
+
+    test('two agents produce two notifications, not one that erased the other',
+        () async {
+      // The bug: a single constant notification id meant the second agent
+      // to speak silently replaced the first. Two agents blocked at once
+      // is the exact situation this feature exists to report, and it was
+      // the one situation it could not report.
+      await service.start();
+
+      gateway.emitForeground(forPane('%7'));
+      gateway.emitForeground(forPane('%9'));
+      await pumpEventQueue();
+
+      expect(presenter.shown, hasLength(2));
+      expect(
+        presenter.shown.map((n) => n.groupingKey).toSet(),
+        hasLength(2),
+        reason: 'two panes must not share a slot',
+      );
+    });
+
+    test('the same agent speaking twice reuses its slot, so it replaces',
+        () async {
+      // The original behaviour was right about ONE thing: a phone away
+      // from a laptop for an hour should show the current situation, not
+      // forty stale rows. That is preserved per agent rather than across
+      // all of them.
+      await service.start();
+
+      gateway.emitForeground(forPane('%7'));
+      gateway.emitForeground(forPane('%7'));
+      await pumpEventQueue();
+
+      expect(presenter.shown, hasLength(2), reason: 'both were drawn');
+      expect(
+        presenter.shown.first.groupingKey,
+        presenter.shown.last.groupingKey,
+        reason: 'onto the same slot, so the tray shows one row',
+      );
+    });
+
+    test('falls back to the session when the sender named no pane', () async {
+      // pane_id is optional in the wire contract. A session name is not,
+      // so there is always something better than a shared constant.
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 'alpha'},
+          title: 'opencode is done',
+          body: '',
+        ),
+      );
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 'beta'},
+          title: 'opencode is done',
+          body: '',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(
+        presenter.shown.map((n) => n.groupingKey).toSet(),
+        hasLength(2),
+      );
+    });
+
+    test('two panes in different sessions never share a slot either', () async {
+      // Pane ids are only unique WITHIN a multiplexer server. Two Macs, or
+      // two servers on one Mac, can both call a pane "%7".
+      await service.start();
+
+      gateway.emitForeground(forPane('%7', session: 'alpha'));
+      gateway.emitForeground(forPane('%7', session: 'beta'));
+      await pumpEventQueue();
+
+      expect(
+        presenter.shown.map((n) => n.groupingKey).toSet(),
+        hasLength(2),
+      );
+    });
+
+    test('a notification naming no session at all still draws', () async {
+      // Degrades to the shared slot rather than to nothing: the user
+      // should still be told, they just cannot be routed anywhere.
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(data: {}, title: 'Something happened', body: ''),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown, hasLength(1));
+      expect(presenter.shown.single.groupingKey, isNull);
+    });
+  });
+
+  group('the header line says where, so the title can say what', () {
+    test('puts the workspace in subText when the sender named one', () async {
+      // The sender drops the workspace from the title for length — a
+      // measured decision, after "Helm - Go Nexa - opencode is done"
+      // truncated on a physical device. subText is the room it moved to.
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 's', 'place': 'Go Nexa', 'area': 'Helm'},
+          title: 'Go Nexa - opencode is done',
+          body: 'OC | building',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.subText, 'Helm');
+    });
+
+    test('omits subText when the area is blank', () async {
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 's', 'area': ''},
+          title: 'opencode is done',
+          body: 'OC | building',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(
+        presenter.shown.single.subText,
+        isNull,
+        reason: 'an empty header draws a separator with nothing after it',
+      );
+    });
+
+    test('omits subText when the sender sent no area key at all', () async {
+      await service.start();
+
+      gateway.emitForeground(alertMessage());
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.subText, isNull);
+    });
+
+    test('omits subText for a message that names no session', () async {
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(data: {}, title: 'Something', body: ''),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.subText, isNull);
+    });
+  });
+
+  group('the body falls back to what the agent is doing', () {
+    test('uses doing when FCM carried a title but no body', () async {
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 's', 'doing': 'OC | Sincronizar archivos'},
+          title: 'opencode needs you',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.body, 'OC | Sincronizar archivos');
+    });
+
+    test('prefers the body FCM actually sent over doing', () async {
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 's', 'doing': 'stale'},
+          title: 'opencode needs you',
+          body: 'what the sender chose',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.body, 'what the sender chose');
+    });
+
+    test('renders an empty body rather than the word null', () async {
+      // The failure mode this guards is cosmetic and unmistakable: a
+      // notification whose second line reads "null".
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(data: {'session': 's'}, title: 'opencode is done'),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.body, isEmpty);
+      expect(presenter.shown.single.title, isNot(contains('null')));
+    });
+
+    test('a blank doing does not become the body', () async {
+      await service.start();
+
+      gateway.emitForeground(
+        const PushMessage(
+          data: {'session': 's', 'doing': '   '},
+          title: 'opencode is done',
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(presenter.shown.single.body, isEmpty);
+    });
+  });
+
   group('a warm tap opens the session it named', () {
     test('opens the session from an FCM tap', () async {
       await service.start();

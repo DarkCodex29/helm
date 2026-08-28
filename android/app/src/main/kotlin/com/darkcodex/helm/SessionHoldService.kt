@@ -107,6 +107,30 @@ class SessionHoldService : Service() {
         var stopListener: StopListener? = null
     }
 
+    /**
+     * The session the running notification names, so a re-start for the
+     * SAME session does not restart the clock below.
+     */
+    private var heldSessionName: String? = null
+
+    /**
+     * When the CURRENT hold began, for the notification's chronometer.
+     *
+     * Reset when the session name changes rather than in [onCreate], and
+     * the difference is visible to the user. `SessionHoldController.hold`
+     * replaces a hold by calling `start` again on the service that is
+     * already running, so [onCreate] does not fire for the new session —
+     * a start time captured there would tell someone who just held
+     * `shalom` that it had been held for two hours, because `helm` had.
+     *
+     * A re-hold of the same session cannot reach here at all: the
+     * controller returns early on it, for this exact reason ("reset a
+     * timer the user did nothing to earn"). The check is kept anyway,
+     * because this class must not depend on a caller's guard to tell the
+     * truth.
+     */
+    private var holdStartedAtMillis: Long = 0L
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -184,6 +208,14 @@ class SessionHoldService : Service() {
 
     private fun startInForeground(sessionName: String, hostName: String?) {
         createChannel()
+
+        // Only a DIFFERENT session restarts the clock. See
+        // [holdStartedAtMillis].
+        if (sessionName != heldSessionName) {
+            heldSessionName = sessionName
+            holdStartedAtMillis = System.currentTimeMillis()
+        }
+
         val notification = buildNotification(sessionName, hostName)
 
         // The three-argument overload — which is what actually declares
@@ -301,12 +333,39 @@ class SessionHoldService : Service() {
         return builder
             .setContentTitle("Holding $sessionName")
             .setContentText("Connected$where. Helm stays attached in the background.")
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            // helm's own prompt glyph, not the framework's
+            // `stat_sys_download_done`. That one is a completion tick: it
+            // says a transfer FINISHED, about a notification whose entire
+            // claim is that something is still going.
+            .setSmallIcon(R.drawable.ic_stat_helm)
+            // The blue reserved for "something is running", NOT the amber
+            // the agent alerts use. Amber means a human is needed, and
+            // this is the one notification that never needs a response —
+            // spending the urgent colour on it would devalue it on the
+            // notifications that do.
+            .setColor(getColor(R.color.helm_hold_accent))
             .setContentIntent(contentIntent)
             // Not dismissible by swipe: a foreground service must keep its
             // notification, and STOP is the way out.
             .setOngoing(true)
-            .setShowWhen(false)
+            // A running stopwatch rather than a timestamp, and rather than
+            // nothing at all.
+            //
+            // "Holding shalom" answers what, never how long — and how long
+            // is the question someone actually has when they find this in
+            // the tray, because the cost of a hold is a connection kept
+            // open and a process kept alive. A wall-clock start time makes
+            // the reader do the subtraction; a chronometer has already
+            // done it.
+            //
+            // All three calls are needed together: `usesChronometer` says
+            // to render `when` as elapsed time, `when` supplies the origin
+            // it counts from, and `showWhen` must flip from the false it
+            // used to be or the field is not drawn at all. Android renders
+            // it, so it keeps counting with no work and no wakeups here.
+            .setShowWhen(true)
+            .setWhen(holdStartedAtMillis)
+            .setUsesChronometer(true)
             .addAction(
                 Notification.Action.Builder(
                     null,

@@ -115,6 +115,31 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="helm_agent_alerts" />
+        <!-- The icon and tint for notifications the Firebase SDK draws
+             ITSELF — the ones that arrive while helm is backgrounded or
+             killed, which is most of them.
+
+             This is the half of the wiring that has no Dart in it. When
+             helm is in the foreground it draws its own notification and
+             passes both values through
+             `AndroidNotificationDetails`; when it is not, no isolate
+             exists and the SDK reads these instead. Setting one and not
+             the other gives one feature two appearances, decided by where
+             the phone happened to be when the message landed.
+
+             Without `default_notification_icon` the SDK falls back to the
+             application icon — and Android keeps only the ALPHA channel of
+             a small icon, so a full-bleed launcher icon silhouettes into a
+             plain white square. That was the observed symptom.
+
+             `android:resource`, not `android:value`: both of these are
+             resource references, and the SDK resolves them as ids. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_helm" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/helm_notification_accent" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

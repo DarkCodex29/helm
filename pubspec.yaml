@@ -99,5 +99,42 @@ dev_dependencies:
   build_runner: ^2.4.13
   riverpod_generator: ^2.6.3
 
+  # Writes android/app/src/main/res/mipmap-*/ from the art in assets/icon/.
+  #
+  # A GENERATOR, not a runtime dependency: it is run by hand, its output is
+  # committed, and nothing in the build invokes it. Pinned exactly rather
+  # than with a caret for the same reason as saf_stream above — it has not
+  # published in over a year, so a caret buys no upgrades and only widens
+  # what could resolve differently on someone else's machine.
+  #
+  #   dart run flutter_launcher_icons
+  #
+  # Re-run it only after changing assets/icon/, which
+  # `tool/generate_launcher_icon.py` draws.
+  flutter_launcher_icons: 0.14.4
+
+# Configuration for the generator above. Read by `dart run
+# flutter_launcher_icons` and by nothing else — deleting this block breaks
+# no build, it only means the icons cannot be regenerated from source.
+#
+# assets/icon/ is deliberately NOT listed under `flutter:` `assets:`: these
+# are build-time source art, and shipping them inside the APK would pay for
+# three 1024px PNGs the app never opens.
+flutter_launcher_icons:
+  android: true
+  # No Runner.xcodeproj in this repo — helm is Android-only today, and
+  # asking for iOS output makes the generator fail rather than skip.
+  ios: false
+  image_path: "assets/icon/helm_icon.png"
+  # A flat colour rather than a background image: the layer is parallaxed
+  # and zoomed by the launcher, and a colour cannot show a seam when it is.
+  adaptive_icon_background: "#0D1117"
+  adaptive_icon_foreground: "assets/icon/helm_icon_foreground.png"
+  # Android 13+ themed icons. The system keeps only this layer's ALPHA and
+  # re-tints it from the wallpaper, exactly as it does a notification small
+  # icon — so the art is the same glyph drawn flat white.
+  adaptive_icon_monochrome: "assets/icon/helm_icon_monochrome.png"
+  min_sdk_android: 24
+
 flutter:
   uses-material-design: true

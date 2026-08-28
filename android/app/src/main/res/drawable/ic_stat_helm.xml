@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    helm's notification small icon: a terminal prompt, `>_`.
+
+    ## Why it is white on transparent, with nothing inside it
+
+    Since Android 5 the system throws away every colour channel of a small
+    icon and keeps only ALPHA, then refills the shape with a tint of its
+    own choosing (the manifest's `default_notification_color` for the
+    Firebase path, `AndroidNotificationDetails.color` for helm's own).
+    Anything opaque becomes one flat colour.
+
+    That is why the launcher icon this replaced rendered as a plain white
+    square: every pixel of a photographic icon is opaque, so its silhouette
+    is its own bounding box. Detail here is therefore drawn as GAPS — the
+    space between the chevron and the underscore is transparent, not dark.
+    A "hollow" shape drawn with a dark fill would silhouette solid.
+
+    ## Why this shape
+
+    `>_` is the one glyph that reads as "terminal" at 24dp, and it survives
+    the size: two strokes, no enclosed counters, no fine detail to lose. A
+    ship's wheel matches the app's NAME better and was rejected on exactly
+    that measurement — six spokes and a hub become mush in a 24dp status
+    bar, and the gaps that make it legible are the first thing to close up.
+
+    ## The geometry
+
+    Laid out on the 24dp canvas so the glyph's inked extent — endpoints
+    plus the 1.5 the round caps add at each end — is symmetric: 3.1 of
+    clearance on the left and right, 3.7 top and bottom. Stroke 3 is 12.5%
+    of the canvas, which is heavy for an in-app icon and correct for a
+    status bar, where the icon may be drawn at 18dp or less.
+
+    Vector rather than PNG deliberately. The usual warning against vector
+    notification icons is about VectorDrawableCompat, which the system UI
+    process cannot inflate on pre-21 devices; this is a framework
+    VectorDrawable and minSdk is 24, so that case cannot arise.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- The prompt chevron. -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M4.6,5.2 L11.3,12 L4.6,18.8"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3" />
+
+    <!-- The cursor, sitting on the chevron's baseline. -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M13.4,18.8 L19.4,18.8"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3" />
+</vector>

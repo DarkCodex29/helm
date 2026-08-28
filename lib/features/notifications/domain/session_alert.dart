@@ -21,7 +21,20 @@ const String kSessionRoutePrefix = '/session';
 /// pane_id  optional  the pane the agent occupies,  e.g. "%7"
 /// agent    optional  the agent's name,             e.g. "claude"
 /// state    optional  "blocked" | "idle"
+/// place    optional  the tab, or the cwd basename, e.g. "Go Nexa"
+/// area     optional  the workspace,                e.g. "Helm"
+/// doing    optional  the agent's terminal title,   e.g. "OC | sync files"
 /// ```
+///
+/// ### Why blank and absent are the same thing here
+///
+/// FCM's `data` is `map<string,string>` on the wire. The sender has no way
+/// to express "I could not work out the workspace" other than by sending
+/// an empty string, so an empty string HAS to be read as absent — the
+/// alternative is a notification header that renders as a bare separator
+/// with nothing after it. [fromData] therefore trims every value and
+/// treats what is left of a blank one as null, uniformly, including for
+/// the three keys that predate this rule.
 ///
 /// ### Why `session` is the only required key, and the only routing key
 ///
@@ -53,6 +66,9 @@ class SessionAlert {
     this.paneId,
     this.agent,
     this.state,
+    this.place,
+    this.area,
+    this.doing,
   });
 
   /// The herdr/tmux session name. The routing key, and never empty.
@@ -71,6 +87,55 @@ class SessionAlert {
   /// showing whatever the state is called.
   final String? state;
 
+  /// Where the agent is working — the tab's label, or the basename of its
+  /// working directory when the tab was never named.
+  ///
+  /// The sender already spends the notification TITLE on this, so helm
+  /// does not draw it a second time. It is carried because the title is a
+  /// pre-rendered string this app cannot take apart, and anything that
+  /// wants to lay the same facts out differently needs them separately.
+  final String? place;
+
+  /// The workspace the [place] belongs to.
+  ///
+  /// Deliberately NOT in the title. The sender measured
+  /// `Helm · Go Nexa · opencode is done` at 33 characters and watched it
+  /// truncate on a physical S22 Ultra, against a budget of roughly 30, so
+  /// it dropped this one. helm draws it in the notification's header line
+  /// instead — see `subText` in [LocalNotificationPresenter.show] — which
+  /// is space the title was never competing for.
+  ///
+  /// The pair reads `place · area`, which is the same order and the same
+  /// separator `agentContextLabel` already uses in the drawer. One
+  /// vocabulary, two surfaces.
+  final String? area;
+
+  /// What the agent is doing, as its own terminal title.
+  ///
+  /// The sender puts this in the notification BODY, so it normally
+  /// arrives twice. It is read here only as a fallback for a message that
+  /// carried a title and no body.
+  final String? doing;
+
+  /// What this alert is ABOUT, for deciding which tray slot it owns.
+  ///
+  /// Two agents must not share a slot — that was the original bug, where
+  /// one constant id made the second agent to speak erase the first. The
+  /// pane is the finest thing the sender knows, and the session name is
+  /// the coarsest thing it always knows, so the key degrades from one to
+  /// the other rather than to a shared constant.
+  ///
+  /// The session is part of the key even when a pane is known, because a
+  /// pane id is only unique WITHIN one multiplexer server. Two Macs, or
+  /// two servers on one Mac, both call their first pane `%0`.
+  ///
+  /// The separator is NUL rather than a readable character on purpose:
+  /// tmux permits `/`, `·` and every printable byte in a session name, so
+  /// any of those would let one session's name forge another session's
+  /// key. NUL cannot appear in either half.
+  String get notificationGroupingKey =>
+      paneId == null ? sessionName : '$sessionName\u0000$paneId';
+
   /// Reads an FCM `data` map, or null when it does not identify a session.
   ///
   /// Never throws, and that is a requirement rather than politeness: one
@@ -78,14 +143,17 @@ class SessionAlert {
   /// and no user to inform. A payload this app cannot understand degrades
   /// to "no deep link", never to a crash.
   static SessionAlert? fromData(Map<String, dynamic> data) {
-    final session = _stringOrNull(data['session'])?.trim();
-    if (session == null || session.isEmpty) return null;
+    final session = _presentString(data['session']);
+    if (session == null) return null;
 
     return SessionAlert(
       sessionName: session,
-      paneId: _stringOrNull(data['pane_id']),
-      agent: _stringOrNull(data['agent']),
-      state: _stringOrNull(data['state']),
+      paneId: _presentString(data['pane_id']),
+      agent: _presentString(data['agent']),
+      state: _presentString(data['state']),
+      place: _presentString(data['place']),
+      area: _presentString(data['area']),
+      doing: _presentString(data['doing']),
     );
   }
 
@@ -108,11 +176,23 @@ class SessionAlert {
   }
 
   /// This alert as the string `flutter_local_notifications` can carry.
+  ///
+  /// Carries the display context as well as the routing key, even though
+  /// only the routing key is read on a tap. A round-trip that silently
+  /// dropped fields would be a trap for whoever next reaches for one, and
+  /// the cost is a few dozen bytes in a string nobody but this app reads.
+  ///
+  /// Absent values are OMITTED rather than written as null, so the
+  /// payload never carries the four characters that would show up in a
+  /// log looking like a bug.
   String toPayload() => jsonEncode({
     'session': sessionName,
     if (paneId != null) 'pane_id': paneId,
     if (agent != null) 'agent': agent,
     if (state != null) 'state': state,
+    if (place != null) 'place': place,
+    if (area != null) 'area': area,
+    if (doing != null) 'doing': doing,
   });
 
   /// The go_router location that opens this session.
@@ -124,6 +204,15 @@ class SessionAlert {
   String get routeLocation =>
       '$kSessionRoutePrefix/${Uri.encodeComponent(sessionName)}';
 
-  static String? _stringOrNull(Object? value) =>
-      value is String ? value : null;
+  /// [value] as a trimmed string, or null when it is not usably present.
+  ///
+  /// Collapses THREE ways of not knowing into one: the key was absent,
+  /// the value was not a string (a background isolate can be handed a
+  /// decoded map from anywhere), or the sender sent whitespace because
+  /// FCM's string-only data map gave it no way to send nothing.
+  static String? _presentString(Object? value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
 }

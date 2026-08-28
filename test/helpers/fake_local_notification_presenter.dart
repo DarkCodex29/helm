@@ -6,11 +6,20 @@ class ShownNotification {
     required this.title,
     required this.body,
     required this.payload,
+    this.groupingKey,
+    this.subText,
   });
 
   final String title;
   final String body;
   final String payload;
+
+  /// What the notification is about, which decides whether it replaces an
+  /// earlier one or sits beside it.
+  final String? groupingKey;
+
+  /// The header line, or null when there was nothing to put there.
+  final String? subText;
 }
 
 /// Recording [LocalNotificationPresenter] stand-in for unit tests.
@@ -53,7 +62,17 @@ class FakeLocalNotificationPresenter implements LocalNotificationPresenter {
     required String title,
     required String body,
     required String payload,
+    String? groupingKey,
+    String? subText,
   }) async {
-    shown.add(ShownNotification(title: title, body: body, payload: payload));
+    shown.add(
+      ShownNotification(
+        title: title,
+        body: body,
+        payload: payload,
+        groupingKey: groupingKey,
+        subText: subText,
+      ),
+    );
   }
 }

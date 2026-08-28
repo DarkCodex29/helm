@@ -64,6 +64,68 @@ void main() {
     });
   });
 
+  group('SessionAlert.fromData — the display context the notifier sends', () {
+    test('reads place, area and doing alongside the routing key', () {
+      final alert = SessionAlert.fromData(const {
+        'session': 'helm-a1b2c3d4',
+        'place': 'Go Nexa',
+        'area': 'Helm',
+        'doing': 'OC | Sincronizar archivos Mac a movil',
+      });
+
+      expect(alert, isNotNull);
+      expect(alert!.place, 'Go Nexa');
+      expect(alert.area, 'Helm');
+      expect(alert.doing, 'OC | Sincronizar archivos Mac a movil');
+    });
+
+    test('treats a blank context value as absent, because FCM cannot say so',
+        () {
+      // FCM's data map is map<string,string> on the wire. The sender has
+      // no way to express "I do not know the workspace" other than by
+      // sending an empty string, so an empty string has to mean it — the
+      // alternative is a header line that renders as a bare separator.
+      final alert = SessionAlert.fromData(const {
+        'session': 'work',
+        'place': '',
+        'area': '   ',
+        'doing': '',
+        'pane_id': '',
+        'agent': '  ',
+      });
+
+      expect(alert, isNotNull);
+      expect(alert!.place, isNull);
+      expect(alert.area, isNull);
+      expect(alert.doing, isNull);
+      expect(alert.paneId, isNull, reason: 'same wire contract, same rule');
+      expect(alert.agent, isNull);
+    });
+
+    test('a payload carrying no context at all still yields an alert', () {
+      final alert = SessionAlert.fromData(const {'session': 'work'});
+
+      expect(alert, isNotNull);
+      expect(alert!.place, isNull);
+      expect(alert.area, isNull);
+      expect(alert.doing, isNull);
+    });
+
+    test('ignores a non-string context value instead of failing on it', () {
+      final alert = SessionAlert.fromData(const {
+        'session': 'work',
+        'place': 7,
+        'area': ['nope'],
+        'doing': null,
+      });
+
+      expect(alert, isNotNull);
+      expect(alert!.place, isNull);
+      expect(alert.area, isNull);
+      expect(alert.doing, isNull);
+    });
+  });
+
   group('SessionAlert payload round-trip', () {
     // flutter_local_notifications carries a single `String? payload`, while
     // FCM carries a map. JSON is the bridge between the two.
@@ -82,6 +144,36 @@ void main() {
       expect(restored.paneId, original.paneId);
       expect(restored.agent, original.agent);
       expect(restored.state, original.state);
+    });
+
+    test('carries the display context through the round-trip as well', () {
+      // A tap needs only the session name, so context is not required for
+      // routing. It travels anyway: a round-trip that silently drops
+      // fields is a trap for whoever next reaches for one of them.
+      const original = SessionAlert(
+        sessionName: 'helm-a1b2c3d4',
+        place: 'Go Nexa',
+        area: 'Helm',
+        doing: 'OC | Sincronizar archivos',
+      );
+
+      final restored = SessionAlert.fromPayload(original.toPayload());
+
+      expect(restored!.place, 'Go Nexa');
+      expect(restored.area, 'Helm');
+      expect(restored.doing, 'OC | Sincronizar archivos');
+    });
+
+    test('omits absent context rather than writing nulls into the payload',
+        () {
+      const original = SessionAlert(sessionName: 'work');
+
+      final payload = original.toPayload();
+
+      expect(payload, isNot(contains('place')));
+      expect(payload, isNot(contains('area')));
+      expect(payload, isNot(contains('doing')));
+      expect(payload, isNot(contains('null')));
     });
 
     test('degrades to null for a payload that is not JSON', () {

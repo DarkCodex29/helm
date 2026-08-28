@@ -232,8 +232,16 @@ class PushNotificationService {
   /// an app that changed tabs because a background agent moved would be
   /// taking the phone over rather than reporting to it.
   void _onForegroundMessage(PushMessage message) {
+    final alert = message.alert;
     final title = message.title;
-    final body = message.body;
+
+    // `doing` is the agent's own terminal title, which the sender ALSO
+    // puts in the notification body — so this fallback normally does
+    // nothing. It earns its place on the message the sender could not
+    // fill in, where the alternative is a notification with a headline
+    // and a blank second line.
+    final body = message.body ?? alert?.doing;
+
     if (title == null && body == null) {
       // A data-only message. There is nothing to say, so saying nothing is
       // the correct rendering of it.
@@ -243,10 +251,22 @@ class PushNotificationService {
     unawaited(
       _presenter.show(
         title: title ?? 'Helm',
+        // '' rather than 'null': the failure this guards against is
+        // cosmetic, unmistakable, and reported by users as a bug.
         body: body ?? '',
         // Empty when the message named no session: a tap then resolves to
         // null and degrades to the ordinary home route.
-        payload: message.alert?.toPayload() ?? '',
+        payload: alert?.toPayload() ?? '',
+        // Null for a message that named no session, which puts every such
+        // notification in one shared slot. That is the honest rendering:
+        // helm has nothing to tell them apart by.
+        groupingKey: alert?.notificationGroupingKey,
+        // The header line, and only the WORKSPACE goes in it. The sender
+        // already spends the title on the place — repeating it here would
+        // print `Go Nexa` twice in a notification two lines tall. Null
+        // whenever the sender did not know, which `SessionAlert.fromData`
+        // has already collapsed a blank into.
+        subText: alert?.area,
       ),
     );
   }
