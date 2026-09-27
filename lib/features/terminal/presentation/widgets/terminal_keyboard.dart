@@ -1,15 +1,55 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:xterm/xterm.dart';
 
-const _bgColor = Color(0xFF161B22);
-const _keyColor = Color(0xFF21262D);
-const _keyActiveColor = Color(0xFF58A6FF);
-const _keyTextColor = Color(0xFFE6EDF3);
-const _keyActiveTextColor = Color(0xFF0D1117);
-const _borderColor = Color(0xFF30363D);
-const _topBarBorderColor = Color(0xFF30363D);
+const _bgColor = AppTheme.surface;
+const _keyColor = AppTheme.surfaceVariant;
+const _keyActiveColor = AppTheme.primary;
+const _keyTextColor = AppTheme.onBackground;
+const _keyActiveTextColor = AppTheme.background;
+const _borderColor = AppTheme.divider;
+const _topBarBorderColor = AppTheme.divider;
+
+/// Fill and glyph for a key that does something OTHER than emit a
+/// character — backspace, enter, shift, the layer switch, space.
+///
+/// Recessed rather than raised: the letters are what the user aims at, so
+/// the frame around them should read as chrome. Every system keyboard
+/// makes this distinction; it is what lets a thumb find Enter without
+/// reading the glyph.
+///
+/// THE FILL ALONE CANNOT CARRY IT. This palette has exactly two surface
+/// steps and they sit 1.14:1 apart — measured on a device screenshot,
+/// after a first attempt that changed only the fill and produced a
+/// difference invisible at arm's length. The glyph is where the range
+/// is, so the tone dims the LABEL too and the two weak signals point the
+/// same way.
+const _actionKeyColor = AppTheme.surface;
+const _actionKeyTextColor = AppTheme.onSurfaceMuted;
+
+/// How long a key must be held before it starts repeating, then the
+/// interval between repeats.
+///
+/// Matched to the platform's own text-editing feel rather than invented:
+/// slow enough that an ordinary tap never repeats, fast enough that
+/// holding backspace clears a long path without becoming a race.
+const _kRepeatDelay = Duration(milliseconds: 400);
+const _kRepeatInterval = Duration(milliseconds: 55);
+
+/// Vertical slop added to a key's TOUCH area without changing its painted
+/// size or the layout around it.
+///
+/// The grid caps what geometry can fix: 11 columns inside 384dp leave a
+/// painted key 31.5dp wide, so Material's 48dp minimum is unreachable
+/// without abandoning a QWERTY row. What IS reachable is refusing to waste
+/// the gaps — the 3dp between keys belongs to whichever key the thumb was
+/// closer to, not to nothing.
+const _kTouchSlop = 3.0;
 
 class TerminalKeyboard extends ConsumerWidget {
   const TerminalKeyboard({super.key, required this.terminal});
@@ -29,7 +69,13 @@ class TerminalKeyboard extends ConsumerWidget {
         const maxKeys = 11;
         final keyWidth =
             (w - horizontalPadding * 2 - keyGap * (maxKeys - 1)) / maxKeys;
-        final keyHeight = keyWidth * 1.15;
+        // Was `keyWidth * 1.15`, which tied the one axis with room to
+        // spare to the one that has none: an 11-column row fixes the
+        // width at ~31.5dp, and deriving the height from it inherited
+        // that ceiling for no reason. Height is now driven toward the
+        // 48dp touch minimum and only falls back to the ratio on a
+        // display wide enough to beat it.
+        final keyHeight = (keyWidth * 1.15).clamp(44.0, 56.0);
 
         return Container(
           color: _bgColor,
@@ -70,6 +116,31 @@ class TerminalKeyboard extends ConsumerWidget {
   }
 }
 
+/// The command strip above the letters.
+///
+/// NOTHING HERE SCROLLS, and that is the whole design. The previous
+/// version packed nineteen controls into one horizontally scrolling row,
+/// which had three costs: about seven were visible at a time, the rest
+/// were undiscoverable behind an edge that looked like the end of the
+/// row, and squeezing them shrank every key below any touch target worth
+/// the name. A shortcut you have to go looking for is slower than the
+/// thing it shortcuts.
+///
+/// What survives is only what CANNOT be typed another way. Seven keys,
+/// one row, ~52dp each — the first layout in this widget whose targets
+/// clear Material's 48dp minimum instead of apologising for missing it.
+///
+/// TWELVE KEYS WERE REMOVED, and every one of them is still reachable:
+///
+/// - `C-c`, `C-z`, `C-d`, `C-b` — CTRL is STICKY. Tapping it then the
+///   letter sends the same byte, which is what those keys did anyway.
+///   Four permanent keys to save one tap was a bad trade against the
+///   width they cost every other key in the row.
+/// - `|`, `~`, `/`, `-` — all four already live on the 123 layer.
+/// - `PgUp`, `PgDn` — the terminal view scrolls by dragging it.
+///
+/// Removing a shortcut removes no capability here; it buys back the
+/// width that made every remaining key hard to hit.
 class _TopBar extends ConsumerWidget {
   const _TopBar({
     required this.terminal,
@@ -84,7 +155,6 @@ class _TopBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
-      height: 46,
       decoration: const BoxDecoration(
         color: _bgColor,
         border: Border(
@@ -92,70 +162,51 @@ class _TopBar extends ConsumerWidget {
           bottom: BorderSide(color: _topBarBorderColor, width: 1),
         ),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        child: Row(
-          children: [
-            _StickyKey(
-              label: 'CTRL',
-              active: state.ctrlHeld,
-              onTap: notifier.toggleCtrl,
-            ),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'ESC', onTap: _sendEsc),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'TAB', onTap: _sendTab),
-            Container(
-              width: 1,
-              height: 26,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              color: _borderColor,
-            ),
-            _TopBarKey(label: '↑', onTap: _sendUp),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '↓', onTap: _sendDown),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '←', onTap: _sendLeft),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '→', onTap: _sendRight),
-            Container(
-              width: 1,
-              height: 26,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              color: _borderColor,
-            ),
-            _TopBarKey(label: 'PgUp', onTap: _sendPageUp),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'PgDn', onTap: _sendPageDown),
-            Container(
-              width: 1,
-              height: 26,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              color: _borderColor,
-            ),
-            _TopBarKey(label: 'C-c', onTap: _sendCtrlC),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'C-z', onTap: _sendCtrlZ),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'C-d', onTap: _sendCtrlD),
-            const SizedBox(width: 3),
-            _TopBarKey(label: 'C-b', onTap: _sendCtrlB),
-            Container(
-              width: 1,
-              height: 26,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              color: _borderColor,
-            ),
-            _TopBarKey(label: '|', onTap: _sendPipe),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '~', onTap: _sendTilde),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '/', onTap: _sendSlash),
-            const SizedBox(width: 3),
-            _TopBarKey(label: '-', onTap: _sendDash),
-          ],
-        ),
+      padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The modifier, the two keys every shell completion and every
+          // vim escape needs, and the arrows. Nothing else earns a
+          // permanent seat.
+          Row(
+            children: [
+              Expanded(
+                child: _StickyKey(
+                  label: 'CTRL',
+                  active: state.ctrlHeld,
+                  onTap: notifier.toggleCtrl,
+                  width: double.infinity,
+                  height: 44,
+                ),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: 'ESC', onTap: _sendEsc),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: 'TAB', onTap: _sendTab),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: '←', onTap: _sendLeft, repeats: true),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: '↑', onTap: _sendUp, repeats: true),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: '↓', onTap: _sendDown, repeats: true),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: _TopBarKey(label: '→', onTap: _sendRight, repeats: true),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -192,53 +243,6 @@ class _TopBar extends ConsumerWidget {
   void _sendRight() {
     terminal.keyInput(TerminalKey.arrowRight, ctrl: state.ctrlHeld);
     if (state.ctrlHeld) notifier.resetModifiers();
-  }
-
-  void _sendPageUp() {
-    terminal.keyInput(TerminalKey.pageUp, ctrl: state.ctrlHeld);
-    if (state.ctrlHeld) notifier.resetModifiers();
-  }
-
-  void _sendPageDown() {
-    terminal.keyInput(TerminalKey.pageDown, ctrl: state.ctrlHeld);
-    if (state.ctrlHeld) notifier.resetModifiers();
-  }
-
-  void _sendCtrlC() => terminal.charInput('c'.codeUnitAt(0), ctrl: true);
-  void _sendCtrlZ() => terminal.charInput('z'.codeUnitAt(0), ctrl: true);
-  void _sendCtrlD() => terminal.charInput('d'.codeUnitAt(0), ctrl: true);
-  void _sendCtrlB() => terminal.charInput('b'.codeUnitAt(0), ctrl: true);
-
-  void _sendPipe() {
-    if (state.ctrlHeld) {
-      terminal.textInput('\x1c');
-      notifier.resetModifiers();
-    } else {
-      terminal.textInput('|');
-    }
-  }
-
-  void _sendTilde() {
-    terminal.textInput('~');
-    if (state.ctrlHeld) notifier.resetModifiers();
-  }
-
-  void _sendSlash() {
-    if (state.ctrlHeld) {
-      terminal.textInput('\x1f');
-      notifier.resetModifiers();
-    } else {
-      terminal.textInput('/');
-    }
-  }
-
-  void _sendDash() {
-    if (state.ctrlHeld) {
-      terminal.textInput('\x1f');
-      notifier.resetModifiers();
-    } else {
-      terminal.textInput('-');
-    }
   }
 }
 
@@ -295,12 +299,20 @@ class _QwertyLayer extends StatelessWidget {
     );
   }
 
-  Widget _key(String label, VoidCallback onTap, {double? width}) {
+  Widget _key(
+    String label,
+    VoidCallback onTap, {
+    double? width,
+    _KeyTone tone = _KeyTone.letter,
+    bool repeats = false,
+  }) {
     return _KeyButton(
       label: label,
       width: width ?? keyWidth,
       height: keyHeight,
       onTap: onTap,
+      tone: tone,
+      repeats: repeats,
     );
   }
 
@@ -332,7 +344,7 @@ class _QwertyLayer extends StatelessWidget {
         gap,
         _letter('p'),
         gap,
-        _key('⌫', _onBackspace),
+        _key('⌫', _onBackspace, tone: _KeyTone.action, repeats: true),
       ],
     );
 
@@ -357,7 +369,12 @@ class _QwertyLayer extends StatelessWidget {
         gap,
         _letter('l'),
         gap,
-        _key('↵', _onEnter, width: keyWidth * 1.5 + keyGap * 0.5),
+        _key(
+          '↵',
+          _onEnter,
+          width: keyWidth * 1.5 + keyGap * 0.5,
+          tone: _KeyTone.action,
+        ),
       ],
     );
 
@@ -370,6 +387,7 @@ class _QwertyLayer extends StatelessWidget {
           onTap: notifier.toggleShift,
           width: keyWidth,
           height: keyHeight,
+          tone: _KeyTone.action,
         ),
         gap,
         _letter('z'),
@@ -394,7 +412,12 @@ class _QwertyLayer extends StatelessWidget {
 
     final spaceRow = Row(
       children: [
-        _key('123', notifier.toggleNumLayer, width: keyWidth * 2 + keyGap),
+        _key(
+          '123',
+          notifier.toggleNumLayer,
+          width: keyWidth * 2 + keyGap,
+          tone: _KeyTone.action,
+        ),
         gap,
         Expanded(
           child: _KeyButton(
@@ -402,6 +425,7 @@ class _QwertyLayer extends StatelessWidget {
             width: double.infinity,
             height: keyHeight,
             onTap: _onSpace,
+            tone: _KeyTone.action,
           ),
         ),
         gap,
@@ -447,12 +471,20 @@ class _NumSymLayer extends StatelessWidget {
     terminal.keyInput(TerminalKey.enter);
   }
 
-  Widget _key(String label, VoidCallback onTap, {double? width}) {
+  Widget _key(
+    String label,
+    VoidCallback onTap, {
+    double? width,
+    _KeyTone tone = _KeyTone.letter,
+    bool repeats = false,
+  }) {
     return _KeyButton(
       label: label,
       width: width ?? keyWidth,
       height: keyHeight,
       onTap: onTap,
+      tone: tone,
+      repeats: repeats,
     );
   }
 
@@ -484,7 +516,7 @@ class _NumSymLayer extends StatelessWidget {
         gap,
         _key('0', () => _onSymbol('0')),
         gap,
-        _key('⌫', _onBackspace),
+        _key('⌫', _onBackspace, tone: _KeyTone.action, repeats: true),
       ],
     );
 
@@ -511,7 +543,7 @@ class _NumSymLayer extends StatelessWidget {
         gap,
         _key('*', () => _onSymbol('*')),
         gap,
-        _key('↵', _onEnter),
+        _key('↵', _onEnter, tone: _KeyTone.action),
       ],
     );
 
@@ -544,7 +576,12 @@ class _NumSymLayer extends StatelessWidget {
 
     final bottomRow = Row(
       children: [
-        _key('ABC', notifier.toggleNumLayer, width: keyWidth * 2 + keyGap),
+        _key(
+          'ABC',
+          notifier.toggleNumLayer,
+          width: keyWidth * 2 + keyGap,
+          tone: _KeyTone.action,
+        ),
         gap,
         _key('+', () => _onSymbol('+')),
         gap,
@@ -569,38 +606,123 @@ class _NumSymLayer extends StatelessWidget {
   }
 }
 
-class _KeyButton extends StatelessWidget {
+/// What a key is FOR, which decides how loudly it is drawn.
+///
+/// Not a colour name: naming these `dark` and `light` would tie the copy
+/// of every call site to one theme and lose the reason the distinction
+/// exists.
+enum _KeyTone {
+  /// Emits a character. The thing the user is actually aiming at.
+  letter,
+
+  /// Edits or navigates instead of typing — backspace, enter, shift,
+  /// space, the layer switch. Recessed so the letters stay foreground.
+  action,
+}
+
+class _KeyButton extends StatefulWidget {
   const _KeyButton({
     required this.label,
     required this.width,
     required this.height,
     required this.onTap,
+    this.tone = _KeyTone.letter,
+    this.repeats = false,
   });
 
   final String label;
   final double width;
   final double height;
   final VoidCallback onTap;
+  final _KeyTone tone;
+
+  /// Whether holding this key fires [onTap] repeatedly.
+  ///
+  /// Reserved for keys whose repetition is SAFE and expected — backspace
+  /// and the arrows. A repeating letter would turn a resting thumb into a
+  /// line of junk, and a repeating Enter would run a command many times,
+  /// which on a terminal is how a hold becomes a mistake nobody can undo.
+  final bool repeats;
+
+  @override
+  State<_KeyButton> createState() => _KeyButtonState();
+}
+
+class _KeyButtonState extends State<_KeyButton> {
+  bool _pressed = false;
+  Timer? _repeatDelay;
+  Timer? _repeatTicker;
+
+  @override
+  void dispose() {
+    _repeatDelay?.cancel();
+    _repeatTicker?.cancel();
+    super.dispose();
+  }
+
+  void _onDown() {
+    setState(() => _pressed = true);
+    // Fires on TOUCH DOWN, not on tap-up. A glass key has no travel to
+    // feel, so the confirmation has to arrive at the moment the finger
+    // lands — waiting for the release puts it after the user has already
+    // started doubting.
+    HapticFeedback.selectionClick();
+    widget.onTap();
+
+    if (!widget.repeats) return;
+    _repeatDelay = Timer(_kRepeatDelay, () {
+      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) {
+        widget.onTap();
+      });
+    });
+  }
+
+  void _release() {
+    _repeatDelay?.cancel();
+    _repeatTicker?.cancel();
+    _repeatDelay = null;
+    _repeatTicker = null;
+    if (mounted && _pressed) setState(() => _pressed = false);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isLetter = widget.tone == _KeyTone.letter;
+    final resting = isLetter ? _keyColor : _actionKeyColor;
+    final restingText = isLetter ? _keyTextColor : _actionKeyTextColor;
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: width == double.infinity ? null : width,
-        height: height,
-        decoration: BoxDecoration(
-          color: _keyColor,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: _borderColor),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: _keyTextColor,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
+      // `opaque` so the slop padding below is tappable rather than a
+      // transparent hole that lets the press fall through to the terminal.
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _onDown(),
+      onTapUp: (_) => _release(),
+      onTapCancel: _release,
+      child: Padding(
+        // Claims the gap on both sides without moving anything: the
+        // Row already reserves it, and negative margin keeps the painted
+        // key exactly where it was.
+        padding: const EdgeInsets.symmetric(vertical: _kTouchSlop),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 60),
+          curve: Curves.easeOut,
+          width: widget.width == double.infinity ? null : widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            color: _pressed ? _keyActiveColor : resting,
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+              color: _pressed ? _keyActiveColor : _borderColor,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: _pressed ? _keyActiveTextColor : restingText,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -615,6 +737,7 @@ class _StickyKey extends StatelessWidget {
     required this.onTap,
     this.width,
     this.height,
+    this.tone = _KeyTone.letter,
   });
 
   final String label;
@@ -623,6 +746,16 @@ class _StickyKey extends StatelessWidget {
   final double? width;
   final double? height;
 
+  /// Defaults to [_KeyTone.letter] so CTRL keeps the top bar's uniform
+  /// look: every control in that strip is a command, so dimming one
+  /// would distinguish nothing.
+  ///
+  /// Shift passes [_KeyTone.action] because it sits in the QWERTY grid,
+  /// where the distinction is real — and where leaving it at the default
+  /// made it the ONE action key still painted as a letter, which a
+  /// screenshot caught after the rest of the row had been converted.
+  final _KeyTone tone;
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -630,7 +763,10 @@ class _StickyKey extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         width: width,
-        height: height ?? 36,
+        // Matches the 44 the other top-bar keys now use; CTRL sitting a
+        // whole 8dp shorter than its neighbours was the one place the
+        // strip visibly failed to line up.
+        height: height ?? 44,
         constraints: width == null
             ? const BoxConstraints(minWidth: 44, maxWidth: 60)
             : null,
@@ -638,7 +774,9 @@ class _StickyKey extends StatelessWidget {
             ? const EdgeInsets.symmetric(horizontal: 10)
             : null,
         decoration: BoxDecoration(
-          color: active ? _keyActiveColor : _keyColor,
+          color: active
+              ? _keyActiveColor
+              : (tone == _KeyTone.letter ? _keyColor : _actionKeyColor),
           borderRadius: BorderRadius.circular(5),
           border: Border.all(
             color: active ? _keyActiveColor : _borderColor,
@@ -658,7 +796,11 @@ class _StickyKey extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: active ? _keyActiveTextColor : _keyTextColor,
+            color: active
+                ? _keyActiveTextColor
+                : (tone == _KeyTone.letter
+                      ? _keyTextColor
+                      : _actionKeyTextColor),
             fontSize: 11,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.5,
@@ -669,30 +811,81 @@ class _StickyKey extends StatelessWidget {
   }
 }
 
-class _TopBarKey extends StatelessWidget {
-  const _TopBarKey({required this.label, required this.onTap});
+class _TopBarKey extends StatefulWidget {
+  const _TopBarKey({
+    required this.label,
+    required this.onTap,
+    this.repeats = false,
+  });
 
   final String label;
   final VoidCallback onTap;
 
+  /// Held-to-repeat, for the arrows and paging only. Never for C-c, C-d
+  /// or C-z: repeating a signal is not a faster version of sending it,
+  /// it is a different and destructive act.
+  final bool repeats;
+
+  @override
+  State<_TopBarKey> createState() => _TopBarKeyState();
+}
+
+class _TopBarKeyState extends State<_TopBarKey> {
+  bool _pressed = false;
+  Timer? _repeatDelay;
+  Timer? _repeatTicker;
+
+  @override
+  void dispose() {
+    _repeatDelay?.cancel();
+    _repeatTicker?.cancel();
+    super.dispose();
+  }
+
+  void _onDown() {
+    setState(() => _pressed = true);
+    HapticFeedback.selectionClick();
+    widget.onTap();
+    if (!widget.repeats) return;
+    _repeatDelay = Timer(_kRepeatDelay, () {
+      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
+    });
+  }
+
+  void _release() {
+    _repeatDelay?.cancel();
+    _repeatTicker?.cancel();
+    _repeatDelay = null;
+    _repeatTicker = null;
+    if (mounted && _pressed) setState(() => _pressed = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 36,
-        constraints: const BoxConstraints(minWidth: 40),
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _onDown(),
+      onTapUp: (_) => _release(),
+      onTapCancel: _release,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 60),
+        curve: Curves.easeOut,
+        // 36dp was under every touch-target floor there is. These keys
+        // sit in a scrolling strip, so height is the one dimension
+        // nothing else competes for.
+        height: 44,
+        constraints: const BoxConstraints(minWidth: 44),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: _keyColor,
+          color: _pressed ? _keyActiveColor : _keyColor,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: _borderColor),
+          border: Border.all(color: _pressed ? _keyActiveColor : _borderColor),
         ),
         alignment: Alignment.center,
         child: Text(
-          label,
-          style: const TextStyle(
-            color: _keyTextColor,
+          widget.label,
+          style: TextStyle(
+            color: _pressed ? _keyActiveTextColor : _keyTextColor,
             fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
