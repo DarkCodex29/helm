@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
@@ -427,6 +429,117 @@ void main() {
     test('says the existing keys are kept', () {
       // Removes the strongest reason to refuse a legitimate key.
       expect(message.toLowerCase(), contains('not replace'));
+    });
+  });
+
+  group('SSHService.summarizeError', () {
+    // This is the copy a DISCONNECTED OVERLAY renders, not the copy the
+    // terminal takes. `describeError` writes multi-paragraph prose with
+    // CRLFs into a view the multiplexer clears on attach; an overlay has
+    // one or two lines and must survive that clear. They are separate
+    // functions because merging them would force one of the two surfaces
+    // to render text written for the other.
+    test('never spans more than one line', () {
+      final errors = <Object>[
+        SSHAuthFailError('no supported methods'),
+        SSHStateError('bad packet'),
+        const FormatException('broken'),
+        const HostKeyMismatchException(
+          host: 'example.com',
+          port: 2222,
+          keyType: 'ssh-ed25519',
+          expectedFingerprint: _realFingerprint,
+          receivedFingerprint: _otherFingerprint,
+        ),
+      ];
+
+      for (final error in errors) {
+        final summary = SSHService.summarizeError(error);
+        expect(summary, isNot(contains('\r')), reason: '$error');
+        expect(summary, isNot(contains('\n')), reason: '$error');
+        expect(summary, isNotEmpty, reason: '$error');
+      }
+    });
+
+    test('names an unreachable host as unreachable, not as a refusal', () {
+      // The failure that sent a user hunting through VPN settings: a
+      // profile pointing at an address nothing answers on. "Connection
+      // lost" says none of this, and a timeout reads like the server said
+      // no when in fact nothing ever answered.
+      final summary = SSHService.summarizeError(
+        const SocketException('Connection timed out'),
+      );
+
+      expect(summary.toLowerCase(), contains('could not reach'));
+      // A SocketException with no `address` names no host, and an earlier
+      // version filled that hole with `message` — emitting "Could not
+      // reach Connection timed out", which reads like a hostname and
+      // identifies nothing. Asserting only on "could not reach" let that
+      // through, so the shape of the sentence is pinned too.
+      expect(summary, isNot(contains('Connection timed out')));
+      expect(summary, 'Could not reach the host — nothing answered');
+    });
+
+    test('names the host it could not reach when the failure carries one', () {
+      final summary = SSHService.summarizeError(
+        SocketException(
+          'Connection timed out',
+          address: InternetAddress('100.100.133.42'),
+        ),
+      );
+
+      expect(summary, contains('100.100.133.42'));
+    });
+
+    test('distinguishes a refused connection from an unanswered one', () {
+      // Something IS listening and said no. Telling the user the host is
+      // unreachable here would send them to the network when the problem
+      // is the port or the service.
+      final summary = SSHService.summarizeError(
+        const SocketException(
+          'Connection refused',
+          osError: OSError('Connection refused', 61),
+        ),
+      );
+
+      expect(summary.toLowerCase(), contains('refused'));
+      expect(summary.toLowerCase(), isNot(contains('could not reach')));
+    });
+
+    test('reports authentication failures as such', () {
+      expect(
+        SSHService.summarizeError(SSHAuthFailError('no supported methods')),
+        'Authentication failed',
+      );
+    });
+
+    test('says a host key was refused without spilling the fingerprints', () {
+      // The fingerprints belong to the full card, which has the room to
+      // show both and the command to check them. Truncated into an
+      // overlay line they would invite exactly the eyeball comparison the
+      // long copy is careful to discourage.
+      final summary = SSHService.summarizeError(
+        const HostKeyMismatchException(
+          host: 'example.com',
+          port: 2222,
+          keyType: 'ssh-ed25519',
+          expectedFingerprint: _realFingerprint,
+          receivedFingerprint: _otherFingerprint,
+        ),
+      );
+
+      expect(summary.toLowerCase(), contains('host key'));
+      expect(summary, isNot(contains(_realFingerprint)));
+      expect(summary, isNot(contains(_otherFingerprint)));
+    });
+
+    test('keeps an unknown failure short instead of dumping toString', () {
+      // A raw toString can be a paragraph. The overlay would render it
+      // whole, push the Reconnect button off screen, and turn the one
+      // actionable control into something the user has to scroll for.
+      final summary = SSHService.summarizeError(StateError('x' * 400));
+
+      expect(summary.length, lessThanOrEqualTo(120));
     });
   });
 }

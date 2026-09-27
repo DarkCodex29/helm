@@ -588,6 +588,22 @@ class TerminalSession {
     ConnectionStatus.disconnected,
   );
 
+  /// One-line reason the session is not connected, or null when it has not
+  /// failed since the last successful connect.
+  ///
+  /// EXISTS BECAUSE THE TERMINAL COPY DOES NOT SURVIVE. [connect] already
+  /// writes [SSHService.describeError] into the terminal, but the
+  /// multiplexer clears that view on attach, so by the time a user looks
+  /// at a disconnected session the explanation is gone and the overlay is
+  /// left saying only "Connection lost". A user chasing that once went
+  /// through their VPN, their firewall and their SSH server before finding
+  /// a stale address in the profile — a fact the failure knew all along.
+  ///
+  /// Holds the SHORT form on purpose: this is overlay copy, so it carries
+  /// no fingerprints and no CRLFs. The long prose stays in the terminal
+  /// for whoever scrolls back before the next attach.
+  final ValueNotifier<String?> lastFailureNotifier = ValueNotifier(null);
+
   /// Host findings worth showing the user, collected when this session
   /// fails or ends.
   ///
@@ -934,6 +950,11 @@ class TerminalSession {
       }
 
       _bridgeIO(_session!);
+      // Cleared only once a connection actually stands. Clearing on the
+      // ATTEMPT would blank the overlay the moment a retry starts and put
+      // it back on failure, so the one surface explaining the problem
+      // would flicker on every retry.
+      lastFailureNotifier.value = null;
       statusNotifier.value = ConnectionStatus.connected;
       _log.i('Session connected: ${profile.name}');
 
@@ -958,6 +979,7 @@ class TerminalSession {
           });
     } catch (e) {
       statusNotifier.value = ConnectionStatus.error;
+      lastFailureNotifier.value = SSHService.summarizeError(e);
       _log.e('Failed to connect ${profile.name}', e);
       terminal.write(
         '\r\n[Helm] Connection failed: ${SSHService.describeError(e)}\r\n',
@@ -1080,6 +1102,7 @@ class TerminalSession {
     _multiplexerSelection = null;
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
+    lastFailureNotifier.dispose();
     advisoriesNotifier.dispose();
     dismissedAdvisoriesNotifier.dispose();
     hostKeyAuthorizationNotifier.dispose();
@@ -1206,6 +1229,7 @@ class TerminalSession {
     // trigger, so a reconnect asks again rather than trusting a verdict
     // about the previous attach.
     sessionVitalityNotifier.value = const SessionVitalityNotProbed();
+    lastFailureNotifier.value = _disconnectSummaryFor(outcome);
     terminal.write(_disconnectMessageFor(outcome));
     _publishAdvisories();
   }
@@ -1821,6 +1845,26 @@ class TerminalSession {
 /// unchanged, so a disconnect with no attach-session signal (e.g. a plain
 /// shell session, or the transport dropping before any exit status was
 /// read) reads exactly as it did before this classification existed.
+/// The [_disconnectMessageFor] copy, cut down to one overlay line.
+///
+/// Kept beside its terminal counterpart so the two cannot drift into
+/// telling the user two different stories about the same disconnect.
+String _disconnectSummaryFor(AttachExitOutcome outcome) {
+  return switch (outcome) {
+    AttachEndedCleanly() =>
+      'The session ended — you may have detached, or it was closed on the '
+          'host',
+    AttachEndedAbnormally(:final exitCode, :final exitSignal) =>
+      'The session exited abnormally'
+          '${exitCode != null ? ' (exit code $exitCode)' : ''}'
+          '${exitSignal != null ? ' (signal ${exitSignal.signalName})' : ''}',
+    // Deliberately not a guess. This is the branch a dropped TCP
+    // connection lands on, and naming a cause here — the network, the
+    // host, the server — would be inventing one.
+    AttachExitUnknown() => 'The connection to the host ended',
+  };
+}
+
 String _disconnectMessageFor(AttachExitOutcome outcome) {
   return switch (outcome) {
     AttachEndedCleanly() =>

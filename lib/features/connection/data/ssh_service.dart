@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/constants/app_constants.dart';
@@ -200,13 +201,13 @@ class SSHService {
         keyType: authorization.keyType,
         fingerprint: authorization.receivedFingerprint,
       ),
-      HostKeyTypeAuthorizationRequiredException() => _knownHostsService
-          .acceptNewKeyType(
-            host: authorization.host,
-            port: authorization.port,
-            keyType: authorization.keyType,
-            fingerprint: authorization.receivedFingerprint,
-          ),
+      HostKeyTypeAuthorizationRequiredException() =>
+        _knownHostsService.acceptNewKeyType(
+          host: authorization.host,
+          port: authorization.port,
+          keyType: authorization.keyType,
+          fingerprint: authorization.receivedFingerprint,
+        ),
     };
   }
 
@@ -277,6 +278,77 @@ class SSHService {
   /// this exact message — not just the `SSHChannelRequestError` type — before
   /// treating a channel-request failure as a PTY denial.
   static const _kPtyDeniedMessage = 'Failed to start pty';
+
+  /// Longest summary an overlay line may carry.
+  ///
+  /// Past this the message stops being a label and starts being a
+  /// paragraph, pushing the one actionable control — Reconnect — out of
+  /// view on a short terminal area.
+  static const _kSummaryMaxLength = 120;
+
+  /// One-line reason for a failed connection, written for a STATUS SURFACE
+  /// rather than for the terminal.
+  ///
+  /// Separate from [describeError] on purpose. That one writes multi-
+  /// paragraph prose with CRLFs into the xterm view, which is the right
+  /// shape for a scrollback the user can read at leisure and the wrong
+  /// shape for an overlay — and, more to the point, the multiplexer CLEARS
+  /// that view on attach, so the terminal copy is gone by the time a user
+  /// asks what went wrong. Merging the two would force one surface to
+  /// render copy written for the other.
+  ///
+  /// Deliberately says nothing a caller could act on incorrectly: no
+  /// fingerprints (they belong to the card that can show both and the
+  /// command to verify them), and never a raw `toString`, which can run to
+  /// a paragraph.
+  static String summarizeError(Object error) {
+    final summary = _summaryFor(error);
+    if (summary.length <= _kSummaryMaxLength) return summary;
+    return '${summary.substring(0, _kSummaryMaxLength - 1).trimRight()}…';
+  }
+
+  static String _summaryFor(Object error) {
+    if (error is HostKeyMismatchException) {
+      return 'Host key verification failed — the server presented a '
+          'different ${error.keyType} key than the one Helm pinned';
+    }
+    if (error is HostKeyAuthorizationRequiredException) {
+      return 'Host key needs confirming for ${error.host}:${error.port}';
+    }
+    if (error is SSHAuthError) return 'Authentication failed';
+    if (error is SSHChannelRequestError &&
+        error.message == _kPtyDeniedMessage) {
+      return 'The server refused to allocate a terminal for this session';
+    }
+    if (error is SocketException) {
+      // Two very different failures wear the same exception type, and
+      // sending a user to the wrong one costs real time. A REFUSAL means
+      // something answered and said no — the port or the service is the
+      // problem. Anything else (timeout, no route, unresolved name) means
+      // nothing answered at all, which is the address, the host being
+      // down, or the network in between.
+      final detail = (error.osError?.message ?? error.message).toLowerCase();
+      if (detail.contains('refused')) {
+        return 'Connection refused — something answered and declined it';
+      }
+      if (detail.contains('resolve') || detail.contains('nodename')) {
+        return 'Could not reach the host — its name did not resolve';
+      }
+      // Only `address` is a host. `message` is prose describing the
+      // failure ("Connection timed out"), and interpolating it here once
+      // produced "Could not reach Connection timed out" — a sentence that
+      // reads like a hostname and names nothing.
+      final host = error.address?.host;
+      return host == null
+          ? 'Could not reach the host — nothing answered'
+          : 'Could not reach $host — nothing answered';
+    }
+    if (error is TimeoutException) {
+      return 'Could not reach the host — it did not answer in time';
+    }
+    if (error is SSHError) return 'SSH error';
+    return 'Connection failed (${error.runtimeType})';
+  }
 
   /// Maps an exception from dartssh2 to a human-readable error message.
   ///

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
@@ -185,7 +186,9 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
               if (status != ConnectionStatus.connected) {
                 return const SizedBox.shrink();
               }
-              return _advisorySurface(maxHeight: advisorySurfaceMaxHeight(areaHeight));
+              return _advisorySurface(
+                maxHeight: advisorySurfaceMaxHeight(areaHeight),
+              );
             },
           ),
         ),
@@ -224,9 +227,7 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                           ? null
                           : () => widget.session.reconnect(),
                       child: Container(
-                        decoration: const BoxDecoration(
-                          color: Color(0xCC0D1117),
-                        ),
+                        decoration: const BoxDecoration(color: AppTheme.scrim),
                         // The overlay fills the terminal area, and that area
                         // is not always tall enough for this column: the
                         // on-screen keyboard, a small device, or landscape can
@@ -256,14 +257,14 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                     height: 36,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: Color(0xFF58A6FF),
+                                      color: AppTheme.primary,
                                     ),
                                   ),
                                   const SizedBox(height: 16),
                                   const Text(
                                     'Connecting…',
                                     style: TextStyle(
-                                      color: Color(0xFF58A6FF),
+                                      color: AppTheme.primary,
                                       fontSize: 15,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -311,16 +312,16 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                     height: 64,
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(16),
-                                      color: const Color(0xFF21262D),
+                                      color: AppTheme.surfaceVariant,
                                       border: Border.all(
-                                        color: const Color(
-                                          0xFFF85149,
-                                        ).withValues(alpha: 0.4),
+                                        color: AppTheme.error.withValues(
+                                          alpha: 0.4,
+                                        ),
                                       ),
                                     ),
                                     child: const Icon(
                                       Icons.wifi_off,
-                                      color: Color(0xFFF85149),
+                                      color: AppTheme.error,
                                       size: 32,
                                     ),
                                   ),
@@ -328,16 +329,78 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                   const Text(
                                     'Connection lost',
                                     style: TextStyle(
-                                      color: Color(0xFFE6EDF3),
+                                      color: AppTheme.onBackground,
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 8),
+                                  // WHICH host, then WHY. Without the first
+                                  // line a user cannot tell a failing server
+                                  // from a profile pointing somewhere that
+                                  // stopped existing — the two look identical
+                                  // from here, and one of them has already
+                                  // cost an evening of blaming a working VPN.
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 320,
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 24,
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${widget.session.profile.username}'
+                                            '@${widget.session.profile.host}'
+                                            ':${widget.session.profile.port}',
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: AppTheme.onSurface,
+                                              fontSize: 12,
+                                              fontFamily: 'monospace',
+                                            ),
+                                          ),
+                                          ValueListenableBuilder<String?>(
+                                            valueListenable: widget
+                                                .session
+                                                .lastFailureNotifier,
+                                            builder: (context, failure, _) {
+                                              // Absent rather than blank when
+                                              // nothing is known: an empty
+                                              // line under the host reads as
+                                              // a reason that failed to load.
+                                              if (failure == null) {
+                                                return const SizedBox.shrink();
+                                              }
+                                              return Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 8,
+                                                ),
+                                                child: Text(
+                                                  failure,
+                                                  textAlign: TextAlign.center,
+                                                  style: const TextStyle(
+                                                    color:
+                                                        AppTheme.onSurfaceMuted,
+                                                    fontSize: 13,
+                                                    height: 1.4,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
                                   const Text(
                                     'Tap to reconnect',
                                     style: TextStyle(
-                                      color: Color(0xFF8B949E),
+                                      color: AppTheme.onSurfaceFaint,
                                       fontSize: 13,
                                     ),
                                   ),
@@ -357,12 +420,8 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                       icon: const Icon(Icons.refresh, size: 16),
                                       label: const Text('Reconnect'),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(
-                                          0xFF58A6FF,
-                                        ),
-                                        foregroundColor: const Color(
-                                          0xFF0D1117,
-                                        ),
+                                        backgroundColor: AppTheme.primary,
+                                        foregroundColor: AppTheme.background,
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 20,
                                           vertical: 10,
