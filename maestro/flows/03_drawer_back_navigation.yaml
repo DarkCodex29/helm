@@ -54,8 +54,10 @@ env:
 - assertVisible: "No active sessions"
 - assertVisible:
     id: "helm.home.drawer_button"
-- assertVisible:
-    id: "helm.home.settings_button"
+# Settings is no longer on this bar — it lives in the drawer's footer —
+# so it cannot stand in for "Home is intact" any more. The hamburger
+# above is the assertion that still means that, and this flow taps it
+# next anyway.
 
 # The drawer still works afterwards: closing it did not break the button.
 - tapOn:

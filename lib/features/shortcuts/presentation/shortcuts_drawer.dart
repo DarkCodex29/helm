@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/session_vitality.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/shortcuts/domain/quick_action.dart';
 import 'package:helm/features/shortcuts/presentation/shortcut_form_sheet.dart';
@@ -106,7 +108,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
       container: true,
       explicitChildNodes: true,
       child: Drawer(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: AppTheme.surface,
         width: 280,
         child: SafeArea(
           child: Column(
@@ -114,7 +116,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
             children: [
               // ── Header ────────────────────────────────────────────────────
               _DrawerHeader(activeServerName: activeTab?.profile.name),
-              const Divider(color: Color(0xFF30363D), height: 1),
+              const Divider(color: AppTheme.divider, height: 1),
 
               // ── Scrollable content ────────────────────────────────────────
               Expanded(
@@ -136,7 +138,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                     ),
 
                     const SizedBox(height: 8),
-                    const Divider(color: Color(0xFF30363D), height: 1),
+                    const Divider(color: AppTheme.divider, height: 1),
 
                     // WORKSPACES section — the host's own structure: the
                     // owner's clients, and the projects inside each. Above
@@ -151,7 +153,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                     ),
 
                     const SizedBox(height: 8),
-                    const Divider(color: Color(0xFF30363D), height: 1),
+                    const Divider(color: AppTheme.divider, height: 1),
 
                     // PROJECTS section
                     _SectionHeader(
@@ -176,7 +178,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                       ),
 
                     const SizedBox(height: 8),
-                    const Divider(color: Color(0xFF30363D), height: 1),
+                    const Divider(color: AppTheme.divider, height: 1),
 
                     // QUICK ACTIONS section
                     _SectionHeader(
@@ -202,6 +204,41 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
 
                     const SizedBox(height: 8),
                   ],
+                ),
+              ),
+
+              // ── Footer ─────────────────────────────────────
+              // OUTSIDE the ListView, so it stays put while the sections
+              // above scroll. Settings is the destination you leave for,
+              // not an item among the workspaces, and a row that scrolls
+              // away with them would read as one.
+              const Divider(color: AppTheme.divider, height: 1),
+              Semantics(
+                identifier: ShortcutsSemantics.settingsButton,
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.settings_outlined,
+                    color: AppTheme.onSurface,
+                    size: 20,
+                  ),
+                  title: const Text(
+                    'Settings',
+                    style: TextStyle(
+                      color: AppTheme.onBackground,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  onTap: () {
+                    // Closed BEFORE navigating, unlike the focus rows
+                    // above. Those close only once the HOST confirmed,
+                    // because closing is their success report; this one
+                    // asks no host and cannot fail, so leaving the drawer
+                    // open behind a pushed route would only mean finding
+                    // it still open on the way back.
+                    Navigator.of(context).pop();
+                    context.push('/settings');
+                  },
                 ),
               ),
             ],
@@ -325,11 +362,11 @@ class _DrawerHeader extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: const Color(0xFF21262D),
+              color: AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF30363D)),
+              border: Border.all(color: AppTheme.divider),
             ),
-            child: const Icon(Icons.bolt, color: Color(0xFF58A6FF), size: 20),
+            child: const Icon(Icons.bolt, color: AppTheme.primary, size: 20),
           ),
           const SizedBox(width: 12),
           Column(
@@ -338,7 +375,7 @@ class _DrawerHeader extends StatelessWidget {
               const Text(
                 'Helm',
                 style: TextStyle(
-                  color: Color(0xFFE6EDF3),
+                  color: AppTheme.onBackground,
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
@@ -347,7 +384,7 @@ class _DrawerHeader extends StatelessWidget {
                 Text(
                   activeServerName!,
                   style: const TextStyle(
-                    color: Color(0xFFB1BAC4),
+                    color: AppTheme.onSurface,
                     fontSize: 12,
                   ),
                 ),
@@ -379,7 +416,7 @@ class _SectionHeader extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: Color(0xFF58A6FF),
+              color: AppTheme.primary,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.0,
@@ -387,7 +424,7 @@ class _SectionHeader extends StatelessWidget {
           ),
           if (onAdd != null)
             IconButton(
-              icon: const Icon(Icons.add, size: 16, color: Color(0xFFB1BAC4)),
+              icon: const Icon(Icons.add, size: 16, color: AppTheme.onSurface),
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               padding: EdgeInsets.zero,
               onPressed: onAdd,
@@ -693,7 +730,7 @@ class _WorkspaceHeader extends StatelessWidget {
             child: Text(
               workspace.label,
               style: const TextStyle(
-                color: Color(0xFFB1BAC4),
+                color: AppTheme.onSurface,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -733,12 +770,10 @@ class _TabRow extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF21262D),
+            color: AppTheme.surfaceVariant,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: tab.focused
-                  ? const Color(0xFF58A6FF)
-                  : const Color(0xFF30363D),
+              color: tab.focused ? AppTheme.primary : AppTheme.divider,
             ),
           ),
           child: Row(
@@ -747,7 +782,7 @@ class _TabRow extends StatelessWidget {
                 child: Text(
                   tab.label,
                   style: const TextStyle(
-                    color: Color(0xFFE6EDF3),
+                    color: AppTheme.onBackground,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
@@ -762,7 +797,7 @@ class _TabRow extends StatelessWidget {
                 // is the one row in the tree that does not need tapping.
                 const Text(
                   'current',
-                  style: TextStyle(color: Color(0xFF58A6FF), fontSize: 11),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 11),
                 ),
               ],
               const SizedBox(width: 8),
@@ -825,13 +860,13 @@ class _ProjectShortcutTile extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF21262D),
+            color: AppTheme.surfaceVariant,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFF30363D)),
+            border: Border.all(color: AppTheme.divider),
           ),
           child: Row(
             children: [
-              const Icon(Icons.circle, size: 8, color: Color(0xFF3FB950)),
+              const Icon(Icons.circle, size: 8, color: AppTheme.secondary),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -840,7 +875,7 @@ class _ProjectShortcutTile extends StatelessWidget {
                     Text(
                       shortcut.name,
                       style: const TextStyle(
-                        color: Color(0xFFE6EDF3),
+                        color: AppTheme.onBackground,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -849,7 +884,7 @@ class _ProjectShortcutTile extends StatelessWidget {
                     Text(
                       _truncatePath(shortcut.projectPath),
                       style: const TextStyle(
-                        color: Color(0xFF8B949E),
+                        color: AppTheme.onSurfaceMuted,
                         fontSize: 11,
                       ),
                       maxLines: 1,
@@ -875,7 +910,7 @@ class _ProjectShortcutTile extends StatelessWidget {
   void _showOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -888,7 +923,7 @@ class _ProjectShortcutTile extends StatelessWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFF30363D),
+                color: AppTheme.divider,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -897,7 +932,7 @@ class _ProjectShortcutTile extends StatelessWidget {
               child: Text(
                 shortcut.name,
                 style: const TextStyle(
-                  color: Color(0xFFE6EDF3),
+                  color: AppTheme.onBackground,
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
@@ -906,12 +941,12 @@ class _ProjectShortcutTile extends StatelessWidget {
             ListTile(
               leading: const Icon(
                 Icons.edit_outlined,
-                color: Color(0xFF58A6FF),
+                color: AppTheme.primary,
                 size: 20,
               ),
               title: const Text(
                 'Edit',
-                style: TextStyle(color: Color(0xFFE6EDF3)),
+                style: TextStyle(color: AppTheme.onBackground),
               ),
               onTap: () {
                 Navigator.of(ctx).pop();
@@ -921,12 +956,12 @@ class _ProjectShortcutTile extends StatelessWidget {
             ListTile(
               leading: const Icon(
                 Icons.delete_outline,
-                color: Color(0xFFF85149),
+                color: AppTheme.error,
                 size: 20,
               ),
               title: const Text(
                 'Delete',
-                style: TextStyle(color: Color(0xFFF85149)),
+                style: TextStyle(color: AppTheme.error),
               ),
               onTap: () {
                 Navigator.of(ctx).pop();
@@ -970,10 +1005,13 @@ class _QuickActionsRow extends StatelessWidget {
             child: ActionChip(
               label: Text(
                 action.label,
-                style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 12),
+                style: const TextStyle(
+                  color: AppTheme.onBackground,
+                  fontSize: 12,
+                ),
               ),
-              backgroundColor: const Color(0xFF21262D),
-              side: const BorderSide(color: Color(0xFF30363D)),
+              backgroundColor: AppTheme.surfaceVariant,
+              side: const BorderSide(color: AppTheme.divider),
               padding: const EdgeInsets.symmetric(horizontal: 8),
               onPressed: () => onTap(action),
             ),
@@ -1006,12 +1044,12 @@ class _FocusError extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, size: 14, color: Color(0xFFF85149)),
+          const Icon(Icons.error_outline, size: 14, color: AppTheme.error),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: Color(0xFFF85149), fontSize: 12),
+              style: const TextStyle(color: AppTheme.error, fontSize: 12),
             ),
           ),
         ],
@@ -1032,7 +1070,7 @@ class _EmptyHint extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Text(
         text,
-        style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+        style: const TextStyle(color: AppTheme.onSurfaceMuted, fontSize: 12),
       ),
     );
   }

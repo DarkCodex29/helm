@@ -117,7 +117,11 @@ void main() {
       expect(tester.takeException(), isNull);
       // Home rendered, and its own chrome is reachable.
       expect(find.byType(HomeScreen), findsOneWidget);
-      expect(find.byTooltip('Settings'), findsOneWidget);
+      // The hamburger, and no longer Settings: Settings moved into the
+      // drawer's footer, so its absence from this bar is the new correct
+      // state rather than the failure this line used to catch. The drawer
+      // button is what still proves Home's own chrome survived — and it
+      // is also the route to Settings now, so one assertion covers both.
       expect(find.byTooltip('Projects'), findsOneWidget);
     },
   );

@@ -25,11 +25,23 @@ env:
 
 # A profile exists, which is exactly the state that used to hide every
 # route into Settings.
+#
+# Settings moved off the AppBar and into the drawer's footer, so the
+# route now runs through the hamburger. Asserting the drawer opened
+# BEFORE tapping the row keeps a failure readable: a drawer that never
+# opened and a Settings row that vanished are different bugs.
+- tapOn:
+    id: "helm.home.drawer_button"
+- extendedWaitUntil:
+    visible:
+      id: "helm.shortcuts.drawer"
+    timeout: 10000
+
 - assertVisible:
-    id: "helm.home.settings_button"
+    id: "helm.shortcuts.settings_button"
 
 - tapOn:
-    id: "helm.home.settings_button"
+    id: "helm.shortcuts.settings_button"
 
 # ── The Settings screen renders ─────────────────────────────────────────
 # Do not assert the bare text "Settings" here: the AppBar button's
@@ -56,5 +68,7 @@ env:
 - extendedWaitUntil:
     visible: "No active sessions"
     timeout: 10000
+# Back lands on Home, not on the drawer: the drawer closes when the row
+# is tapped, so there is nothing between Settings and Home to return to.
 - assertVisible:
-    id: "helm.home.settings_button"
+    id: "helm.home.drawer_button"

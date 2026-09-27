@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
+import 'package:helm/core/theme/terminal_theme.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
@@ -166,10 +168,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onDrawerChanged: (isOpen) {
           if (mounted) setState(() => _isDrawerOpen = isOpen);
         },
-        backgroundColor: const Color(0xFF272822),
+        // Matches the terminal's own background, not the app's: this
+        // scaffold sits directly behind the terminal view, and any other
+        // value draws a visible seam around it during resize and scroll.
+        backgroundColor: HelmTerminalTheme.background,
         drawer: const ShortcutsDrawer(),
         appBar: AppBar(
-          backgroundColor: const Color(0xFF161B22),
+          backgroundColor: AppTheme.surface,
           elevation: 0,
           titleSpacing: 0,
           leading: Builder(
@@ -214,18 +219,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
             _buildBrowseAction(tabsState.activeTab?.session),
+            // HOLD STAYS on the bar. It is the one action here decided in
+            // a moment — you reach for it BECAUSE you are about to leave
+            // — and putting a time-sensitive control behind opening a
+            // drawer is how it stops being used.
             _buildHoldAction(tabsState.activeTab?.session),
-            Semantics(
-              identifier: HomeSemantics.settingsButton,
-              child: IconButton(
-                icon: Icon(
-                  Icons.settings,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
-                tooltip: 'Settings',
-                onPressed: () => context.push('/settings'),
-              ),
-            ),
+            // SETTINGS moved to the drawer's footer, and only settings.
+            //
+            // It is the least frequent control on this bar and was paying
+            // permanent width out of the tab strip's pocket — the one
+            // element here that is actually starved. A drawer footer is
+            // also where the platform already puts settings.
+            //
+            // Browse did NOT move with it, for the reason stated on
+            // [_buildBrowseAction]: the drawer is the surface that CHANGES
+            // which tab is active, so a control scoped to the active tab
+            // cannot live inside it without becoming ambiguous.
           ],
         ),
         body: Column(
@@ -359,8 +368,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return Container(
       height: 32,
       decoration: const BoxDecoration(
-        color: Color(0xFF161B22),
-        border: Border(top: BorderSide(color: Color(0xFF30363D), width: 1)),
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.divider, width: 1)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -370,7 +379,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
             icon: Icon(
               kbVisible ? Icons.keyboard_hide : Icons.keyboard,
-              color: const Color(0xFF8B949E),
+              color: AppTheme.onSurfaceMuted,
               size: 18,
             ),
             tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
@@ -395,20 +404,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               height: 80,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                color: const Color(0xFF21262D),
-                border: Border.all(color: const Color(0xFF30363D)),
+                color: AppTheme.surfaceVariant,
+                border: Border.all(color: AppTheme.divider),
               ),
               child: const Icon(
                 Icons.terminal,
                 size: 40,
-                color: Color(0xFF58A6FF),
+                color: AppTheme.primary,
               ),
             ),
             const SizedBox(height: 24),
             Text(
               'No active sessions',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: const Color(0xFFE6EDF3),
+                color: AppTheme.onBackground,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -416,7 +425,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             Text(
               'Connect to your server to start a terminal session',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF8B949E),
+                color: AppTheme.onSurfaceMuted,
               ),
               textAlign: TextAlign.center,
             ),
@@ -464,7 +473,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final profile = await showModalBottomSheet<ConnectionProfile>(
       // ignore: use_build_context_synchronously
       context: context,
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -492,7 +501,7 @@ class _ProfilePickerSheet extends StatelessWidget {
           width: 36,
           height: 4,
           decoration: BoxDecoration(
-            color: const Color(0xFF30363D),
+            color: AppTheme.divider,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -501,13 +510,13 @@ class _ProfilePickerSheet extends StatelessWidget {
           child: Text(
             'Select Connection',
             style: TextStyle(
-              color: Color(0xFFE6EDF3),
+              color: AppTheme.onBackground,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
           ),
         ),
-        const Divider(color: Color(0xFF30363D), height: 1),
+        const Divider(color: AppTheme.divider, height: 1),
         ListView.builder(
           shrinkWrap: true,
           itemCount: profiles.length,
@@ -518,32 +527,39 @@ class _ProfilePickerSheet extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF21262D),
+                  color: AppTheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF30363D)),
+                  border: Border.all(color: AppTheme.divider),
                 ),
                 child: const Icon(
                   Icons.computer,
-                  color: Color(0xFF58A6FF),
+                  color: AppTheme.primary,
                   size: 18,
                 ),
               ),
               title: Text(
                 profile.name,
                 style: const TextStyle(
-                  color: Color(0xFFE6EDF3),
+                  color: AppTheme.onBackground,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               subtitle: Text(
                 '${profile.username}@${profile.host}:${profile.port}',
-                style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+                style: const TextStyle(
+                  color: AppTheme.onSurfaceMuted,
+                  fontSize: 12,
+                ),
               ),
               trailing: profile.isDefault
-                  ? const Icon(Icons.star, color: Color(0xFFF4BF75), size: 16)
+                  ? const Icon(
+                      Icons.star,
+                      color: AppTheme.defaultMarker,
+                      size: 16,
+                    )
                   : const Icon(
                       Icons.chevron_right,
-                      color: Color(0xFF8B949E),
+                      color: AppTheme.onSurfaceMuted,
                       size: 18,
                     ),
               onTap: () => Navigator.of(ctx).pop(profile),

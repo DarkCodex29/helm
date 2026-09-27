@@ -43,10 +43,6 @@ class HomeSemantics {
   /// The hamburger that opens the shortcuts drawer.
   static const drawerButton = 'helm.home.drawer_button';
 
-  /// The AppBar action that opens Settings. This is the only persistent
-  /// route to `/settings`, so the E2E suite guards it.
-  static const settingsButton = 'helm.home.settings_button';
-
   /// The AppBar `+` action, only present while there are no tabs.
   static const appBarNewSessionButton = 'helm.home.app_bar_new_session_button';
 
@@ -65,6 +61,16 @@ class ShortcutsSemantics {
   /// "PROJECTS" therefore also matches the button on Home and can never
   /// report the drawer as closed.
   static const drawer = 'helm.shortcuts.drawer';
+
+  /// The Settings row pinned to the bottom of the drawer. This is the
+  /// only persistent route to `/settings`, so the E2E suite guards it.
+  ///
+  /// It was `helm.home.settings_button` while the control lived on
+  /// Home's AppBar. The id MOVED WITH THE WIDGET rather than being kept
+  /// stable for the flows' convenience: an identifier naming a surface
+  /// its widget no longer sits on costs nothing to leave behind and a
+  /// whole debugging session to discover.
+  static const settingsButton = 'helm.shortcuts.settings_button';
 
   /// The AGENTS section body. Wraps the agent list AND every one of its
   /// "nothing to show" states, so an E2E flow can assert on the honest

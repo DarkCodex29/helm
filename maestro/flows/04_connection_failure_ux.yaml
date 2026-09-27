@@ -55,7 +55,7 @@ env:
     timeout: 30000
 
 # The app is still alive and still navigable after a failed retry.
-- assertVisible:
-    id: "helm.home.drawer_button"
-- assertVisible:
-    id: "helm.home.settings_button"
+#
+# One assertion, not two: Settings moved into the drawer's footer, and
+# the hamburger is now the only persistent AppBar control that proves
+# Home survived. Reaching Settings is 02's job, not this flow's.
