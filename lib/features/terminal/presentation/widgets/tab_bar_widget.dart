@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:helm/features/terminal/presentation/widgets/agent_state_chip.dart';
@@ -20,15 +21,15 @@ class TerminalTabBar extends StatelessWidget {
   final void Function(String tabId) onTabClose;
   final VoidCallback onAddTab;
 
-  static const _bgColor = Color(0xFF161B22);
-  static const _activeTabColor = Color(0xFF21262D);
-  static const _inactiveTabColor = Color(0xFF0D1117);
-  static const _activeTextColor = Color(0xFFE6EDF3);
-  static const _inactiveTextColor = Color(0xFF6E7681);
-  static const _borderColor = Color(0xFF30363D);
-  static const _connectedColor = Color(0xFF3FB950);
-  static const _disconnectedColor = Color(0xFFF85149);
-  static const _activeAccent = Color(0xFF58A6FF);
+  static const _bgColor = AppTheme.surface;
+  static const _activeTabColor = AppTheme.surfaceVariant;
+  static const _inactiveTabColor = AppTheme.background;
+  static const _activeTextColor = AppTheme.onBackground;
+  static const _inactiveTextColor = AppTheme.onSurfaceFaint;
+  static const _borderColor = AppTheme.divider;
+  static const _connectedColor = AppTheme.secondary;
+  static const _disconnectedColor = AppTheme.error;
+  static const _activeAccent = AppTheme.primary;
 
   @override
   Widget build(BuildContext context) {

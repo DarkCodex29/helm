@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/settings/presentation/settings_provider.dart';
 
@@ -277,9 +278,9 @@ class _ProfilesList extends StatelessWidget {
                 if (p.isDefault)
                   Padding(
                     padding: const EdgeInsets.only(right: 6),
-                    child: Icon(
+                    child: const Icon(
                       Icons.star,
-                      color: const Color(0xFFF4BF75),
+                      color: AppTheme.defaultMarker,
                       size: 16,
                     ),
                   ),
@@ -314,7 +315,7 @@ class _SshKeyCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFF0D1117),
+              color: AppTheme.background,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: theme.colorScheme.outline),
             ),
@@ -323,7 +324,7 @@ class _SshKeyCard extends StatelessWidget {
               style: const TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 11,
-                color: Color(0xFFB1BAC4),
+                color: AppTheme.onSurface,
                 height: 1.5,
               ),
             ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 
 /// Asks the user to confirm a host key once, after the update that changed
@@ -76,10 +77,10 @@ class HostKeyMigrationCard extends StatefulWidget {
 }
 
 class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
-  static const _accent = Color(0xFF58A6FF);
-  static const _primaryText = Color(0xFFE6EDF3);
-  static const _bodyText = Color(0xFFB1BAC4);
-  static const _mutedText = Color(0xFF8B949E);
+  static const _accent = AppTheme.primary;
+  static const _primaryText = AppTheme.onBackground;
+  static const _bodyText = AppTheme.onSurface;
+  static const _mutedText = AppTheme.onSurfaceMuted;
 
   bool _showSupersededValue = false;
 
@@ -97,9 +98,9 @@ class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
         constraints: const BoxConstraints(maxWidth: 420),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF21262D),
+          color: AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF30363D)),
+          border: Border.all(color: AppTheme.divider),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +201,7 @@ class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
                     onPressed: widget.onCancel,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _accent,
-                      foregroundColor: const Color(0xFF0D1117),
+                      foregroundColor: AppTheme.background,
                       minimumSize: const Size(48, 48),
                       textStyle: const TextStyle(
                         fontSize: 13,
@@ -234,9 +235,9 @@ class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
     width: double.infinity,
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: const Color(0xFF0D1117),
+      color: AppTheme.background,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFF30363D)),
+      border: Border.all(color: AppTheme.divider),
     ),
     child: child,
   );

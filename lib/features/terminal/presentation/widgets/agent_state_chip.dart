@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
+import 'package:helm/core/theme/app_theme.dart';
 
 /// Visual vocabulary for [AgentState], shared by the tab badge and the
 /// drawer list so the two can never disagree about what a state looks like.
@@ -20,17 +21,17 @@ class AgentStateStyle {
   final IconData icon;
 
   static const _blocked = AgentStateStyle._(
-    Color(0xFFD29922),
+    AppTheme.warning,
     Icons.priority_high,
   );
-  static const _working = AgentStateStyle._(Color(0xFF58A6FF), Icons.autorenew);
-  static const _done = AgentStateStyle._(Color(0xFF3FB950), Icons.check);
+  static const _working = AgentStateStyle._(AppTheme.primary, Icons.autorenew);
+  static const _done = AgentStateStyle._(AppTheme.secondary, Icons.check);
   static const _idle = AgentStateStyle._(
-    Color(0xFF6E7681),
+    AppTheme.onSurfaceFaint,
     Icons.pause_rounded,
   );
   static const _unknown = AgentStateStyle._(
-    Color(0xFF6E7681),
+    AppTheme.onSurfaceFaint,
     Icons.question_mark,
   );
 
@@ -77,7 +78,7 @@ class AgentBadge extends StatelessWidget {
           size: 9,
           // The urgent badge is filled, so its glyph has to invert to stay
           // legible against its own background.
-          color: isUrgent ? const Color(0xFF0D1117) : style.color,
+          color: isUrgent ? AppTheme.background : style.color,
         ),
       ),
     );
@@ -136,12 +137,12 @@ class AgentRow extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF21262D),
+            color: AppTheme.surfaceVariant,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               // The one that needs a human is the one the eye should land
               // on first when the drawer opens.
-              color: isUrgent ? style.color : const Color(0xFF30363D),
+              color: isUrgent ? style.color : AppTheme.divider,
               width: isUrgent ? 1.5 : 1,
             ),
           ),
@@ -160,7 +161,7 @@ class AgentRow extends StatelessWidget {
                     Text(
                       agent.label,
                       style: const TextStyle(
-                        color: Color(0xFFE6EDF3),
+                        color: AppTheme.onBackground,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -172,7 +173,7 @@ class AgentRow extends StatelessWidget {
                       Text(
                         contextLabel!,
                         style: const TextStyle(
-                          color: Color(0xFF8B949E),
+                          color: AppTheme.onSurfaceMuted,
                           fontSize: 11,
                         ),
                         // The owner has a tab called "Facturación

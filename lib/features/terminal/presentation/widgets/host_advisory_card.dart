@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 
 /// Compact, dismissible summary of what is wrong with the connected host.
 ///
@@ -87,9 +88,9 @@ class HostAdvisoryCard extends StatelessWidget {
         // finding is capped, never padded out to fill the ceiling.
         constraints: BoxConstraints(maxWidth: 420, maxHeight: maxHeight),
         decoration: BoxDecoration(
-          color: const Color(0xFF21262D),
+          color: AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF30363D)),
+          border: Border.all(color: AppTheme.divider),
         ),
         // Clips the rows to the rounded border, so a mid-scroll row does
         // not paint over the card's own edge.
@@ -121,8 +122,8 @@ class _AdvisoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isWarning = advisory.severity == HostAdvisorySeverity.warning;
     final accent = isWarning
-        ? const Color(0xFFD29922)
-        : const Color(0xFF8B949E);
+        ? AppTheme.warning
+        : AppTheme.onSurfaceMuted;
     final remediation = advisory.remediationCopy;
 
     return Padding(
@@ -153,7 +154,7 @@ class _AdvisoryRow extends StatelessWidget {
                 Text(
                   advisory.detail,
                   style: const TextStyle(
-                    color: Color(0xFFB1BAC4),
+                    color: AppTheme.onSurface,
                     fontSize: 12,
                     height: 1.35,
                   ),
@@ -163,7 +164,7 @@ class _AdvisoryRow extends StatelessWidget {
                   Text(
                     remediation,
                     style: const TextStyle(
-                      color: Color(0xFF8B949E),
+                      color: AppTheme.onSurfaceMuted,
                       fontSize: 12,
                       height: 1.35,
                       fontStyle: FontStyle.italic,
@@ -175,7 +176,7 @@ class _AdvisoryRow extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 16),
-            color: const Color(0xFF8B949E),
+            color: AppTheme.onSurfaceMuted,
             tooltip: 'Dismiss',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),

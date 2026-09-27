@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 
 /// Banner shown on HomeScreen when a previous session is waiting to be
@@ -26,14 +27,14 @@ class SessionRecoveryBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF21262D),
+        color: AppTheme.surfaceVariant,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF30363D)),
+        border: Border.all(color: AppTheme.divider),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.bolt, color: Color(0xFF58A6FF), size: 22),
+          const Icon(Icons.bolt, color: AppTheme.primary, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -43,7 +44,7 @@ class SessionRecoveryBanner extends StatelessWidget {
                 const Text(
                   'Previous session found',
                   style: TextStyle(
-                    color: Color(0xFFE6EDF3),
+                    color: AppTheme.onBackground,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -52,7 +53,7 @@ class SessionRecoveryBanner extends StatelessWidget {
                 Text(
                   'You had open: $profileNames',
                   style: const TextStyle(
-                    color: Color(0xFFB1BAC4),
+                    color: AppTheme.onSurface,
                     fontSize: 12,
                   ),
                   maxLines: 1,
@@ -74,7 +75,7 @@ class SessionRecoveryBanner extends StatelessWidget {
           TextButton(
             onPressed: onDiscard,
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFB1BAC4),
+              foregroundColor: AppTheme.onSurface,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               minimumSize: const Size(48, 48),
             ),
@@ -84,8 +85,8 @@ class SessionRecoveryBanner extends StatelessWidget {
           ElevatedButton(
             onPressed: onRecover,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF58A6FF),
-              foregroundColor: const Color(0xFF0D1117),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: AppTheme.background,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               minimumSize: const Size(64, 48),
               textStyle: const TextStyle(

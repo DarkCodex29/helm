@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/session_reference.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/settings/presentation/settings_provider.dart';
 import 'package:helm/features/shortcuts/data/remote_fs_provider.dart';
@@ -165,7 +166,7 @@ class _ProjectShortcutFormSheetState
   void _showProjectPicker(List<String> projects) {
     showModalBottomSheet<String>(
       context: context,
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -180,13 +181,13 @@ class _ProjectShortcutFormSheetState
                 child: Text(
                   'Proyectos detectados',
                   style: const TextStyle(
-                    color: Color(0xFFE6EDF3),
+                    color: AppTheme.onBackground,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              const Divider(color: Color(0xFF30363D), height: 1),
+              const Divider(color: AppTheme.divider, height: 1),
               Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
@@ -198,7 +199,7 @@ class _ProjectShortcutFormSheetState
                       title: Text(
                         path,
                         style: const TextStyle(
-                          color: Color(0xFFE6EDF3),
+                          color: AppTheme.onBackground,
                           fontSize: 13,
                         ),
                       ),
@@ -279,7 +280,7 @@ class _ProjectShortcutFormSheetState
 
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xFF161B22),
+        color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: SafeArea(
@@ -303,7 +304,7 @@ class _ProjectShortcutFormSheetState
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF30363D),
+                      color: AppTheme.divider,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -311,7 +312,7 @@ class _ProjectShortcutFormSheetState
                 Text(
                   _isEditing ? 'Edit Project' : 'New Project',
                   style: const TextStyle(
-                    color: Color(0xFFE6EDF3),
+                    color: AppTheme.onBackground,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
@@ -343,7 +344,7 @@ class _ProjectShortcutFormSheetState
                               height: 12,
                               child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
-                                color: Color(0xFF58A6FF),
+                                color: AppTheme.primary,
                               ),
                             )
                           : const Text('🔍', style: TextStyle(fontSize: 13)),
@@ -351,7 +352,7 @@ class _ProjectShortcutFormSheetState
                         'Detectar proyectos',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF58A6FF),
+                          color: AppTheme.primary,
                         ),
                       ),
                       style: TextButton.styleFrom(
@@ -374,7 +375,7 @@ class _ProjectShortcutFormSheetState
                               height: 12,
                               child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
-                                color: Color(0xFF58A6FF),
+                                color: AppTheme.primary,
                               ),
                             )
                           : const Text('📂', style: TextStyle(fontSize: 13)),
@@ -382,7 +383,7 @@ class _ProjectShortcutFormSheetState
                         'Dir actual',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF58A6FF),
+                          color: AppTheme.primary,
                         ),
                       ),
                       style: TextButton.styleFrom(
@@ -425,7 +426,7 @@ class _ProjectShortcutFormSheetState
                   ),
                   error: (e, _) => Text(
                     'Error loading profiles: $e',
-                    style: const TextStyle(color: Color(0xFFF85149)),
+                    style: const TextStyle(color: AppTheme.error),
                   ),
                   data: (profiles) => _ProfileDropdown(
                     profiles: profiles,
@@ -441,8 +442,8 @@ class _ProjectShortcutFormSheetState
                         child: OutlinedButton(
                           onPressed: _delete,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFFF85149),
-                            side: const BorderSide(color: Color(0xFFF85149)),
+                            foregroundColor: AppTheme.error,
+                            side: const BorderSide(color: AppTheme.error),
                           ),
                           child: const Text('Delete'),
                         ),
@@ -454,8 +455,8 @@ class _ProjectShortcutFormSheetState
                       child: ElevatedButton(
                         onPressed: _save,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF58A6FF),
-                          foregroundColor: const Color(0xFF0D1117),
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: AppTheme.background,
                         ),
                         child: const Text('Save'),
                       ),
@@ -537,7 +538,7 @@ class _QuickActionFormSheetState extends ConsumerState<QuickActionFormSheet> {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xFF161B22),
+        color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: SafeArea(
@@ -560,7 +561,7 @@ class _QuickActionFormSheetState extends ConsumerState<QuickActionFormSheet> {
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF30363D),
+                      color: AppTheme.divider,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -568,7 +569,7 @@ class _QuickActionFormSheetState extends ConsumerState<QuickActionFormSheet> {
                 Text(
                   _isEditing ? 'Edit Quick Action' : 'New Quick Action',
                   style: const TextStyle(
-                    color: Color(0xFFE6EDF3),
+                    color: AppTheme.onBackground,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
@@ -597,8 +598,8 @@ class _QuickActionFormSheetState extends ConsumerState<QuickActionFormSheet> {
                         child: OutlinedButton(
                           onPressed: _delete,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFFF85149),
-                            side: const BorderSide(color: Color(0xFFF85149)),
+                            foregroundColor: AppTheme.error,
+                            side: const BorderSide(color: AppTheme.error),
                           ),
                           child: const Text('Delete'),
                         ),
@@ -610,8 +611,8 @@ class _QuickActionFormSheetState extends ConsumerState<QuickActionFormSheet> {
                       child: ElevatedButton(
                         onPressed: _save,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF58A6FF),
-                          foregroundColor: const Color(0xFF0D1117),
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: AppTheme.background,
                         ),
                         child: const Text('Save'),
                       ),
@@ -647,29 +648,29 @@ class _FormField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       validator: validator,
-      style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 14),
+      style: const TextStyle(color: AppTheme.onBackground, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        labelStyle: const TextStyle(color: Color(0xFFB1BAC4), fontSize: 13),
-        hintStyle: const TextStyle(color: Color(0xFF30363D), fontSize: 13),
+        labelStyle: const TextStyle(color: AppTheme.onSurface, fontSize: 13),
+        hintStyle: const TextStyle(color: AppTheme.divider, fontSize: 13),
         filled: true,
-        fillColor: const Color(0xFF21262D),
+        fillColor: AppTheme.surfaceVariant,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF58A6FF)),
+          borderSide: const BorderSide(color: AppTheme.primary),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFF85149)),
+          borderSide: const BorderSide(color: AppTheme.error),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
@@ -698,26 +699,26 @@ class _ProfileDropdown extends StatelessWidget {
       value: selectedId,
       hint: const Text(
         'Select connection profile',
-        style: TextStyle(color: Color(0xFF8B949E), fontSize: 13),
+        style: TextStyle(color: AppTheme.onSurfaceMuted, fontSize: 13),
       ),
-      dropdownColor: const Color(0xFF21262D),
-      style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 14),
+      dropdownColor: AppTheme.surfaceVariant,
+      style: const TextStyle(color: AppTheme.onBackground, fontSize: 14),
       decoration: InputDecoration(
         labelText: 'Connection Profile',
-        labelStyle: const TextStyle(color: Color(0xFFB1BAC4), fontSize: 13),
+        labelStyle: const TextStyle(color: AppTheme.onSurface, fontSize: 13),
         filled: true,
-        fillColor: const Color(0xFF21262D),
+        fillColor: AppTheme.surfaceVariant,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF58A6FF)),
+          borderSide: const BorderSide(color: AppTheme.primary),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
@@ -747,24 +748,24 @@ class _MultiplexerDropdown extends StatelessWidget {
     return DropdownButtonFormField<MultiplexerId?>(
       // ignore: deprecated_member_use
       value: selected,
-      dropdownColor: const Color(0xFF21262D),
-      style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 14),
+      dropdownColor: AppTheme.surfaceVariant,
+      style: const TextStyle(color: AppTheme.onBackground, fontSize: 14),
       decoration: InputDecoration(
         labelText: 'Multiplexer (optional)',
-        labelStyle: const TextStyle(color: Color(0xFFB1BAC4), fontSize: 13),
+        labelStyle: const TextStyle(color: AppTheme.onSurface, fontSize: 13),
         filled: true,
-        fillColor: const Color(0xFF21262D),
+        fillColor: AppTheme.surfaceVariant,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF30363D)),
+          borderSide: const BorderSide(color: AppTheme.divider),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF58A6FF)),
+          borderSide: const BorderSide(color: AppTheme.primary),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,

@@ -15,6 +15,30 @@ class AppTheme {
   static const Color onSurface = Color(0xFFB1BAC4);
   static const Color divider = Color(0xFF30363D);
 
+  /// Secondary copy: labels, captions, and the inactive half of a pair.
+  /// Dimmer than [onSurface] but still required to pass AA against
+  /// [background] and [surface], because it carries real text.
+  static const Color onSurfaceMuted = Color(0xFF8B949E);
+
+  /// Disabled and placeholder text, plus the resting state of a control
+  /// that has not been reached yet. Deliberately BELOW AA: nothing that a
+  /// user must be able to read should ever be painted with this.
+  static const Color onSurfaceFaint = Color(0xFF6E7681);
+
+  /// Attention without alarm — an advisory the user should notice but that
+  /// is not a failure. Distinct from [error] on purpose: spending the red
+  /// on a warning is how a red stops meaning anything.
+  static const Color warning = Color(0xFFD29922);
+
+  /// Wash painted over live content behind a modal overlay. Carries alpha,
+  /// so the terminal underneath stays legible as context.
+  static const Color scrim = Color(0xCC0D1117);
+
+  /// The star on the profile the app dials by default. Not [warning]: this
+  /// marks a user's own choice and must never read as something wrong,
+  /// which is exactly what sharing the advisory amber would imply.
+  static const Color defaultMarker = Color(0xFFF4BF75);
+
   static ThemeData get dark {
     final base = ThemeData.dark(useMaterial3: true);
     final textTheme = GoogleFonts.interTextTheme(base.textTheme).copyWith(

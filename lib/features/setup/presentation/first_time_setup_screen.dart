@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/connection_profile_repository.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
@@ -271,7 +272,7 @@ class _StepHeader extends StatelessWidget {
               child: Text(
                 '$step',
                 style: const TextStyle(
-                  color: Color(0xFF0D1117),
+                  color: AppTheme.background,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -298,7 +299,7 @@ class _SshKeyDisplay extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1117),
+        color: AppTheme.background,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: theme.colorScheme.outline),
       ),
@@ -352,7 +353,7 @@ class _SshKeyDisplay extends StatelessWidget {
                 style: const TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,
-                  color: Color(0xFFB1BAC4),
+                  color: AppTheme.onSurface,
                   height: 1.5,
                 ),
                 maxLines: 4,

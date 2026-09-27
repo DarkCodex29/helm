@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
@@ -14,13 +15,13 @@ import 'package:helm/features/files/presentation/providers/file_download_provide
 // The drawer's palette, repeated rather than imported because this app has
 // no token file yet and every surface spells these out — see
 // shortcuts_drawer.dart. Worth centralizing, but not from here.
-const _surface = Color(0xFF161B22);
-const _raised = Color(0xFF21262D);
-const _border = Color(0xFF30363D);
-const _primaryText = Color(0xFFE6EDF3);
-const _mutedText = Color(0xFF8B949E);
-const _accent = Color(0xFF58A6FF);
-const _danger = Color(0xFFF85149);
+const _surface = AppTheme.surface;
+const _raised = AppTheme.surfaceVariant;
+const _border = AppTheme.divider;
+const _primaryText = AppTheme.onBackground;
+const _mutedText = AppTheme.onSurfaceMuted;
+const _accent = AppTheme.primary;
+const _danger = AppTheme.error;
 
 /// Browses the remote filesystem of one connection.
 ///

@@ -2,6 +2,8 @@ import 'dart:ui' show Color;
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'package:helm/core/theme/app_theme.dart';
+
 /// The drawable Android silhouettes into the status bar and the tray.
 ///
 /// Names a resource in `android/app/src/main/res/drawable/`, WITHOUT the
@@ -30,7 +32,7 @@ const String kAgentAlertIconResource = 'ic_stat_helm';
 /// to draw), and `agent_state_chip.dart` (where the decision was made).
 /// `local_notification_presenter_test.dart` reads all three and fails if
 /// they ever drift.
-const Color kAgentAlertAccentColor = Color(0xFFD29922);
+const Color kAgentAlertAccentColor = AppTheme.warning;
 
 /// The id every alert helm cannot identify shares.
 ///

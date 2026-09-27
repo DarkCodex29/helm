@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 
 /// Asks the user to authorize a host key algorithm their server has not
@@ -77,10 +78,10 @@ class HostKeyTypeCard extends StatelessWidget {
   /// The user declined. Nothing is written to the trust store.
   final VoidCallback onCancel;
 
-  static const _accent = Color(0xFF58A6FF);
-  static const _primaryText = Color(0xFFE6EDF3);
-  static const _bodyText = Color(0xFFB1BAC4);
-  static const _mutedText = Color(0xFF8B949E);
+  static const _accent = AppTheme.primary;
+  static const _primaryText = AppTheme.onBackground;
+  static const _bodyText = AppTheme.onSurface;
+  static const _mutedText = AppTheme.onSurfaceMuted;
 
   @override
   Widget build(BuildContext context) {
@@ -96,9 +97,9 @@ class HostKeyTypeCard extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 420),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF21262D),
+          color: AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF30363D)),
+          border: Border.all(color: AppTheme.divider),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,7 +229,7 @@ class HostKeyTypeCard extends StatelessWidget {
                     onPressed: onCancel,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _accent,
-                      foregroundColor: const Color(0xFF0D1117),
+                      foregroundColor: AppTheme.background,
                       minimumSize: const Size(48, 48),
                       textStyle: const TextStyle(
                         fontSize: 13,
@@ -262,9 +263,9 @@ class HostKeyTypeCard extends StatelessWidget {
     width: double.infinity,
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: const Color(0xFF0D1117),
+      color: AppTheme.background,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFF30363D)),
+      border: Border.all(color: AppTheme.divider),
     ),
     child: child,
   );
