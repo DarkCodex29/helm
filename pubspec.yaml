@@ -11,8 +11,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  cupertino_icons: ^1.0.8
-
   # SSH
   dartssh2: ^3.3.1
 
@@ -27,7 +25,6 @@ dependencies:
 
   # State management
   flutter_riverpod: ^2.6.1
-  riverpod_annotation: ^2.6.1
 
   # Navigation
   go_router: ^14.6.3
@@ -37,7 +34,6 @@ dependencies:
 
   # Code generation (models)
   freezed_annotation: ^2.4.4
-  json_annotation: ^4.9.0
 
   # SharedPreferences for profile storage
   shared_preferences: ^2.3.4
@@ -48,8 +44,6 @@ dependencies:
   # Ed25519 key generation (transitive via dartssh2, declared explicitly)
   pinenacl: ^0.6.0
 
-  # SHA-256 host key fingerprints
-  crypto: ^3.0.6
   path_provider: ^2.1.6
   open_filex: ^4.7.0
 
@@ -97,7 +91,6 @@ dev_dependencies:
   freezed: ^2.5.7
   json_serializable: ^6.9.2
   build_runner: ^2.4.13
-  riverpod_generator: ^2.6.3
 
   # Writes android/app/src/main/res/mipmap-*/ from the art in assets/icon/.
   #
