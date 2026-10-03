@@ -443,8 +443,18 @@ class _TreeScriptedSession extends TerminalSession {
 /// that name makes a text assertion ambiguous between header and row.
 final _contextTree = MuxWorkspaceTreeAvailable(
   workspaces: [
-    (workspaceId: 'w1', label: 'EBIM', agentState: AgentState.working),
-    (workspaceId: 'w2', label: 'Go Nexa', agentState: AgentState.blocked),
+    (
+      workspaceId: 'w1',
+      label: 'EBIM',
+      agentState: AgentState.working,
+      activeTabId: null,
+    ),
+    (
+      workspaceId: 'w2',
+      label: 'Go Nexa',
+      agentState: AgentState.blocked,
+      activeTabId: null,
+    ),
   ],
   tabs: [
     (

@@ -77,6 +77,13 @@ class ShortcutsSemantics {
   /// explanation (unsupported / unreachable / genuinely none) rather than
   /// on the absence of rows, which all three would otherwise look like.
   static const agentsSection = 'helm.shortcuts.agents_section';
+
+  /// One tappable workspace header inside the WORKSPACES tree, addressed
+  /// by the host's own workspace id rather than by label — the pattern
+  /// [ProfileEditSemantics.fontSizeOption] already follows, for the same
+  /// reason: two clients can share a label, but never an id.
+  static String workspaceHeaderButton(String workspaceId) =>
+      'helm.shortcuts.workspace_header_button_$workspaceId';
 }
 
 /// Identifiers on `HelmTerminalView`.

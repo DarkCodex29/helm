@@ -169,8 +169,12 @@ MuxTab _tab(String tabId, String workspaceId, String label) => (
   agentState: AgentState.unknown,
 );
 
-MuxWorkspace _workspace(String workspaceId, String label) =>
-    (workspaceId: workspaceId, label: label, agentState: AgentState.unknown);
+MuxWorkspace _workspace(String workspaceId, String label) => (
+  workspaceId: workspaceId,
+  label: label,
+  agentState: AgentState.unknown,
+  activeTabId: null,
+);
 
 /// The owner's real tree, trimmed to the two rows these tests join against.
 /// Labels are his, because the defect is about HIS three identical rows.
@@ -190,7 +194,10 @@ AgentStatus _placed(String? tabId, String? workspaceId) => (
 void _contextTests() {
   group('agentContextLabel — names the agent only from what was measured', () {
     test('joins the tab and the workspace it resolved', () {
-      expect(agentContextLabel(_placed('w2:t5', 'w2'), _tree), 'Helm · Go Nexa');
+      expect(
+        agentContextLabel(_placed('w2:t5', 'w2'), _tree),
+        'Helm · Go Nexa',
+      );
     });
 
     test('names two agents in the same state apart — the whole defect', () {
@@ -203,13 +210,10 @@ void _contextTests() {
       );
     });
 
-    test(
-      'names the workspace alone when the tab is gone from the tree — the '
-      'agent is still in that client, and half a true answer beats none',
-      () {
-        expect(agentContextLabel(_placed('w2:t99', 'w2'), _tree), 'Go Nexa');
-      },
-    );
+    test('names the workspace alone when the tab is gone from the tree — the '
+        'agent is still in that client, and half a true answer beats none', () {
+      expect(agentContextLabel(_placed('w2:t99', 'w2'), _tree), 'Go Nexa');
+    });
 
     test('names the tab alone when the workspace is gone from the tree', () {
       expect(agentContextLabel(_placed('w2:t5', 'w9'), _tree), 'Helm');

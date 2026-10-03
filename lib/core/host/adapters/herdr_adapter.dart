@@ -592,12 +592,19 @@ class HerdrAdapter
         .cast<Map<String, dynamic>>();
   }
 
-  /// Parses one `workspace list` entry. Reads three of the eight fields on
-  /// the wire — see [MuxWorkspace] for why the other five are dropped.
+  /// Parses one `workspace list` entry. Reads four of the eight fields on
+  /// the wire — see [MuxWorkspace] for why the other four are dropped.
+  ///
+  /// `active_tab_id` is read as `String?` rather than required: it is
+  /// present in every capture this adapter has seen, but [MuxWorkspace]'s
+  /// doc is explicit that its live trustworthiness across host mutations is
+  /// unverified, so a reader must degrade sanely on a missing or stale
+  /// value rather than this parse crashing on one.
   MuxWorkspace _parseWorkspaceInfo(Map<String, dynamic> json) => (
     workspaceId: json['workspace_id'] as String,
     label: json['label'] as String,
     agentState: _parseAgentState(json['agent_status'] as String),
+    activeTabId: json['active_tab_id'] as String?,
   );
 
   /// Parses one `tab list` entry.
