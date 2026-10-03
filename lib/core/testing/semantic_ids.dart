@@ -238,4 +238,13 @@ class ProfileEditSemantics {
   /// got more honest.
   static const backgroundHoldSwitch =
       'helm.profile_edit.background_hold_switch';
+
+  /// The control picking [ConnectionProfile.fontSize] for this profile.
+  static const fontSizeControl = 'helm.profile_edit.font_size_control';
+
+  /// One selectable candidate point size inside [fontSizeControl].
+  /// Addressable per-size rather than by position, so a test can select
+  /// "the 9pt option" without caring which index it currently renders at.
+  static String fontSizeOption(int fontSize) =>
+      'helm.profile_edit.font_size_option_$fontSize';
 }

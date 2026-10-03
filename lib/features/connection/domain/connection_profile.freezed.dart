@@ -88,6 +88,25 @@ mixin _$ConnectionProfile {
   /// is, a box the user opens for one command is not.
   bool get holdInBackground => throw _privateConstructorUsedError;
 
+  /// Point size [HelmTerminalView] renders this session's terminal at.
+  ///
+  /// `@Default(AppConstants.defaultTerminalFontSize)` matters for the
+  /// same reason it matters on [holdInBackground]: every profile
+  /// already on a device predates this field, and that default is the
+  /// exact point size `terminal_view_widget.dart` hardcoded before this
+  /// field existed — see `connection_profile_test.dart`'s "Font size is
+  /// chosen, never inherited" group, which asserts this against JSON
+  /// captured verbatim from the pre-field app. A device upgrading must
+  /// render identically to how it rendered the day before; a surprise
+  /// resize is not a feature.
+  ///
+  /// It is a per-profile field, not a global setting, for the same
+  /// reason [holdInBackground] is: different hosts paint different
+  /// things. A profile that mostly shows `herdr`'s 80-column TUIs wants
+  /// a size small enough to fit 80 columns on this device; a profile
+  /// used for a quick `ls` does not need that trade-off at all.
+  double get fontSize => throw _privateConstructorUsedError;
+
   /// Serializes this ConnectionProfile to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -116,6 +135,7 @@ abstract class $ConnectionProfileCopyWith<$Res> {
     String? multiplexer,
     bool isDefault,
     bool holdInBackground,
+    double fontSize,
   });
 }
 
@@ -144,6 +164,7 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
     Object? multiplexer = freezed,
     Object? isDefault = null,
     Object? holdInBackground = null,
+    Object? fontSize = null,
   }) {
     return _then(
       _value.copyWith(
@@ -187,6 +208,10 @@ class _$ConnectionProfileCopyWithImpl<$Res, $Val extends ConnectionProfile>
                 ? _value.holdInBackground
                 : holdInBackground // ignore: cast_nullable_to_non_nullable
                       as bool,
+            fontSize: null == fontSize
+                ? _value.fontSize
+                : fontSize // ignore: cast_nullable_to_non_nullable
+                      as double,
           )
           as $Val,
     );
@@ -213,6 +238,7 @@ abstract class _$$ConnectionProfileImplCopyWith<$Res>
     String? multiplexer,
     bool isDefault,
     bool holdInBackground,
+    double fontSize,
   });
 }
 
@@ -240,6 +266,7 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
     Object? multiplexer = freezed,
     Object? isDefault = null,
     Object? holdInBackground = null,
+    Object? fontSize = null,
   }) {
     return _then(
       _$ConnectionProfileImpl(
@@ -283,6 +310,10 @@ class __$$ConnectionProfileImplCopyWithImpl<$Res>
             ? _value.holdInBackground
             : holdInBackground // ignore: cast_nullable_to_non_nullable
                   as bool,
+        fontSize: null == fontSize
+            ? _value.fontSize
+            : fontSize // ignore: cast_nullable_to_non_nullable
+                  as double,
       ),
     );
   }
@@ -302,6 +333,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     this.multiplexer,
     this.isDefault = false,
     this.holdInBackground = false,
+    this.fontSize = AppConstants.defaultTerminalFontSize,
   });
 
   factory _$ConnectionProfileImpl.fromJson(Map<String, dynamic> json) =>
@@ -387,9 +419,30 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
   @JsonKey()
   final bool holdInBackground;
 
+  /// Point size [HelmTerminalView] renders this session's terminal at.
+  ///
+  /// `@Default(AppConstants.defaultTerminalFontSize)` matters for the
+  /// same reason it matters on [holdInBackground]: every profile
+  /// already on a device predates this field, and that default is the
+  /// exact point size `terminal_view_widget.dart` hardcoded before this
+  /// field existed — see `connection_profile_test.dart`'s "Font size is
+  /// chosen, never inherited" group, which asserts this against JSON
+  /// captured verbatim from the pre-field app. A device upgrading must
+  /// render identically to how it rendered the day before; a surprise
+  /// resize is not a feature.
+  ///
+  /// It is a per-profile field, not a global setting, for the same
+  /// reason [holdInBackground] is: different hosts paint different
+  /// things. A profile that mostly shows `herdr`'s 80-column TUIs wants
+  /// a size small enough to fit 80 columns on this device; a profile
+  /// used for a quick `ls` does not need that trade-off at all.
+  @override
+  @JsonKey()
+  final double fontSize;
+
   @override
   String toString() {
-    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, sessionRef: $sessionRef, multiplexer: $multiplexer, isDefault: $isDefault, holdInBackground: $holdInBackground)';
+    return 'ConnectionProfile(id: $id, name: $name, host: $host, port: $port, username: $username, tmuxSession: $tmuxSession, sessionRef: $sessionRef, multiplexer: $multiplexer, isDefault: $isDefault, holdInBackground: $holdInBackground, fontSize: $fontSize)';
   }
 
   @override
@@ -412,7 +465,9 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
             (identical(other.isDefault, isDefault) ||
                 other.isDefault == isDefault) &&
             (identical(other.holdInBackground, holdInBackground) ||
-                other.holdInBackground == holdInBackground));
+                other.holdInBackground == holdInBackground) &&
+            (identical(other.fontSize, fontSize) ||
+                other.fontSize == fontSize));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -429,6 +484,7 @@ class _$ConnectionProfileImpl implements _ConnectionProfile {
     multiplexer,
     isDefault,
     holdInBackground,
+    fontSize,
   );
 
   /// Create a copy of ConnectionProfile
@@ -460,6 +516,7 @@ abstract class _ConnectionProfile implements ConnectionProfile {
     final String? multiplexer,
     final bool isDefault,
     final bool holdInBackground,
+    final double fontSize,
   }) = _$ConnectionProfileImpl;
 
   factory _ConnectionProfile.fromJson(Map<String, dynamic> json) =
@@ -541,6 +598,26 @@ abstract class _ConnectionProfile implements ConnectionProfile {
   /// is, a box the user opens for one command is not.
   @override
   bool get holdInBackground;
+
+  /// Point size [HelmTerminalView] renders this session's terminal at.
+  ///
+  /// `@Default(AppConstants.defaultTerminalFontSize)` matters for the
+  /// same reason it matters on [holdInBackground]: every profile
+  /// already on a device predates this field, and that default is the
+  /// exact point size `terminal_view_widget.dart` hardcoded before this
+  /// field existed — see `connection_profile_test.dart`'s "Font size is
+  /// chosen, never inherited" group, which asserts this against JSON
+  /// captured verbatim from the pre-field app. A device upgrading must
+  /// render identically to how it rendered the day before; a surprise
+  /// resize is not a feature.
+  ///
+  /// It is a per-profile field, not a global setting, for the same
+  /// reason [holdInBackground] is: different hosts paint different
+  /// things. A profile that mostly shows `herdr`'s 80-column TUIs wants
+  /// a size small enough to fit 80 columns on this device; a profile
+  /// used for a quick `ls` does not need that trade-off at all.
+  @override
+  double get fontSize;
 
   /// Create a copy of ConnectionProfile
   /// with the given fields replaced by the non-null parameter values.

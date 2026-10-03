@@ -19,6 +19,9 @@ _$ConnectionProfileImpl _$$ConnectionProfileImplFromJson(
   multiplexer: json['multiplexer'] as String?,
   isDefault: json['isDefault'] as bool? ?? false,
   holdInBackground: json['holdInBackground'] as bool? ?? false,
+  fontSize:
+      (json['fontSize'] as num?)?.toDouble() ??
+      AppConstants.defaultTerminalFontSize,
 );
 
 Map<String, dynamic> _$$ConnectionProfileImplToJson(
@@ -34,4 +37,5 @@ Map<String, dynamic> _$$ConnectionProfileImplToJson(
   'multiplexer': instance.multiplexer,
   'isDefault': instance.isDefault,
   'holdInBackground': instance.holdInBackground,
+  'fontSize': instance.fontSize,
 };

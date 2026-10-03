@@ -1,6 +1,7 @@
 // ignore_for_file: invalid_annotation_target — see the doc comment on
 // ConnectionProfile.sessionRef for why this is a known false positive.
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'package:helm/core/constants/app_constants.dart';
 
 part 'connection_profile.freezed.dart';
 part 'connection_profile.g.dart';
@@ -131,6 +132,25 @@ class ConnectionProfile with _$ConnectionProfile {
     /// a notification is a per-machine judgement: a long-lived agent host
     /// is, a box the user opens for one command is not.
     @Default(false) bool holdInBackground,
+
+    /// Point size [HelmTerminalView] renders this session's terminal at.
+    ///
+    /// `@Default(AppConstants.defaultTerminalFontSize)` matters for the
+    /// same reason it matters on [holdInBackground]: every profile
+    /// already on a device predates this field, and that default is the
+    /// exact point size `terminal_view_widget.dart` hardcoded before this
+    /// field existed — see `connection_profile_test.dart`'s "Font size is
+    /// chosen, never inherited" group, which asserts this against JSON
+    /// captured verbatim from the pre-field app. A device upgrading must
+    /// render identically to how it rendered the day before; a surprise
+    /// resize is not a feature.
+    ///
+    /// It is a per-profile field, not a global setting, for the same
+    /// reason [holdInBackground] is: different hosts paint different
+    /// things. A profile that mostly shows `herdr`'s 80-column TUIs wants
+    /// a size small enough to fit 80 columns on this device; a profile
+    /// used for a quick `ls` does not need that trade-off at all.
+    @Default(AppConstants.defaultTerminalFontSize) double fontSize,
   }) = _ConnectionProfile;
 
   factory ConnectionProfile.fromJson(Map<String, dynamic> json) =>

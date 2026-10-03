@@ -10,6 +10,7 @@ import 'package:helm/features/connection/data/ssh_key_service.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/settings/presentation/settings_provider.dart';
+import 'package:helm/features/settings/presentation/terminal_font_size_preview.dart';
 import 'package:uuid/uuid.dart';
 
 class ProfileEditScreen extends ConsumerStatefulWidget {
@@ -35,6 +36,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
 
   bool _isDefault = false;
   bool _holdInBackground = false;
+  double _fontSize = AppConstants.defaultTerminalFontSize;
   bool _isSaving = false;
   String? _testStatus;
   bool _testPassed = false;
@@ -70,6 +72,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         _selectedMultiplexer = decodeMultiplexer(profile.multiplexer);
         _isDefault = profile.isDefault;
         _holdInBackground = profile.holdInBackground;
+        _fontSize = profile.fontSize;
       });
     }
   }
@@ -262,6 +265,11 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            _FontSizeControl(
+              value: _fontSize,
+              onChanged: (v) => setState(() => _fontSize = v),
+            ),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
@@ -341,6 +349,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       multiplexer: encodeMultiplexer(_selectedMultiplexer),
       isDefault: _isDefault,
       holdInBackground: _holdInBackground,
+      fontSize: _fontSize,
     );
 
     try {
@@ -479,6 +488,84 @@ class _TestStatusCard extends StatelessWidget {
             child: Text(message, style: TextStyle(color: color, fontSize: 13)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Lets the user pick [ConnectionProfile.fontSize] by what it buys rather
+/// than by its point size alone: each candidate is labelled with the
+/// LIVE column count `previewColumnsForFontSize` measures for it at this
+/// control's own on-screen width.
+///
+/// That width comes from a [LayoutBuilder] around this control, not from
+/// `MediaQuery`'s screen size — the real terminal view sits inside this
+/// same Scaffold's body, narrower than the full screen once its own
+/// padding is subtracted, so the control's own measured width is the
+/// closer honest answer of the two, even though neither is the ACTUAL
+/// terminal viewport width. That number only ever comes from
+/// `TerminalView`'s real layout once a session exists (see
+/// `terminal_view_widget.dart`); this preview exists to inform the choice
+/// before a session does.
+class _FontSizeControl extends StatelessWidget {
+  const _FontSizeControl({required this.value, required this.onChanged});
+
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      identifier: ProfileEditSemantics.fontSizeControl,
+      container: true,
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: theme.colorScheme.outline),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Terminal text size', style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Smaller text fits more columns, which matters for TUIs '
+              'that paint a fixed 80-column layout — shown below for '
+              'each size on this screen.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: AppConstants.terminalFontSizeOptions.map((size) {
+                    final columns = previewColumnsForFontSize(
+                      fontSize: size,
+                      viewportWidth: width,
+                    );
+                    final selected = size == value;
+                    return Semantics(
+                      identifier: ProfileEditSemantics.fontSizeOption(
+                        size.round(),
+                      ),
+                      child: ChoiceChip(
+                        label: Text('${size.round()}pt — ~$columns cols'),
+                        selected: selected,
+                        onSelected: (_) => onChanged(size),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
