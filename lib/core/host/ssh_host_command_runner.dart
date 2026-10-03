@@ -28,7 +28,8 @@ typedef SshChannelOpener = Future<SshCommandChannel> Function(String command);
 /// stdin to a fixed `/bin/sh -s` command and never requests a
 /// pseudo-terminal, so script bytes cross zero shell-quoting layers.
 class SshHostCommandRunner implements HostCommandRunner {
-  SshHostCommandRunner(SSHClient client) : _openChannel = _defaultOpener(client);
+  SshHostCommandRunner(SSHClient client)
+    : _openChannel = _defaultOpener(client);
 
   /// For tests: bypasses the live [SSHClient] and drives a scripted
   /// [SshChannelOpener] directly.
@@ -52,7 +53,10 @@ class SshHostCommandRunner implements HostCommandRunner {
   }
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     final channel = await _openChannel('/bin/sh -s');
     channel.stdin.add(utf8.encode(script));
     await channel.stdin.close();
@@ -87,11 +91,12 @@ class SshHostCommandRunner implements HostCommandRunner {
     try {
       // Wait for the OUTPUT STREAMS to close, not just for the channel.
       //
-      // dartssh2 2.16.0 documents the difference on SSHSession.done
-      // (ssh_session.dart:31-33): "This Future completes when the channel
-      // is closed. More data may still be available on the stdout and
-      // stderr streams at this time." The stdout/stderr controllers are
-      // closed separately, in _handleChannelDataDone.
+      // dartssh2 3.3.1 documents the difference on SSHSession.done
+      // (ssh_session.dart:31-33, unchanged since 2.16.0): "This Future
+      // completes when the channel is closed. More data may still be
+      // available on the stdout and stderr streams at this time." The
+      // stdout/stderr controllers are closed separately, in
+      // _handleChannelDataDone (`ssh_session.dart:181-184`).
       //
       // Awaiting only `done` and then cancelling the subscriptions
       // therefore discards whatever was still buffered. Measured against a

@@ -33,9 +33,11 @@ import 'package:xterm/xterm.dart';
 /// session-attach spec's "Attach Without a Stdin Race" requirement.
 ///
 /// Defaults to [SSHClient.execute], which — verified against dartssh2
-/// 2.16.0's source — sends the pty-req before the exec request, exactly
-/// like [SSHClient.shell] does, and returns the same [SSHSession] type, so
-/// [TerminalSession._bridgeIO] needs no changes to work with either path.
+/// 3.3.1's source (`ssh_client.dart:542` precedes `:562` in `execute()`,
+/// and `:609` precedes `:628` in `shell()`) — sends the pty-req before
+/// the exec request, exactly like [SSHClient.shell] does, and returns
+/// the same [SSHSession] type, so [TerminalSession._bridgeIO] needs no
+/// changes to work with either path.
 /// Tests inject a scripted implementation to avoid a live SSH transport,
 /// mirroring `SshChannelOpener` in `ssh_host_command_runner.dart`.
 typedef AttachSessionOpener =
@@ -125,11 +127,13 @@ class _UnconnectedHostCommandRunner implements HostCommandRunner {
 ///
 /// Read from [SSHSession.exitCode]/[SSHSession.exitSignal] once the attach
 /// session's [SSHSession.done] completes. Verified against dartssh2
-/// 2.16.0's source (ssh_session.dart): both are set synchronously inside
-/// `_handleRequest`, which runs for the `exit-status`/`exit-signal`
+/// 3.3.1's source (ssh_session.dart:141-160): both are set synchronously
+/// inside `_handleRequest`, which runs for the `exit-status`/`exit-signal`
 /// channel request the remote sends before closing the channel — so both
 /// are already populated by the time `done` completes; no extra await or
-/// polling is needed.
+/// polling is needed. The same structure existed in 2.16.0, which this
+/// was originally verified against; re-checked here because the method
+/// moved line numbers between versions.
 ///
 /// Empirically verified against real tmux 3.6a and zellij 0.44.3 hosts
 /// (exact commands and observed exit codes recorded in this remediation's
@@ -904,12 +908,15 @@ class TerminalSession {
         // On this path, the shell connectAndOpenShell already opened is
         // dead weight — closed here, BEFORE attaching, so a failed attach
         // never leaves it open either (no leaked orphan remote shell, no
-        // undrained channel). Verified against dartssh2 2.16.0's source
+        // undrained channel). Verified against dartssh2 3.3.1's source
         // (ssh_client.dart's `_openSessionChannel`/`_channels` map,
         // ssh_channel.dart's `SSHChannelController`) that channels are
-        // fully independent: each open channel gets its own allocated id
-        // and its own controller instance, and closing one only ever
-        // touches that channel's own EOF/close state — never `_client`,
+        // fully independent: `SSHChannelController` holds no reference to
+        // the client or the transport at all, only the `sendMessage`
+        // callback it was constructed with, and each open channel gets
+        // its own allocated id and its own controller instance in the
+        // `_channels` map. Closing one only ever touches that channel's
+        // own EOF/close state and calls `sendMessage` — never `_client`,
         // `_transport`, or any other channel. Closing this shell cannot
         // disturb the exec channel opened immediately below.
         //
