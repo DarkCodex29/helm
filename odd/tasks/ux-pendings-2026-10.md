@@ -25,14 +25,17 @@ exists to prevent.
 
 ## Tasks
 
-- [ ] 1. Make the disconnection overlay scrim actually opaque
+- [x] 1. Make the disconnection overlay scrim actually opaque
   - Surfaces: `lib/core/theme/app_theme.dart`,
     `lib/features/terminal/presentation/widgets/terminal_view_widget.dart`
   - `AppTheme.scrim` is `Color(0xCC0D1117)` (80%), so the terminal shows through
     the three-line overlay and the text collides with the icon.
-  - Commit: pending
+  - `AppTheme.scrim` had exactly one consumer, so the shared token went fully
+    opaque rather than forking a second one. No layout change was needed: the
+    text/icon collision WAS the terminal bleeding through.
+  - Commit: `389c69b`
 
-- [ ] 2. Terminal font-size control, persisted per profile
+- [x] 2. Terminal font-size control, persisted per profile
   - Surfaces: `lib/features/connection/domain/connection_profile.dart`,
     `lib/features/connection/data/connection_profile_repository.dart`,
     `lib/features/settings/presentation/`,
@@ -44,16 +47,45 @@ exists to prevent.
     value, persisted per `ConnectionProfile`.
   - `ConnectionProfile` is `@freezed` with generated `fromJson`/`toJson`, so a
     new field requires `build_runner`.
-  - Commit: pending
+  - Landed in the profile editor, not global settings: `settings_screen.dart`
+    edits no profile fields at all, and `holdInBackground`'s own doc argues why
+    a per-machine judgement is deliberately not global.
+  - The live column preview measures the same way xterm's own
+    `TerminalPainter._measureCharSize` does (a real `ui.Paragraph` over the real
+    font stack) in `terminal_font_size_preview.dart`. It is preview-only;
+    `TerminalView`'s layout stays the sole source of the size pushed at the PTY.
+  - `HelmTerminalView` gained no constructor parameter — it reads the profile
+    the session already carries, so its ten call sites were untouched.
+  - NOT verified without a device: the exact on-device column count per size.
+    The harness lacks real device font metrics, so only monotonicity and
+    direction are proven there.
+  - Commit: `e6d6a18`
 
-- [ ] 3. Make workspace headers tappable in the shortcuts drawer
+- [x] 3. Make workspace headers tappable in the shortcuts drawer
   - Surfaces: `lib/features/shortcuts/presentation/shortcuts_drawer.dart`,
     multiplexer workspace-tree layer
   - `_WorkspaceTreeSection` (`:613`) draws `EBIM`, `Go Nexa` as inert text.
     herdr exposes `active_tab_id` per workspace, so a header can focus it.
   - Existing coverage to extend:
     `test/features/shortcuts/presentation/shortcuts_drawer_workspaces_test.dart`
-  - Commit: pending
+  - `MuxWorkspace` now reads `active_tab_id`; its doc comment records that a
+    reader arrived rather than contradicting the old "nobody reads this"
+    reasoning. A stale id falls back to the workspace's first tab by number,
+    treated as the same non-atomic race the tree's own doc already names.
+  - Focus reuses the existing `_focusTab` path, so there is one error wording
+    and one close-on-success order.
+  - NOT verified without the live host: `active_tab_id` behavior across a host
+    mutation between the two commands. The fallback exists for that gap.
+  - Commit: `9e08068`
+
+## Final verification
+
+`flutter analyze` clean. Full suite `1348/1348` passing, up from the `1320`
+baseline. Branch `feat/ux-pendings-2026-10`, three commits, not pushed and not
+merged — both remain the owner's decision.
+
+No slice has been exercised on the S22 or against the live herdr host. Every
+claim above is from `flutter test` and `flutter analyze` only.
 
 ## Deliberately out of scope
 
