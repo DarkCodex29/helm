@@ -35,6 +35,9 @@ enum HostAdvisoryId {
 
   /// From [DiagnosticId.tailscaleOwnsPort22].
   tailscaleOwnsPort22,
+
+  /// From [DiagnosticId.tailscaleAddressUnstable].
+  tailscaleAddressUnstable,
 }
 
 /// One user-facing finding about the connected host.
@@ -198,11 +201,15 @@ HostAdvisory? advisoryForDiagnostic(HostDiagnostic diagnostic) {
       DiagnosticId.sessionsMayDieOnLogout =>
         HostAdvisoryId.sessionsMayDieOnLogout,
       DiagnosticId.tailscaleOwnsPort22 => HostAdvisoryId.tailscaleOwnsPort22,
+      DiagnosticId.tailscaleAddressUnstable =>
+        HostAdvisoryId.tailscaleAddressUnstable,
     },
     severity: severity,
     title: switch (diagnostic.id) {
       DiagnosticId.sessionsMayDieOnLogout => 'Sessions may not survive logout',
       DiagnosticId.tailscaleOwnsPort22 => 'Tailscale may own port 22',
+      DiagnosticId.tailscaleAddressUnstable =>
+        'Connected by a raw Tailscale address',
     },
     detail: diagnostic.detail,
     remediationCopy: diagnostic.remediationCopy,

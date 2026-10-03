@@ -1820,7 +1820,11 @@ class TerminalSession {
     // simply yields no diagnostic findings.
     unawaited(
       _advisor
-          .collect(selection: _multiplexerSelection, runner: _hostRunner)
+          .collect(
+            selection: _multiplexerSelection,
+            runner: _hostRunner,
+            connectHost: profile.host,
+          )
           .then((advisories) {
             // Collecting takes host round-trips, and the session can be
             // torn down during them — closing a tab disposes it while this

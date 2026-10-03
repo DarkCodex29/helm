@@ -141,22 +141,17 @@ void main() {
       expect(report.sessions.single.name, 'helm-0');
     });
 
-    test(
-      'the probe reports herdr as PRESENT even though a non-interactive '
-      'shell cannot resolve the bare name',
-      () async {
-        final result = await _connect(
-          runner: _probeRunner(_realHostProbeOutput),
-        );
+    test('the probe reports herdr as PRESENT even though a non-interactive '
+        'shell cannot resolve the bare name', () async {
+      final result = await _connect(runner: _probeRunner(_realHostProbeOutput));
 
-        final herdr = result.session.hostReport!.mux.firstWhere(
-          (m) => m.id == 'herdr',
-        );
-        expect(herdr.found, isTrue);
-        expect(herdr.onInheritedPath, isFalse);
-        expect(herdr.absPath, '/home/deployer/.local/bin/herdr');
-      },
-    );
+      final herdr = result.session.hostReport!.mux.firstWhere(
+        (m) => m.id == 'herdr',
+      );
+      expect(herdr.found, isTrue);
+      expect(herdr.onInheritedPath, isFalse);
+      expect(herdr.absPath, '/home/deployer/.local/bin/herdr');
+    });
   });
 
   group('TerminalSession.connect — honors the persisted multiplexer', () {
@@ -174,21 +169,18 @@ void main() {
       expect(result.commands, ["/usr/bin/zellij attach --create 'helm-0'"]);
     });
 
-    test(
-      'attaches herdr through its absolute path when it is off the '
-      'inherited PATH',
-      () async {
-        final result = await _connect(
-          profile: _profile(multiplexer: 'herdr'),
-          runner: _probeRunner(_realHostProbeOutput),
-        );
+    test('attaches herdr through its absolute path when it is off the '
+        'inherited PATH', () async {
+      final result = await _connect(
+        profile: _profile(multiplexer: 'herdr'),
+        runner: _probeRunner(_realHostProbeOutput),
+      );
 
-        expect(
-          result.commands.single,
-          startsWith('/home/deployer/.local/bin/herdr'),
-        );
-      },
-    );
+      expect(
+        result.commands.single,
+        startsWith('/home/deployer/.local/bin/herdr'),
+      );
+    });
 
     test('attaches tmux through its probe-resolved absolute path', () async {
       final result = await _connect(
@@ -387,27 +379,30 @@ void main() {
       expect(result.session.status.name, 'connected');
     });
 
-    test('an unverified report is never reported as a missing multiplexer', () async {
-      final terminal = RecordingTerminal();
-      final result = await _connect(
-        profile: _profile(multiplexer: 'zellij'),
-        runner: FakeHostCommandRunner(),
-        terminal: terminal,
-      );
+    test(
+      'an unverified report is never reported as a missing multiplexer',
+      () async {
+        final terminal = RecordingTerminal();
+        final result = await _connect(
+          profile: _profile(multiplexer: 'zellij'),
+          runner: FakeHostCommandRunner(),
+          terminal: terminal,
+        );
 
-      // The probe could not report. That is NOT evidence zellij is absent,
-      // so the user must not be told it is — and the attach proceeds with
-      // the multiplexer they chose, exactly as before the probe existed.
-      expect(
-        result.session.multiplexerSelection,
-        isA<MultiplexerUnverified>(),
-      );
-      expect(
-        terminal.writes.where((w) => w.contains('not installed')),
-        isEmpty,
-      );
-      expect(result.commands, ["zellij attach --create 'helm-0'"]);
-    });
+        // The probe could not report. That is NOT evidence zellij is absent,
+        // so the user must not be told it is — and the attach proceeds with
+        // the multiplexer they chose, exactly as before the probe existed.
+        expect(
+          result.session.multiplexerSelection,
+          isA<MultiplexerUnverified>(),
+        );
+        expect(
+          terminal.writes.where((w) => w.contains('not installed')),
+          isEmpty,
+        );
+        expect(result.commands, ["zellij attach --create 'helm-0'"]);
+      },
+    );
 
     test('a timed-out probe leaves the session connected', () async {
       final runner = FakeHostCommandRunner();
@@ -419,10 +414,7 @@ void main() {
       final result = await _connect(runner: runner);
 
       expect(result.session.status.name, 'connected');
-      expect(
-        result.session.hostReport!.status,
-        HostReportStatus.truncated,
-      );
+      expect(result.session.hostReport!.status, HostReportStatus.truncated);
     });
   });
 
@@ -444,17 +436,20 @@ void main() {
       );
     });
 
-    test('publishes an off-PATH finding for the selected multiplexer', () async {
-      final result = await _connect(
-        profile: _profile(multiplexer: 'herdr'),
-        runner: _probeRunner(_realHostProbeOutput),
-      );
+    test(
+      'publishes an off-PATH finding for the selected multiplexer',
+      () async {
+        final result = await _connect(
+          profile: _profile(multiplexer: 'herdr'),
+          runner: _probeRunner(_realHostProbeOutput),
+        );
 
-      expect(
-        result.session.advisoriesNotifier.value.map((a) => a.id),
-        contains(HostAdvisoryId.multiplexerOffPath),
-      );
-    });
+        expect(
+          result.session.advisoriesNotifier.value.map((a) => a.id),
+          contains(HostAdvisoryId.multiplexerOffPath),
+        );
+      },
+    );
 
     test('costs no host round-trips beyond the probe itself', () async {
       // Diagnostics are NOT run here: a healthy connect must not pay for
@@ -462,7 +457,10 @@ void main() {
       // unregistered command, so a diagnostic slipping in fails loudly.
       final runner = _probeRunner(_realHostProbeOutput);
 
-      await _connect(profile: _profile(multiplexer: 'zellij'), runner: runner);
+      await _connect(
+        profile: _profile(multiplexer: 'zellij'),
+        runner: runner,
+      );
 
       expect(runner.runCalls, isEmpty);
     });
@@ -570,6 +568,78 @@ void main() {
       );
     });
 
+    test('surfaces a raw-Tailscale-address warning using the profile\'s own '
+        'host string — proves the connect host reaches HostAdvisor.collect, '
+        'not just that HostDiagnostics can take one as a parameter', () async {
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final attachSession = FakeSSHSession();
+      final runner = _probeRunner(_realHostProbeOutput);
+      runner.whenRun(
+        'command -v tailscale >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        'tailscale debug prefs',
+        const HostCommandResult(stdout: '{"RunSSH":false}', exitCode: 0),
+      );
+      runner.whenRun(
+        'tailscale status --peers=false --json',
+        const HostCommandResult(
+          stdout:
+              '{"BackendState":"Running",'
+              '"TailscaleIPs":["100.108.167.71"],'
+              '"Self":{"DNSName":"gian-macbook-pro.taila49d8e.ts.net."},'
+              '"CurrentTailnet":{"MagicDNSSuffix":"taila49d8e.ts.net",'
+              '"MagicDNSEnabled":true}}',
+          exitCode: 0,
+        ),
+      );
+      runner.whenRun(
+        'command -v loginctl >/dev/null 2>&1',
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        r'loginctl show-user $(id -un) --property=Linger',
+        const HostCommandResult(stdout: 'Linger=yes', exitCode: 0),
+      );
+
+      final session = TerminalSession(
+        profile: ConnectionProfile(
+          id: 'profile-1',
+          name: 'Test Host',
+          host: '100.108.167.71',
+          username: 'tester',
+          multiplexer: 'tmux',
+        ),
+        sshService: service,
+        tmuxSessionName: 'helm-0',
+        terminal: RecordingTerminal(),
+        hostRunnerFactory: (_) => runner,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
+
+      await attachSession.endWithExitCode(1);
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        session.advisoriesNotifier.value.map((a) => a.id),
+        contains(HostAdvisoryId.tailscaleAddressUnstable),
+      );
+      expect(
+        session.advisoriesNotifier.value
+            .firstWhere((a) => a.id == HostAdvisoryId.tailscaleAddressUnstable)
+            .detail,
+        contains('gian-macbook-pro.taila49d8e.ts.net'),
+      );
+    });
+
     test('a failed connect publishes without needing a live host', () async {
       final service = FakeSSHService();
       service.queueConnectError(StateError('refused'));
@@ -637,13 +707,18 @@ void main() {
       expect(result.session.hostRunner, isNotNull);
     });
 
-    test('drops the runner on dispose so no caller reaches a dead client', () async {
-      final result = await _connect(runner: _probeRunner(_realHostProbeOutput));
+    test(
+      'drops the runner on dispose so no caller reaches a dead client',
+      () async {
+        final result = await _connect(
+          runner: _probeRunner(_realHostProbeOutput),
+        );
 
-      await result.session.dispose();
+        await result.session.dispose();
 
-      expect(result.session.hostRunner, isNull);
-    });
+        expect(result.session.hostRunner, isNull);
+      },
+    );
   });
 
   group('TerminalSession.connect — no session reference', () {
@@ -723,6 +798,8 @@ class _SlowDiagnosticsRunner implements HostCommandRunner {
   }
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async =>
-      HostCommandResult(stdout: _probeStdout, exitCode: 0);
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async => HostCommandResult(stdout: _probeStdout, exitCode: 0);
 }
