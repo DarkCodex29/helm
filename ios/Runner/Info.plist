@@ -26,26 +26,6 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- Publishes this app's Documents directory to the Files app.
-
-	     Downloads are staged in Documents/helm_downloads on iOS and in the
-	     CACHE directory everywhere else — see
-	     SftpDownloadService.defaultDownloadDirectory, which documents the
-	     split. The cache is the better home for a hand-off file, but the
-	     Files app cannot see it under any Info.plist key, so on iOS an
-	     invisible download would be one the user could view once and never
-	     find again.
-
-	     UIFileSharingEnabled lists the folder in Files;
-	     LSSupportsOpeningDocumentsInPlace lets other apps open a file from
-	     it without first copying it. Both are needed: the first alone
-	     shows the file, the second is what makes opening it in place work.
-
-	     Note this makes Documents/ user-visible, which is why the download
-	     directory is a NAMED SUBFOLDER and why the stale-file sweep is
-	     scoped to it. -->
-	<key>UIFileSharingEnabled</key>
-	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
@@ -72,6 +52,28 @@
 		</dict>
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<!-- Publishes this app's Documents directory to the Files app.
+
+	     Downloads are staged in Documents/helm_downloads on iOS and in the
+	     CACHE directory everywhere else — see
+	     SftpDownloadService.defaultDownloadDirectory, which documents the
+	     split. The cache is the better home for a hand-off file, but the
+	     Files app cannot see it under any Info.plist key, so on iOS an
+	     invisible download would be one the user could view once and never
+	     find again.
+
+	     UIFileSharingEnabled lists the folder in Files;
+	     LSSupportsOpeningDocumentsInPlace (above, separated from this key
+	     when Xcode re-sorted this file alphabetically) lets other apps open
+	     a file from it without first copying it. Both are needed: the first
+	     alone shows the file, the second is what makes opening it in place
+	     work.
+
+	     Note this makes Documents/ user-visible, which is why the download
+	     directory is a NAMED SUBFOLDER and why the stale-file sweep is
+	     scoped to it. -->
+	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
