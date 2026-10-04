@@ -157,6 +157,34 @@ Requiere provisionar FCM una vez y dejar el notifier corriendo en la Mac. El pro
 Firebase solo transporta el push: el contenido lo compone la Mac y la credencial de envío
 nunca sale de ella.
 
+### Firma de release (Android)
+
+`flutter build apk --release` funciona sin nada más, pero firma con el keystore de
+debug: es compartido y público (viene con el SDK de Android), así que cualquiera
+puede firmar un APK que Android acepte como "actualización" de Helm. El build te lo
+recuerda con un warning bien visible cada vez que falta la firma real.
+
+Para firmar de verdad:
+
+1. Generá el keystore (elegí vos el password, no lo inventes acá ni lo anotes en
+   el repo):
+   ```bash
+   keytool -genkey -v -keystore ~/helm-release.jks -keyalg RSA -keysize 2048 \
+     -validity 10000 -alias helm
+   ```
+2. Creá `android/key.properties` (gitignorado a propósito, igual que el `.jks`):
+   ```properties
+   storePassword=<tu password>
+   keyPassword=<tu password>
+   keyAlias=helm
+   storeFile=/ruta/absoluta/a/helm-release.jks
+   ```
+3. `flutter build apk --release` ahora firma con ese keystore y el warning desaparece.
+
+**Guardá el `.jks` y el password en otro lado.** Si los perdés, no hay forma de subir
+una actualización a un Helm ya instalado — Android la rechaza porque no coincide la
+firma, y la única salida es desinstalar y reinstalar desde cero.
+
 ## Stack
 
 | Componente | Versión |
