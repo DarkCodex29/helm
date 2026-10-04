@@ -15,7 +15,7 @@ and they are not the same kind of problem:
 
 ## Tasks
 
-- [ ] 1. Make release builds signable with a real key
+- [x] 1. Make release builds signable with a real key
   - Surfaces: `android/app/build.gradle.kts`, `README.md`
   - `build.gradle.kts:45-49` still carries its template TODO and signs release
     with the SHARED PUBLIC debug keystore. Anyone can sign with that key, so a
@@ -27,18 +27,20 @@ and they are not the same kind of problem:
   - The debug fallback must survive for anyone who has not made a keystore, or
     `flutter run --release` breaks on a fresh clone — but it must become LOUD.
     Silence is exactly what let this TODO live this long.
-  - Commit: pending
+  - Commit: `2ced683`
 
-- [ ] 2. Let an iOS foreground notification tap reach the app
+- [x] 2. Let an iOS foreground notification tap reach the app
   - Surfaces: `ios/Runner/AppDelegate.swift`
   - Confirmed absent, not assumed: `rg -c UNUserNotificationCenter` returns 0,
     and `FlutterAppDelegate` does not conform to `UNUserNotificationCenterDelegate`
     either — only `FlutterPluginAppLifeCycleDelegate` does.
   - Verification is inherently manual: it needs a real notification, shown while
     helm is in the foreground, tapped by a human.
-  - Commit: pending
+  - Commit: `820355f`. Runtime NOT verified: a foreground tap needs a real
+    agent alert raised and tapped by a human. Compile-level proof only, which
+    is what the unconditional cast buys.
 
-- [ ] 3. Give the user a way out of a host key mismatch
+- [x] 3. Give the user a way out of a host key mismatch
   - Surfaces: `lib/features/connection/data/known_hosts_service.dart`,
     `lib/features/settings/presentation/**`, `test/**`
   - `removeHost()` has ZERO call sites in `lib/` — verified again this session.
@@ -65,3 +67,12 @@ and they are not the same kind of problem:
 - Choosing a licence. A public repository with none is "all rights reserved",
   which contradicts wanting others to use it — but which licence is a decision,
   not a task.
+
+## Final verification
+
+`flutter analyze` clean, full suite **1381/1381** (1366 at the branch point).
+Branch `feat/scaling-2026-10`, three commits, not pushed and not merged.
+
+Android release signing is now possible but NOT done: the keystore does not
+exist yet, so builds still fall back to debug — loudly. Creating it is the
+owner's step, documented in the README.
