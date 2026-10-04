@@ -78,7 +78,7 @@ class _ErrorState extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          Icon(Icons.error_outline, color: theme.colorScheme.error, size: 20),
+          Icon(AppTheme.errorIcon, color: theme.colorScheme.error, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -126,7 +126,7 @@ class _PinsList extends ConsumerWidget {
         content: Text(
           'Before forgetting ${pin.host}:${pin.port}, verify its current '
           'fingerprint on the server, through a channel you already '
-          'trust — for example by running ssh-keygen on the host '
+          'trust - for example by running ssh-keygen on the host '
           'itself.\n\n'
           'Only forget this pin once you have confirmed the server\'s own '
           'key matches what you expect. Helm will trust whatever key the '
@@ -180,7 +180,7 @@ class _PinTile extends StatelessWidget {
                 // No key type to show — see `PinnedHost.keyType`'s doc
                 // comment for why there genuinely is none, not merely an
                 // unread one.
-                ? 'Pinned by an older version of Helm — key type unknown'
+                ? 'Pinned by an older version of Helm - key type unknown'
                 : pin.keyType!,
             style: theme.textTheme.bodySmall,
           ),

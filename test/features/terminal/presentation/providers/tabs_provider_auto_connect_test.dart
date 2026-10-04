@@ -70,7 +70,7 @@ void main() {
   group('TabsNotifier.autoConnectDefault', () {
     test(
       'opens a session for the profile the user marked default, with no '
-      'user action — this is the whole point of the "Opens automatically '
+      'user action - this is the whole point of the "Opens automatically '
       'on launch" copy the profile editor already shows',
       () async {
         _seedProfiles([_otherProfile, _defaultProfile]);
@@ -93,7 +93,7 @@ void main() {
 
     test(
       'an unreachable host does NOT throw out of auto-connect and does NOT '
-      'strand Home — the tab is still there, carrying the failure',
+      'strand Home - the tab is still there, carrying the failure',
       () async {
         _seedProfiles([_defaultProfile]);
         ssh.queueConnectError(const SocketFailure());
@@ -116,7 +116,7 @@ void main() {
     );
 
     test(
-      'stands down while a crash-recovery offer is outstanding — accepting '
+      'stands down while a crash-recovery offer is outstanding - accepting '
       'that offer reopens this very profile, and nothing must dial in '
       'parallel with it',
       () async {
@@ -137,7 +137,7 @@ void main() {
 
     test(
       'does not open a SECOND session when a recovered one is already on '
-      'that profile — one session, not one per launch path',
+      'that profile - one session, not one per launch path',
       () async {
         _seedProfiles([_defaultProfile]);
         ssh.queueConnectError(const SocketFailure());
@@ -161,7 +161,7 @@ void main() {
     );
 
     test(
-      'with NO profile marked default, launch is left exactly as it was — '
+      'with NO profile marked default, launch is left exactly as it was - '
       'no tab, no dial, today empty state',
       () async {
         _seedProfiles([_otherProfile]);

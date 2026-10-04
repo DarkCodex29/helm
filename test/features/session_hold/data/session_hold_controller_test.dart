@@ -302,7 +302,7 @@ void main() {
 
     test(
       'a hold the user turned off by hand does not come back for that '
-      'session — the preference decides what happens on the NEXT connect, '
+      'session - the preference decides what happens on the NEXT connect, '
       'and never overrules the user in the moment',
       () async {
         final s = _session();
@@ -338,7 +338,7 @@ void main() {
     });
 
     test(
-      'turning one session off says nothing about another — the refusal is '
+      'turning one session off says nothing about another - the refusal is '
       'per session, not a mode the whole app enters',
       () async {
         final first = _session(name: 'helm-one');
@@ -356,7 +356,7 @@ void main() {
 
     test(
       'a hold that ended because the session disconnected is taken again on '
-      'the next connect — a dropped connection is not the user declining',
+      'the next connect - a dropped connection is not the user declining',
       () async {
         final s = _session();
 

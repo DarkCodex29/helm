@@ -69,11 +69,11 @@ void main() {
   ) async {
     final session = _session();
     session.lastFailureNotifier.value =
-        'Could not reach 100.64.0.9 — nothing answered';
+        'Could not reach 100.64.0.9 - nothing answered';
     await _pump(tester, session);
 
     expect(
-      find.text('Could not reach 100.64.0.9 — nothing answered'),
+      find.text('Could not reach 100.64.0.9 - nothing answered'),
       findsOneWidget,
     );
     // The generic line stays: it is the title, and the reason sits under

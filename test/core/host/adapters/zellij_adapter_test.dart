@@ -117,7 +117,7 @@ void main() {
   });
 
   group('agents capability', () {
-    test('is null — ZellijAdapter does not support agent state', () {
+    test('is null - ZellijAdapter does not support agent state', () {
       expect(adapter.agents, isNull);
     });
 
@@ -141,7 +141,7 @@ void main() {
   });
 
   group('panes capability', () {
-    test('is null — ZellijAdapter cannot report pane revision or cwd', () {
+    test('is null - ZellijAdapter cannot report pane revision or cwd', () {
       expect(adapter.panes, isNull);
     });
   });

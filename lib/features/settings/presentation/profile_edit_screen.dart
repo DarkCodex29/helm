@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/constants/app_constants.dart';
@@ -479,7 +480,7 @@ class _TestStatusCard extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            success ? Icons.check_circle_outline : Icons.error_outline,
+            success ? AppTheme.successIcon : AppTheme.errorIcon,
             color: color,
             size: 18,
           ),
@@ -548,7 +549,7 @@ class _FontSizeControl extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               'Smaller text fits more columns, which matters for TUIs '
-              'that paint a fixed 80-column layout — the estimate below '
+              'that paint a fixed 80-column layout - the estimate below '
               'is for the terminal on this device.',
               style: theme.textTheme.bodySmall,
             ),
@@ -565,7 +566,7 @@ class _FontSizeControl extends StatelessWidget {
                 return Semantics(
                   identifier: ProfileEditSemantics.fontSizeOption(size.round()),
                   child: ChoiceChip(
-                    label: Text('${size.round()}pt — ~$columns cols'),
+                    label: Text('${size.round()}pt - ~$columns cols'),
                     selected: selected,
                     onSelected: (_) => onChanged(size),
                   ),

@@ -98,7 +98,7 @@ Future<TerminalSession> _session({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('refreshWorkspaceTree — what the host said, passed through', () {
+  group('refreshWorkspaceTree - what the host said, passed through', () {
     test('publishes the tree the multiplexer reported, intact', () async {
       final adapter = FakeWorkspaceAwareAdapter()..whenTree(_tree);
       final session = await _session(adapter: adapter);
@@ -113,7 +113,7 @@ void main() {
       await session.dispose();
     });
 
-    test('a host that genuinely has no workspaces still reports AVAILABLE — '
+    test('a host that genuinely has no workspaces still reports AVAILABLE - '
         'an empty tree is a measurement, and it must stay distinguishable '
         'from every way of not knowing', () async {
       final adapter = FakeWorkspaceAwareAdapter()
@@ -129,7 +129,7 @@ void main() {
     });
   });
 
-  group('refreshWorkspaceTree — every refusal says it did not find out', () {
+  group('refreshWorkspaceTree - every refusal says it did not find out', () {
     test('a multiplexer with no workspaces NAMES itself rather than reporting '
         'an empty tree, and is never asked in the first place', () async {
       final adapter = FakeAgentlessAdapter(id: MultiplexerId.tmux);
@@ -173,8 +173,8 @@ void main() {
       expect(adapter.listTreeCalls, 0);
     });
 
-    test('an adapter that THREW — which is how herdr reports an error code '
-        'this app does not recognize — degrades to unreachable, never to an '
+    test('an adapter that THREW - which is how herdr reports an error code '
+        'this app does not recognize - degrades to unreachable, never to an '
         'empty tree', () async {
       final adapter = FakeWorkspaceAwareAdapter()
         ..whenTreeThrows(StateError('unrecognized herdr error'));
@@ -189,7 +189,7 @@ void main() {
     });
   });
 
-  group('refreshWorkspaceTree — the channel budget', () {
+  group('refreshWorkspaceTree - the channel budget', () {
     test('a wedged host is abandoned at kWorkspaceTreeTimeout, so the drawer '
         'is never left waiting on an answer that never comes', () async {
       final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
@@ -288,7 +288,7 @@ void main() {
     });
 
     test('a vanished tab is reported as such and NOT as a failure to reach '
-        'the host — the drawer showed a project that is gone, which is a '
+        'the host - the drawer showed a project that is gone, which is a '
         'different thing to tell the user', () async {
       final adapter = FakeWorkspaceAwareAdapter()
         ..whenTabFocus(const MuxTabFocusTargetNotFound());

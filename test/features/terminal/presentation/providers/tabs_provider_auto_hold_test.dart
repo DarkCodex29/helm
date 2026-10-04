@@ -88,7 +88,7 @@ void main() {
   group('TabsNotifier.addTab and the background-hold preference', () {
     test(
       'a connect that FAILED holds nothing, even for a profile that asked '
-      'for a hold — a foreground service over a connection that was never '
+      'for a hold - a foreground service over a connection that was never '
       'established is a notification about nothing',
       () async {
         ssh.queueConnectError(const _SocketFailure());
@@ -110,7 +110,7 @@ void main() {
     );
 
     test(
-      'a profile that did not ask for a hold gets none — this is the state '
+      'a profile that did not ask for a hold gets none - this is the state '
       'every existing install upgrades into',
       () async {
         ssh.queueConnectError(const _SocketFailure());

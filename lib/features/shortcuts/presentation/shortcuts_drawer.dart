@@ -285,11 +285,11 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
         // the same thing the user needs after tapping — one line saying
         // what the tap actually did.
         MuxAgentFocused() =>
-          'Focused ${agent.label} on the Mac — this screen does not follow',
+          'Focused ${agent.label} on the Mac - this screen does not follow',
         // A fact about helm's own screen: the row the user just tapped
         // describes something that is no longer there.
         MuxAgentFocusTargetNotFound() =>
-          '${agent.label} is gone — this list is out of date',
+          '${agent.label} is gone - this list is out of date',
         // A fact about the host: nothing is known, including whether the
         // agent is still there. It must not read like the line above.
         MuxAgentFocusFailed() => 'Could not focus ${agent.label} on the host',
@@ -335,7 +335,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
         // A fact about helm's own screen: the row the user just tapped
         // describes a project that is no longer open.
         MuxTabFocusTargetNotFound() =>
-          '${tab.label} is gone — this tree is out of date',
+          '${tab.label} is gone - this tree is out of date',
         // A fact about the host: nothing is known, including whether the
         // tab is still there. It must not read like the line above.
         MuxTabFocusFailed() => 'Could not switch to ${tab.label} on the host',
@@ -559,7 +559,7 @@ class _AgentsSection extends StatelessWidget {
   ) {
     return switch (snapshot) {
       AgentsNotProbed() => const _EmptyHint(
-        text: 'Not connected — agent state unknown',
+        text: 'Not connected - agent state unknown',
       ),
       // Names the multiplexer instead of saying "unsupported": the user
       // chose it, and the actionable fact is that THIS one cannot answer,
@@ -570,7 +570,7 @@ class _AgentsSection extends StatelessWidget {
       // Never "no agents". herdr is the only multiplexer that advertises
       // agent state, so naming it here is accurate rather than a guess.
       AgentsUnreachable() => const _EmptyHint(
-        text: "Could not reach herdr's agent server — agent state unknown",
+        text: "Could not reach herdr's agent server - agent state unknown",
       ),
       // An empty agent list is where BOTH stories land, and where the user
       // actually looks when nothing is happening — so this is the one
@@ -588,7 +588,7 @@ class _AgentsSection extends StatelessWidget {
               vitality is SessionVitalityKnown &&
               vitality.shape == SessionShape.virgin =>
         const _EmptyHint(
-          text: 'Session restored empty — every pane is a fresh shell at home',
+          text: 'Session restored empty - every pane is a fresh shell at home',
         ),
       // Every other vitality variant falls through to here on purpose,
       // including [SessionVitalityIndeterminate] and
@@ -695,7 +695,7 @@ class _WorkspaceTreeSection extends StatelessWidget {
       // surfaces each explaining itself — and it is the wording pattern
       // this drawer already uses ("Not connected — agent state unknown").
       return const _EmptyHint(
-        text: 'No active session — the workspace tree is unknown',
+        text: 'No active session - the workspace tree is unknown',
       );
     }
     final pending = tree;
@@ -703,7 +703,7 @@ class _WorkspaceTreeSection extends StatelessWidget {
       // Never "could not reach the host": helm never opened a connection
       // to reach it over, which is a different thing to tell the user.
       return const _EmptyHint(
-        text: 'Not connected — the workspace tree is unknown',
+        text: 'Not connected - the workspace tree is unknown',
       );
     }
 
@@ -728,7 +728,7 @@ class _WorkspaceTreeSection extends StatelessWidget {
         text: '${muxId.name} has no workspaces',
       ),
       MuxWorkspaceTreeUnreachable() => const _EmptyHint(
-        text: "Could not read herdr's workspaces — the tree is unknown",
+        text: "Could not read herdr's workspaces - the tree is unknown",
       ),
       MuxWorkspaceTreeAvailable(:final workspaces) when workspaces.isEmpty =>
         const _EmptyHint(text: 'No workspaces on this host'),
@@ -1152,7 +1152,7 @@ class _FocusError extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, size: 14, color: AppTheme.error),
+          const Icon(AppTheme.errorIcon, size: 14, color: AppTheme.error),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

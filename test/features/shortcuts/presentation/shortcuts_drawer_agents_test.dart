@@ -140,7 +140,7 @@ void main() {
 
   _agentContextTests();
 
-  group('AGENTS section — four outcomes, only one of them says "none"', () {
+  group('AGENTS section - four outcomes, only one of them says "none"', () {
     testWidgets(
       'no active session says so, rather than showing an empty list',
       (tester) async {
@@ -160,7 +160,7 @@ void main() {
         );
 
         expect(
-          find.text('Not connected — agent state unknown'),
+          find.text('Not connected - agent state unknown'),
           findsOneWidget,
         );
         expect(find.textContaining('No agents'), findsNothing);
@@ -171,7 +171,7 @@ void main() {
     );
 
     testWidgets(
-      'an agent-blind multiplexer NAMES itself — the actionable fact is '
+      'an agent-blind multiplexer NAMES itself - the actionable fact is '
       'that this one cannot answer, not that helm failed',
       (tester) async {
         final session = await _pumpDrawer(
@@ -220,7 +220,7 @@ void main() {
 
     testWidgets(
       'a VIRGIN verdict on an empty agent list says the session came back '
-      'empty — the whole point of the second fact',
+      'empty - the whole point of the second fact',
       (tester) async {
         final session = await _pumpDrawer(
           tester,
@@ -266,7 +266,7 @@ void main() {
     ]) {
       testWidgets(
         'an unmeasured verdict (${vitality.runtimeType}) draws no claim at '
-        'all — silence is the only honest output',
+        'all - silence is the only honest output',
         (tester) async {
           final session = await _pumpDrawer(
             tester,
@@ -283,7 +283,7 @@ void main() {
     }
 
     testWidgets(
-      'a VIRGIN verdict never overrides live agents — a session with an '
+      'a VIRGIN verdict never overrides live agents - a session with an '
       'agent in it is being worked in, whatever else was measured',
       (tester) async {
         final session = await _pumpDrawer(
@@ -344,7 +344,7 @@ void main() {
     );
   });
 
-  group('AGENTS section — the one waiting on a human comes first', () {
+  group('AGENTS section - the one waiting on a human comes first', () {
     testWidgets('sorts most urgent first regardless of host order', (
       tester,
     ) async {
@@ -368,7 +368,7 @@ void main() {
     });
 
     testWidgets(
-      'ties keep the host order, which is stable across polls — a list '
+      'ties keep the host order, which is stable across polls - a list '
       'that reshuffles itself every ten seconds is unreadable',
       (tester) async {
         final session = await _pumpDrawer(
@@ -513,7 +513,7 @@ Future<_TreeScriptedSession> _pumpWithTree(
 }
 
 void _agentContextTests() {
-  group('AGENTS section — three rows called opencode must not read alike', () {
+  group('AGENTS section - three rows called opencode must not read alike', () {
     testWidgets(
       'names the project and client each agent is in, using the tree the '
       'drawer already holds',
@@ -546,7 +546,7 @@ void _agentContextTests() {
     );
 
     testWidgets(
-      'asks the host NOTHING extra for it — the tree is the same one read '
+      'asks the host NOTHING extra for it - the tree is the same one read '
       'once for the workspace section',
       (tester) async {
         final session = await _pumpWithTree(
@@ -569,7 +569,7 @@ void _agentContextTests() {
 
     testWidgets(
       'still lists and still allows tapping an agent the tree cannot place '
-      '— an unplaceable agent is a real agent',
+      '- an unplaceable agent is a real agent',
       (tester) async {
         await _pumpWithTree(
           tester,
@@ -618,7 +618,7 @@ void _agentContextTests() {
     );
 
     testWidgets(
-      'lists agents without waiting for the tree — a session with no tree '
+      'lists agents without waiting for the tree - a session with no tree '
       'to read renders its agents anyway',
       (tester) async {
         await _pumpDrawer(

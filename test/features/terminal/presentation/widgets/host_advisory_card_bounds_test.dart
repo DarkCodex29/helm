@@ -44,7 +44,7 @@ const _offPath = HostAdvisory(
   detail:
       'herdr is installed at /home/deployer/.local/bin/herdr, but a '
       'non-interactive SSH shell on this host cannot find it by name. Helm '
-      'attaches through the full path, so this session works — but typing '
+      'attaches through the full path, so this session works - but typing '
       '"herdr" in your own shell there may not.',
   remediationCopy:
       'Add the directory containing herdr to PATH in the shell startup file '
@@ -236,7 +236,7 @@ void main() {
     });
 
     testWidgets(
-      'every dismiss button can be tapped — including the ones that started '
+      'every dismiss button can be tapped - including the ones that started '
       'below the fold',
       (tester) async {
         final state = await _pump(

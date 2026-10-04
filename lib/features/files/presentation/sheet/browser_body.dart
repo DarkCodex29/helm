@@ -119,7 +119,7 @@ class _ListingError extends StatelessWidget {
     RemoteListingFailure.permissionDenied => Icons.lock_outline,
     RemoteListingFailure.notFound => Icons.search_off,
     RemoteListingFailure.disconnected => Icons.link_off,
-    RemoteListingFailure.unknown => Icons.error_outline,
+    RemoteListingFailure.unknown => AppTheme.errorIcon,
   };
 
   @override

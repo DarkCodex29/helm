@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/features/notifications/domain/session_alert.dart';
 
 void main() {
-  group('SessionAlert.fromData — the wire contract with the Mac', () {
+  group('SessionAlert.fromData - the wire contract with the Mac', () {
     test('reads the session name, which is the only routing key', () {
       final alert = SessionAlert.fromData(const {
         'session': 'helm-a1b2c3d4',
@@ -64,7 +64,7 @@ void main() {
     });
   });
 
-  group('SessionAlert.fromData — the display context the notifier sends', () {
+  group('SessionAlert.fromData - the display context the notifier sends', () {
     test('reads place, area and doing alongside the routing key', () {
       final alert = SessionAlert.fromData(const {
         'session': 'helm-a1b2c3d4',

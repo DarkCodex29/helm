@@ -85,7 +85,7 @@ List<Color> _dotColors(WidgetTester tester) => tester
     .toList();
 
 void main() {
-  group('connection dot — follows the live session, not a stale read', () {
+  group('connection dot - follows the live session, not a stale read', () {
     testWidgets('a connected tab and a disconnected tab do not look alike', (
       tester,
     ) async {
@@ -148,7 +148,7 @@ void main() {
     });
 
     testWidgets(
-      'a failed connect is not shown as connected — only `connected` is',
+      'a failed connect is not shown as connected - only `connected` is',
       (tester) async {
         final subject = _session();
         final reference = _session(status: ConnectionStatus.connected);
@@ -198,7 +198,7 @@ void main() {
     });
   });
 
-  group('agent badge — silent unless a state was measured', () {
+  group('agent badge - silent unless a state was measured', () {
     testWidgets('draws no badge for a snapshot nobody measured', (
       tester,
     ) async {

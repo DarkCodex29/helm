@@ -44,7 +44,7 @@ HostReport _realHostReport() => HostReport(
 );
 
 void main() {
-  group('resolveMultiplexer — the request is present on the host', () {
+  group('resolveMultiplexer - the request is present on the host', () {
     test('returns the requested multiplexer with its probe-resolved path', () {
       final selection = resolveMultiplexer(
         requested: MultiplexerId.tmux,
@@ -84,7 +84,7 @@ void main() {
     );
   });
 
-  group('resolveMultiplexer — the request is positively absent', () {
+  group('resolveMultiplexer - the request is positively absent', () {
     test('substitutes and names both the missing and the available ones', () {
       final selection = resolveMultiplexer(
         requested: MultiplexerId.zellij,
@@ -150,7 +150,7 @@ void main() {
     });
   });
 
-  group('resolveMultiplexer — host default (no persisted choice)', () {
+  group('resolveMultiplexer - host default (no persisted choice)', () {
     test('prefers herdr when present, even off the inherited PATH', () {
       final selection = resolveMultiplexer(
         requested: null,
@@ -282,7 +282,7 @@ void main() {
     });
   });
 
-  group('resolveMultiplexer — the probe could not report', () {
+  group('resolveMultiplexer - the probe could not report', () {
     test('a truncated report is unverified, never "not installed"', () {
       final selection = resolveMultiplexer(
         requested: MultiplexerId.zellij,
@@ -367,7 +367,7 @@ void main() {
     });
   });
 
-  group('resolveMultiplexer — malformed records', () {
+  group('resolveMultiplexer - malformed records', () {
     test('ignores a mux record whose id this build does not know', () {
       final selection = resolveMultiplexer(
         requested: null,

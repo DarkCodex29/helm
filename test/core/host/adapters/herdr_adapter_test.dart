@@ -252,7 +252,7 @@ void main() {
       ]);
     });
 
-    test('reports the PANE id as the target, never the terminal id — the '
+    test('reports the PANE id as the target, never the terminal id - the '
         'pane id is the only identifier herdr agent wait accepts', () async {
       // MEASURED against herdr 0.8.0, both spellings, same agent:
       //   agent wait w1:p1                 → blocks, then returns the agent
@@ -436,7 +436,7 @@ void main() {
       },
     );
 
-    test('reads the agent field when neither name nor title is present — a '
+    test('reads the agent field when neither name nor title is present - a '
         'real herdr agent carries neither, so without it every agent in the '
         'app reads as an opaque terminal id', () async {
       // The payload below is the VERBATIM live capture (see
@@ -516,7 +516,7 @@ void main() {
     });
 
     test(
-      'a transport that gave up is UNREACHABLE, never a crash — a null exit '
+      'a transport that gave up is UNREACHABLE, never a crash - a null exit '
       'code is no exit code at all, not herdr reporting a failed command',
       () async {
         runner.whenRun(
@@ -544,7 +544,7 @@ void main() {
     });
 
     test('stderr that is not the JSON error envelope at all is surfaced, not '
-        'guessed at — a malformed failure must never be read as a '
+        'guessed at - a malformed failure must never be read as a '
         'recognized code', () async {
       // e.g. the binary died before it could write its envelope, or a
       // shell wrapper wrote its own message. There is no `error.code`
@@ -571,7 +571,7 @@ void main() {
   });
 
   group('agents capability', () {
-    test('is non-null — HerdrAdapter supports agent state', () {
+    test('is non-null - HerdrAdapter supports agent state', () {
       expect(adapter.agents, isNotNull);
     });
 
@@ -665,7 +665,7 @@ void main() {
     });
 
     test(
-      'a dead server reports MuxPaneServerNotRunning, never an empty list — '
+      'a dead server reports MuxPaneServerNotRunning, never an empty list - '
       'an empty list here would read as "this session has no panes"',
       () async {
         runner.whenRun(
@@ -705,7 +705,7 @@ void main() {
     });
 
     test(
-      'a transport that gave up is UNREACHABLE, never a crash — this is the '
+      'a transport that gave up is UNREACHABLE, never a crash - this is the '
       'failure caught on a real device, where a timed-out pane list was read '
       'as herdr answering with an unrecognized error and took the vitality '
       'check down with a StateError',
@@ -810,12 +810,12 @@ void main() {
   });
 
   group('panes capability', () {
-    test('is non-null — HerdrAdapter can report pane state', () {
+    test('is non-null - HerdrAdapter can report pane state', () {
       expect(adapter.panes, isNotNull);
     });
   });
 
-  group('waitForAgent — a REAL blocking wait on herdr agent wait', () {
+  group('waitForAgent - a REAL blocking wait on herdr agent wait', () {
     // MEASURED against a real herdr 0.8.0 binary, not assumed. This
     // subcommand was previously dismissed as unverified, and this adapter
     // faked the wait with `agent list` plus a filter. Every fact below
@@ -926,7 +926,7 @@ void main() {
       expect(runner.runCalls, [expected]);
     });
 
-    test('never falls back to agent list — it is a wait now, not a list plus '
+    test('never falls back to agent list - it is a wait now, not a list plus '
         'a filter', () async {
       // `agent list` is deliberately left UNREGISTERED: the fake throws
       // for an unscripted command, so a regression to the old
@@ -974,7 +974,7 @@ void main() {
       ));
     });
 
-    test('a herdr timeout is TIMED OUT, never FAILED — nothing changed is not '
+    test('a herdr timeout is TIMED OUT, never FAILED - nothing changed is not '
         'an error, and a caller must be free to simply re-arm', () async {
       runner.whenRun(
         "herdr agent wait 'w1:p1' --until blocked --timeout 1000",
@@ -992,7 +992,7 @@ void main() {
     });
 
     test(
-      'a vanished target is FAILED and carries the code, never TIMED OUT — '
+      'a vanished target is FAILED and carries the code, never TIMED OUT - '
       'a caller must not read "the pane is gone" as "nothing changed"',
       () async {
         runner.whenRun(
@@ -1063,7 +1063,7 @@ void main() {
       expect(result, isA<MuxAgentWaitFailed>());
     });
 
-    test('an empty until set is rejected outright — herdr would silently '
+    test('an empty until set is rejected outright - herdr would silently '
         'substitute its own default of idle|done|blocked', () async {
       expect(
         () => adapter.waitForAgent(
@@ -1077,7 +1077,7 @@ void main() {
     });
   });
 
-  group('focusAgent — bringing the agent`s pane to the front', () {
+  group('focusAgent - bringing the agent`s pane to the front', () {
     // MEASURED against a real herdr 0.8.2 binary, not assumed:
     //
     //   $ herdr agent focus --help
@@ -1136,7 +1136,7 @@ void main() {
       expect(runner.runCalls, [expected]);
     });
 
-    test('the focus is scoped, and --session still precedes the subcommand — '
+    test('the focus is scoped, and --session still precedes the subcommand - '
         'an unscoped focus would raise a pane in another session', () async {
       const expected = "herdr --session 'helm-0' agent focus 'w1:p1'";
       final scopedRunner = FakeHostCommandRunner();
@@ -1176,7 +1176,7 @@ void main() {
     });
 
     test('a success body this adapter never parses cannot break the success '
-        'path — the exit code is what decides it', () async {
+        'path - the exit code is what decides it', () async {
       // herdr could add a field, drop `agent`, or change `type` and this
       // must keep working: nothing downstream reads the body. Asserting
       // it here is what stops a future contributor "helpfully" parsing a
@@ -1189,7 +1189,7 @@ void main() {
       expect(await adapter.focusAgent('w1:p1'), isA<MuxAgentFocused>());
     });
 
-    test('a vanished pane is TARGET NOT FOUND, never a generic failure — the '
+    test('a vanished pane is TARGET NOT FOUND, never a generic failure - the '
         'drawer showed the user a row that is gone, and that is a different '
         'thing to say than "we could not reach the host"', () async {
       runner.whenRun(
@@ -1220,7 +1220,7 @@ void main() {
     );
 
     test(
-      'an unrecognized code is reported AS ITSELF — never silently mapped '
+      'an unrecognized code is reported AS ITSELF - never silently mapped '
       'onto server_not_running and never onto a target that is missing',
       () async {
         runner.whenRun(
@@ -1257,7 +1257,7 @@ void main() {
       expect((result as MuxAgentFocusFailed).code, isNull);
     });
 
-    test('a transport that gave up without an exit code is FAILED — nothing '
+    test('a transport that gave up without an exit code is FAILED - nothing '
         'is known about whether the pane was raised', () async {
       runner.whenRun(
         "herdr agent focus 'w1:p1'",
@@ -1390,7 +1390,7 @@ void main() {
 
     test(
       'a transport that never answered is UNDETERMINED, never NOT INSTALLED '
-      '— a host that did not reply has said nothing about whether the binary '
+      '- a host that did not reply has said nothing about whether the binary '
       'is there, and a caller acts on that difference by picking a different '
       'multiplexer entirely',
       () async {
@@ -1598,7 +1598,7 @@ void main() {
     });
 
     test('the wait is scoped too, and --session still precedes the '
-        'subcommand — an unscoped wait would watch another session', () async {
+        'subcommand - an unscoped wait would watch another session', () async {
       // Reproduces the measured lie in the wait's shape: the UNSCOPED
       // spelling talks to herdr's DEFAULT session socket, where the pane
       // this session is attached to does not exist at all — so an
@@ -1639,7 +1639,7 @@ void main() {
       );
     });
 
-    test('session list stays UNSCOPED even on a scoped adapter — enumerating '
+    test('session list stays UNSCOPED even on a scoped adapter - enumerating '
         'every session is a global question', () async {
       final scopedRunner = FakeHostCommandRunner();
       scopedRunner.whenRun(
@@ -1666,7 +1666,7 @@ void main() {
       expect(scopedRunner.runCalls, [_detectCommand]);
     });
 
-    test('attachCommand is unaffected by the session scope — it names its '
+    test('attachCommand is unaffected by the session scope - it names its '
         'target session as a positional argument already', () {
       final scoped = HerdrAdapter(runner, sessionRef: 'helm-0');
 

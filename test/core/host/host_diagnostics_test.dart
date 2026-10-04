@@ -102,7 +102,7 @@ void main() {
   });
 
   group(
-    'Logout persistence — linger finding (Diagnostics Are Display-Only)',
+    'Logout persistence - linger finding (Diagnostics Are Display-Only)',
     () {
       test('warns with remediation copy when linger is off and '
           'KillUserProcesses is on', () async {
@@ -159,7 +159,7 @@ void main() {
     },
   );
 
-  group('Logout persistence — systemd absence', () {
+  group('Logout persistence - systemd absence', () {
     test(
       'reports unsupported, never disabled, when systemd is not available',
       () async {
@@ -185,7 +185,7 @@ void main() {
     );
   });
 
-  group('Logout persistence — truth table (No False Alarm)', () {
+  group('Logout persistence - truth table (No False Alarm)', () {
     test('reports ok, not a warning, when both linger and KillUserProcesses '
         'are off', () async {
       runner.whenRun(
@@ -248,7 +248,7 @@ void main() {
 
     test('reports unknown, never ok or warn, when linger is off and '
         'KillUserProcesses cannot be determined (e.g. commented out, or '
-        "systemctl show returning empty output with exit 0 — both are "
+        "systemctl show returning empty output with exit 0 - both are "
         'traps, neither is a value)', () async {
       runner.whenRun(
         _loginctlPresenceCommand,
@@ -273,7 +273,7 @@ void main() {
       '(Tailscale SSH Detected Post-Connect)', () {
     test(
       'evaluateLogoutPersistence never queries Tailscale, even when a '
-      'Tailscale-intercepting host is scripted underneath it — proves '
+      'Tailscale-intercepting host is scripted underneath it - proves '
       'the Tailscale check has no reachable path from the pre-connect '
       'surface, not just that the two methods happen to look separate',
       () async {
@@ -376,7 +376,7 @@ void main() {
     });
 
     test('reports ok when the connect host is a LAN address, not a raw '
-        'Tailscale address — a different problem the README covers, not '
+        'Tailscale address - a different problem the README covers, not '
         'this check', () async {
       runner.whenRun(
         _tailscalePresenceCommand,
@@ -394,7 +394,7 @@ void main() {
       expect(finding.status, DiagnosticStatus.ok);
     });
 
-    test('never matches via the 100.64.0.0/10 CGNAT range — only an exact '
+    test('never matches via the 100.64.0.0/10 CGNAT range - only an exact '
         'TailscaleIPs membership counts, because that range is shared '
         'with NetBird and some ISPs', () async {
       runner.whenRun(
@@ -476,7 +476,7 @@ void main() {
     });
 
     test('reports warn, never ok, when the connect host matches but '
-        'MagicDNS is disabled for this tailnet — the fragility is real '
+        'MagicDNS is disabled for this tailnet - the fragility is real '
         'even with no name to suggest yet, and remediation never '
         'instructs an impossible action', () async {
       runner.whenRun(

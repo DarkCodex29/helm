@@ -121,7 +121,7 @@ void main() {
 
   group('two tabs never collide on one session', () {
     test(
-      'the reported sequence — open, open, close the first, open — no '
+      'the reported sequence - open, open, close the first, open - no '
       'longer duplicates a name',
       () async {
         await _open(container, _plain);
@@ -224,7 +224,7 @@ void main() {
     });
 
     test(
-      'recovery beats the profile — the snapshot names the session that '
+      'recovery beats the profile - the snapshot names the session that '
       'was actually running',
       () async {
         await container.read(tabsProvider.notifier).recoverSession(const [

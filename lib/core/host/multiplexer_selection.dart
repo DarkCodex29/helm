@@ -222,7 +222,7 @@ String? multiplexerSelectionNotice(MultiplexerSelection selection) {
     MultiplexerVerified() => null,
     MultiplexerUnverified() => null,
     MultiplexerSubstituted(:final requested, :final id, :final available) =>
-      '${requested.name} is not installed on this host — '
+      '${requested.name} is not installed on this host - '
           'attaching with ${id.name} instead. '
           'Available: ${available.map((m) => m.name).join(', ')}.',
     MultiplexerNoneFound(:final id) =>

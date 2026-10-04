@@ -110,7 +110,7 @@ void main() {
   group('tapping an agent row', () {
     testWidgets(
       'asks the host to focus THAT agent, by the target the host itself '
-      'reported — not by label, not by list position',
+      'reported - not by label, not by list position',
       (tester) async {
         final session = await _pumpOpenDrawer(
           tester,
@@ -168,7 +168,7 @@ void main() {
 
   group('a focus that did not happen', () {
     testWidgets(
-      'leaves the drawer OPEN — closing it would claim the user is now '
+      'leaves the drawer OPEN - closing it would claim the user is now '
       'looking at a pane that never came up',
       (tester) async {
         final session = await _pumpOpenDrawer(
@@ -203,7 +203,7 @@ void main() {
     });
 
     testWidgets(
-      'a vanished agent reads DIFFERENTLY from a host we could not reach — '
+      'a vanished agent reads DIFFERENTLY from a host we could not reach - '
       'one says this list is stale, the other says helm could not ask',
       (tester) async {
         final texts = <MuxAgentFocusResult, String>{};

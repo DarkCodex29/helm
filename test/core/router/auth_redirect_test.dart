@@ -4,7 +4,7 @@ import 'package:helm/features/auth/domain/auth_state.dart';
 import 'package:helm/features/notifications/domain/session_alert.dart';
 
 void main() {
-  group('resolveAuthRedirect — the gate itself, unchanged', () {
+  group('resolveAuthRedirect - the gate itself, unchanged', () {
     test('holds still while the biometric answer is still loading', () {
       expect(
         resolveAuthRedirect(
@@ -84,7 +84,7 @@ void main() {
     });
   });
 
-  group('resolveAuthRedirect — a notification survives the gate', () {
+  group('resolveAuthRedirect - a notification survives the gate', () {
     const alert = SessionAlert(sessionName: 'helm-a1b2c3d4');
 
     test('lands on the session the notification named, not on home', () {

@@ -477,7 +477,7 @@ void main() {
       // identifies nothing. Asserting only on "could not reach" let that
       // through, so the shape of the sentence is pinned too.
       expect(summary, isNot(contains('Connection timed out')));
-      expect(summary, 'Could not reach the host — nothing answered');
+      expect(summary, 'Could not reach the host - nothing answered');
     });
 
     test('names the host it could not reach when the failure carries one', () {

@@ -45,7 +45,7 @@ const _realisticToken =
 void main() {
   const registrar = DeviceTokenRegistrar();
 
-  group('DeviceTokenRegistrar.register — how the token reaches the host', () {
+  group('DeviceTokenRegistrar.register - how the token reaches the host', () {
     test('delivers the token over runScript, never over run', () async {
       // run() builds a command LINE, so anything interpolated into it is
       // parsed by the remote shell. runScript() puts the bytes on stdin of
@@ -92,7 +92,7 @@ void main() {
     });
   });
 
-  group('DeviceTokenRegistrar.register — the token is untrusted input', () {
+  group('DeviceTokenRegistrar.register - the token is untrusted input', () {
     test('refuses a token containing a newline, and sends nothing', () async {
       // The single escape from a quoted heredoc is a line equal to the
       // delimiter, and a newline is the only way to author one. Verified
@@ -188,7 +188,7 @@ void main() {
     });
   });
 
-  group('DeviceTokenRegistrar.register — failure never reaches the caller', () {
+  group('DeviceTokenRegistrar.register - failure never reaches the caller', () {
     test('reports a non-zero exit without throwing', () async {
       final runner = _RecordingRunner(exitCode: 127, stderr: 'python3: not found');
 

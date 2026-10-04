@@ -44,7 +44,7 @@ const _anAgent = (
 );
 
 void main() {
-  group('judgeSessionVitality — VIRGIN needs every negative fact', () {
+  group('judgeSessionVitality - VIRGIN needs every negative fact', () {
     test('the measured resurrected-empty session: untouched panes at home with '
         'an authoritative empty agent list reads as VIRGIN', () {
       final verdict = judgeSessionVitality(
@@ -71,7 +71,7 @@ void main() {
     });
   });
 
-  group('judgeSessionVitality — any ONE positive fact makes it LIVED-IN', () {
+  group('judgeSessionVitality - any ONE positive fact makes it LIVED-IN', () {
     test('a pane whose revision moved past 1 has been used', () {
       final verdict = judgeSessionVitality(
         panes: [
@@ -109,7 +109,7 @@ void main() {
     });
 
     test('revision alone settles LIVED-IN even when the agent list could not '
-        'be read — one positive fact does not need the others', () {
+        'be read - one positive fact does not need the others', () {
       final verdict = judgeSessionVitality(
         panes: [_pane(revision: 4)],
         agents: const AgentsUnreachable(),
@@ -131,7 +131,7 @@ void main() {
     });
   });
 
-  group('judgeSessionVitality — never guesses', () {
+  group('judgeSessionVitality - never guesses', () {
     test('an unknown home directory yields INDETERMINATE, never VIRGIN: '
         '"cwd equals home" is unanswerable without home', () {
       final verdict = judgeSessionVitality(
@@ -192,7 +192,7 @@ void main() {
       expect(verdict, isNot(isA<SessionVitalityKnown>()));
     });
 
-    test('revision 0 is still untouched — the threshold is "past 1"', () {
+    test('revision 0 is still untouched - the threshold is "past 1"', () {
       final verdict = judgeSessionVitality(
         panes: [_pane(revision: 0)],
         agents: const AgentsKnown([]),

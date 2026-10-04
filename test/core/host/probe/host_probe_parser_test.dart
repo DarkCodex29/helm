@@ -127,7 +127,7 @@ void main() {
     });
   });
 
-  group('parseResult — bounded traversal', () {
+  group('parseResult - bounded traversal', () {
     test(
       'a timed-out command result is never accepted as a partial report',
       () {

@@ -50,7 +50,7 @@ class _ScriptedRunner implements HostCommandRunner {
 }
 
 void main() {
-  group('HostProber.probe — delivery', () {
+  group('HostProber.probe - delivery', () {
     test('delivers the v1 script over runScript, never as a shell command', () {
       // AD-1: the script crosses zero shell-quoting layers because it is
       // fed to `/bin/sh -s` over stdin.
@@ -92,7 +92,7 @@ void main() {
     });
   });
 
-  group('HostProber.probe — degrades honestly', () {
+  group('HostProber.probe - degrades honestly', () {
     test('a thrown transport failure becomes an unknown report, not empty', () async {
       final report = await const HostProber().probe(_ThrowingRunner());
 

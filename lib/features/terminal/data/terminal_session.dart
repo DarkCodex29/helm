@@ -1065,7 +1065,7 @@ class TerminalSession {
     final keyService = SSHKeyService();
     final privateKey = await keyService.getPrivateKey();
     if (privateKey == null) {
-      terminal.write('[Helm] No SSH key found — cannot reconnect\r\n');
+      terminal.write('[Helm] No SSH key found - cannot reconnect\r\n');
       return;
     }
 
@@ -1888,7 +1888,7 @@ class TerminalSession {
 String _disconnectSummaryFor(AttachExitOutcome outcome) {
   return switch (outcome) {
     AttachEndedCleanly() =>
-      'The session ended — you may have detached, or it was closed on the '
+      'The session ended - you may have detached, or it was closed on the '
           'host',
     AttachEndedAbnormally(:final exitCode, :final exitSignal) =>
       'The session exited abnormally'
@@ -1904,10 +1904,10 @@ String _disconnectSummaryFor(AttachExitOutcome outcome) {
 String _disconnectMessageFor(AttachExitOutcome outcome) {
   return switch (outcome) {
     AttachEndedCleanly() =>
-      '\r\n[Helm] Disconnected — the session ended (you may have detached, '
+      '\r\n[Helm] Disconnected - the session ended (you may have detached, '
           'or it was closed on the host)\r\n',
     AttachEndedAbnormally(:final exitCode, :final exitSignal) =>
-      '\r\n[Helm] Disconnected — the session exited abnormally'
+      '\r\n[Helm] Disconnected - the session exited abnormally'
           '${exitCode != null ? ' (exit code $exitCode)' : ''}'
           '${exitSignal != null ? ' (signal ${exitSignal.signalName})' : ''}'
           '\r\n',

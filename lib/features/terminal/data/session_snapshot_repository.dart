@@ -110,7 +110,7 @@ class SessionSnapshotRepository {
       await prefs.setBool(AppConstants.sessionDirtyKey, true);
       await prefs.setString(AppConstants.sessionSnapshotKey, encoded);
       await prefs.setInt(_timestampKey, DateTime.now().millisecondsSinceEpoch);
-      _log.i('Session marked dirty — ${tabs.length} tab(s) snapshotted');
+      _log.i('Session marked dirty - ${tabs.length} tab(s) snapshotted');
     } catch (e) {
       _log.e('Failed to mark session dirty', e);
     }
@@ -146,7 +146,7 @@ class SessionSnapshotRepository {
       final age = DateTime.now().millisecondsSinceEpoch - ts;
       if (age < _crashThresholdMs) {
         _log.i(
-          'Snapshot too recent (${age}ms) — likely a fast resume, ignoring',
+          'Snapshot too recent (${age}ms) - likely a fast resume, ignoring',
         );
         return null;
       }
@@ -170,7 +170,7 @@ class SessionSnapshotRepository {
       if (snapshots.isEmpty) return null;
 
       _log.i(
-        'Found pending recovery — ${snapshots.length} tab(s), age: ${age}ms',
+        'Found pending recovery - ${snapshots.length} tab(s), age: ${age}ms',
       );
       return snapshots;
     } catch (e) {

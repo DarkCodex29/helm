@@ -156,8 +156,8 @@ void main() {
     );
 
     testWidgets(
-      "it leaves herdr's status bar — the top two rows, where `1 blocked` "
-      'is drawn — uncovered at rest',
+      "it leaves herdr's status bar - the top two rows, where `1 blocked` "
+      'is drawn - uncovered at rest',
       (tester) async {
         final f = await _connected();
         await _pumpTerminal(tester, f.session);

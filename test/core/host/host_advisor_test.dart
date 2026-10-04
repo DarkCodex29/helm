@@ -72,7 +72,7 @@ const _verifiedTmux = MultiplexerVerified(
 );
 
 void main() {
-  group('HostAdvisor.collect — without a live runner', () {
+  group('HostAdvisor.collect - without a live runner', () {
     test('still returns the probe-derived findings', () async {
       // A connect that failed outright has no client, so no host question
       // can be asked. What the probe already told us must survive that.
@@ -95,7 +95,7 @@ void main() {
     });
   });
 
-  group('HostAdvisor.collect — with a live runner', () {
+  group('HostAdvisor.collect - with a live runner', () {
     test('a healthy host produces no advisories at all', () async {
       final advisories = await const HostAdvisor().collect(
         selection: _verifiedTmux,
@@ -229,7 +229,7 @@ void main() {
   });
 
   group(
-    'HostAdvisor.collect — a broken transport cannot break the surface',
+    'HostAdvisor.collect - a broken transport cannot break the surface',
     () {
       test(
         'a throwing runner still yields the probe-derived findings',

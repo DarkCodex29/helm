@@ -11,7 +11,7 @@ import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
 
 void main() {
-  group('advisoriesForSelection — nothing to say', () {
+  group('advisoriesForSelection - nothing to say', () {
     test('a verified multiplexer on the inherited PATH produces none', () {
       final advisories = advisoriesForSelection(
         const MultiplexerVerified(
@@ -39,7 +39,7 @@ void main() {
     });
   });
 
-  group('advisoriesForSelection — the multiplexer is not what was asked', () {
+  group('advisoriesForSelection - the multiplexer is not what was asked', () {
     test('a substitution names both sides', () {
       final advisories = advisoriesForSelection(
         const MultiplexerSubstituted(
@@ -74,7 +74,7 @@ void main() {
     });
   });
 
-  group('advisoriesForSelection — installed but off the inherited PATH', () {
+  group('advisoriesForSelection - installed but off the inherited PATH', () {
     test('reports the verified real-host herdr case', () {
       final advisories = advisoriesForSelection(
         const MultiplexerVerified(
@@ -114,7 +114,7 @@ void main() {
     });
   });
 
-  group('advisoryForDiagnostic — maps host findings', () {
+  group('advisoryForDiagnostic - maps host findings', () {
     test('a warn finding becomes a warning advisory with its remediation', () {
       final advisory = advisoryForDiagnostic(
         const HostDiagnostic(

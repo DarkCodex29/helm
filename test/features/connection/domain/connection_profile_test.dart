@@ -195,7 +195,7 @@ void main() {
         '"port":22,"username":"deployer","tmuxSession":null,'
         '"sessionRef":null,"multiplexer":null,"isDefault":false}';
 
-    test('a profile saved before the field existed loads with the hold OFF — '
+    test('a profile saved before the field existed loads with the hold OFF - '
         'installing an update must never start a foreground service the user '
         'was never asked about', () {
       final profile = ConnectionProfile.fromJson(
@@ -231,7 +231,7 @@ void main() {
       expect(profile.holdInBackground, isFalse);
     });
 
-    test('turning the switch on survives a save and a load — the whole point '
+    test('turning the switch on survives a save and a load - the whole point '
         'of the preference is that it is chosen once', () {
       const profile = ConnectionProfile(
         id: 'held-1',
@@ -323,7 +323,7 @@ void main() {
       expect(profile.fontSize, AppConstants.defaultTerminalFontSize);
     });
 
-    test('choosing a smaller point size survives a save and a load — the '
+    test('choosing a smaller point size survives a save and a load - the '
         'whole point of the preference is that it is chosen once per '
         'profile', () {
       const profile = ConnectionProfile(

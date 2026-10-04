@@ -93,7 +93,7 @@ const _blockedAgent = (
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('refreshAgents — never collapses "we do not know" into "nothing"', () {
+  group('refreshAgents - never collapses "we do not know" into "nothing"', () {
     test('a multiplexer that cannot track agents reports UNSUPPORTED, naming '
         'itself, and never an empty agent list', () async {
       final session = await _connectedSession(
@@ -292,7 +292,7 @@ void main() {
     });
   });
 
-  group('agent polling lifecycle — demand-gated, never orphaned', () {
+  group('agent polling lifecycle - demand-gated, never orphaned', () {
     test('a connected session with nothing observing asks the host NOTHING, '
         'however long it stays connected', () async {
       final adapter = FakeAgentAdapter()
@@ -332,7 +332,7 @@ void main() {
       await session.dispose();
     });
 
-    test('while observed, it re-asks once per kAgentPollInterval — the badge '
+    test('while observed, it re-asks once per kAgentPollInterval - the badge '
         'is the whole point, so a snapshot taken once at connect would be '
         'stale within seconds', () async {
       final adapter = FakeAgentAdapter()
@@ -441,7 +441,7 @@ void main() {
     });
   });
 
-  group('disposal guards — an in-flight answer outliving its session', () {
+  group('disposal guards - an in-flight answer outliving its session', () {
     test('a query that lands AFTER dispose is dropped instead of writing to a '
         'disposed notifier', () async {
       final adapter = FakeAgentAdapter()..whenHangs();
@@ -583,7 +583,7 @@ void main() {
   // 773888f is the record of what channel accumulation costs a user — a
   // connection with no channel left for a reconnect to attach through, i.e.
   // losing the terminal in order to refresh a badge.
-  group('event-driven agent tracking — exactly one held channel', () {
+  group('event-driven agent tracking - exactly one held channel', () {
     /// An observed session, with the observer removed for the caller by
     /// [stop]. Removing it INSIDE the test body is mandatory: the widget
     /// binding's pending-timer invariant runs before `addTearDown`
@@ -618,7 +618,7 @@ void main() {
 
     test(
       'holds exactly ONE wait, and never arms a second while the first is '
-      'outstanding — a wait is a held channel, and MaxSessions is 10',
+      'outstanding - a wait is a held channel, and MaxSessions is 10',
       () async {
         final adapter = FakeWaitingAgentAdapter()
           ..agentList = const MuxAgentsAvailable([blocked]);
@@ -650,7 +650,7 @@ void main() {
 
     test(
       'arms the COMPLEMENT of the current state, never the state the agent '
-      'is already in — herdr answers that instantly, so it would spin',
+      'is already in - herdr answers that instantly, so it would spin',
       () async {
         // MEASURED on a real host: against an agent already `blocked`,
         // `agent wait --until blocked` returned in 0.115s with a success
@@ -707,7 +707,7 @@ void main() {
     });
 
     test('a state change publishes the new snapshot without waiting out an '
-        'interval — this is the whole point of the wait', () async {
+        'interval - this is the whole point of the wait', () async {
       final adapter = FakeWaitingAgentAdapter()
         ..agentList = const MuxAgentsAvailable([working]);
       final harness = await observed(adapter);
@@ -741,7 +741,7 @@ void main() {
       await harness.session.dispose();
     });
 
-    test('a timed-out wait simply re-arms and keeps the last known state — a '
+    test('a timed-out wait simply re-arms and keeps the last known state - a '
         'window in which nothing changed is not a failure', () async {
       final adapter = FakeWaitingAgentAdapter()
         ..agentList = const MuxAgentsAvailable([blocked]);
@@ -796,7 +796,7 @@ void main() {
     });
 
     test('an adapter that does NOT advertise agentWait is never asked to '
-        'wait — it would answer instantly and the loop would spin', () async {
+        'wait - it would answer instantly and the loop would spin', () async {
       // FakeAgentAdapter's waitForAgent throws precisely so this cannot
       // pass by accident: the capability gate is the only thing keeping
       // the loop off it.
@@ -897,7 +897,7 @@ void main() {
 
     test(
       're-arming while a previous wait is STILL HELD joins it instead of '
-      'opening a second channel — a wait cannot be cancelled from here',
+      'opening a second channel - a wait cannot be cancelled from here',
       () async {
         // Found by mutation-testing the one-loop guard, and it is not
         // hypothetical: opening and closing the drawer is exactly this

@@ -12,7 +12,7 @@ void main() {
   group('a profile that did not ask for a hold never gets one', () {
     test(
       'the request is null, so the connect path has nothing to hand the '
-      'controller — the decision is taken here rather than by a controller '
+      'controller - the decision is taken here rather than by a controller '
       'that would otherwise be asked to hold and then refuse',
       () {
         final request = autoHoldRequest(
@@ -28,7 +28,7 @@ void main() {
 
     test(
       'a profile constructed with no opinion at all is treated as not '
-      'asking — a foreground service is never inherited',
+      'asking - a foreground service is never inherited',
       () {
         expect(
           autoHoldRequest(

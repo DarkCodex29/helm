@@ -17,7 +17,7 @@ import 'package:helm/core/host/multiplexer_selection.dart';
 import '../../helpers/fake_host_command_runner.dart';
 
 void main() {
-  group('buildMultiplexerAdapter — maps every id to its adapter', () {
+  group('buildMultiplexerAdapter - maps every id to its adapter', () {
     test('tmux', () {
       final adapter = buildMultiplexerAdapter(
         const MultiplexerVerified(
@@ -61,7 +61,7 @@ void main() {
     });
   });
 
-  group('buildMultiplexerAdapter — the resolved path reaches the command', () {
+  group('buildMultiplexerAdapter - the resolved path reaches the command', () {
     test('attaches through the probe-resolved absolute path', () {
       final adapter = buildMultiplexerAdapter(
         const MultiplexerVerified(
@@ -122,7 +122,7 @@ void main() {
     });
   });
 
-  group('buildMultiplexerAdapter — the session ref reaches the socket', () {
+  group('buildMultiplexerAdapter - the session ref reaches the socket', () {
     // The factory is the ONLY place a session ref becomes an agent-scoped
     // adapter. Dropping the argument here would restore the measured
     // failure — `agent list` answering for herdr's DEFAULT session and
@@ -177,7 +177,7 @@ void main() {
       expect(runner.runCalls.single, isNot(contains('--session')));
     });
 
-    test('a session ref is harmless for multiplexers that cannot use it — '
+    test('a session ref is harmless for multiplexers that cannot use it - '
         'tmux and zellij take no such flag and must not grow one', () {
       for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
         final adapter = buildMultiplexerAdapter(
@@ -192,7 +192,7 @@ void main() {
     });
   });
 
-  group('buildMultiplexerAdapter — the herdr mobile config path', () {
+  group('buildMultiplexerAdapter - the herdr mobile config path', () {
     const herdrSelection = MultiplexerVerified(
       id: MultiplexerId.herdr,
       absPath: '/home/deployer/.local/bin/herdr',

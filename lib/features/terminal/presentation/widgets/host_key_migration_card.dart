@@ -126,7 +126,7 @@ class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
             const Text(
               'This update changed how Helm computes host key '
               'fingerprints, so the value stored for this server can no '
-              'longer be compared — this is not necessarily a sign that '
+              'longer be compared - this is not necessarily a sign that '
               'the key changed.',
               style: TextStyle(color: _bodyText, fontSize: 12, height: 1.4),
             ),
@@ -284,7 +284,7 @@ class _HostKeyMigrationCardState extends State<HostKeyMigrationCard> {
         const Text(
           'The previous value used an older format and cannot be compared '
           'with anything this server reports. It is shown only for the '
-          'record — do not read it as a before-and-after pair.',
+          'record - do not read it as a before-and-after pair.',
           style: TextStyle(color: _mutedText, fontSize: 11, height: 1.4),
         ),
         const SizedBox(height: 6),

@@ -114,7 +114,7 @@ class FakeWaitingAgentAdapter
   @override
   Future<MuxAgentFocusResult> focusAgent(String target) async =>
       throw StateError(
-        'FakeWaitingAgentAdapter: focusAgent() is not scripted here — use '
+        'FakeWaitingAgentAdapter: focusAgent() is not scripted here - use '
         'FakeAgentAdapter for focus behaviour',
       );
 

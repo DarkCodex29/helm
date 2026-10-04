@@ -21,7 +21,7 @@ AgentStatus _agent(AgentState state, {String target = 't'}) => (
 void main() {
   _contextTests();
 
-  group('mostUrgentAgentState — no badge unless somebody measured one', () {
+  group('mostUrgentAgentState - no badge unless somebody measured one', () {
     test('nothing asked yet draws no badge', () {
       expect(mostUrgentAgentState(const AgentsNotProbed()), isNull);
     });
@@ -37,7 +37,7 @@ void main() {
       expect(mostUrgentAgentState(const AgentsUnreachable()), isNull);
     });
 
-    test('a known but empty reading draws no badge either — "nothing is '
+    test('a known but empty reading draws no badge either - "nothing is '
         'happening" is not worth a pixel in the tab strip', () {
       expect(mostUrgentAgentState(const AgentsKnown([])), isNull);
     });
@@ -50,7 +50,7 @@ void main() {
     });
   });
 
-  group('mostUrgentAgentState — the loudest state wins', () {
+  group('mostUrgentAgentState - the loudest state wins', () {
     test('a single agent badges its own state, whatever it is', () {
       for (final state in AgentState.values) {
         expect(
@@ -105,7 +105,7 @@ void main() {
     });
   });
 
-  group('agentStateUrgency — one ordering, so the badge and the drawer '
+  group('agentStateUrgency - one ordering, so the badge and the drawer '
       'can never disagree', () {
     test('ranks blocked > working > done > idle > unknown', () {
       const descending = [
@@ -134,9 +134,9 @@ void main() {
     });
   });
 
-  group('agentStateLabel — what a person actually reads', () {
+  group('agentStateLabel - what a person actually reads', () {
     test('blocked reads as a prompt to answer, not as a failure to '
-        'investigate — it is the state this whole feature exists for', () {
+        'investigate - it is the state this whole feature exists for', () {
       expect(agentStateLabel(AgentState.blocked), 'Needs you');
       expect(agentStateLabel(AgentState.blocked), isNot('Blocked'));
     });
@@ -192,7 +192,7 @@ AgentStatus _placed(String? tabId, String? workspaceId) => (
 );
 
 void _contextTests() {
-  group('agentContextLabel — names the agent only from what was measured', () {
+  group('agentContextLabel - names the agent only from what was measured', () {
     test('joins the tab and the workspace it resolved', () {
       expect(
         agentContextLabel(_placed('w2:t5', 'w2'), _tree),
@@ -200,7 +200,7 @@ void _contextTests() {
       );
     });
 
-    test('names two agents in the same state apart — the whole defect', () {
+    test('names two agents in the same state apart - the whole defect', () {
       final calera = _placed('w1:t1', 'w1');
       final helm = _placed('w2:t5', 'w2');
 
@@ -210,7 +210,7 @@ void _contextTests() {
       );
     });
 
-    test('names the workspace alone when the tab is gone from the tree — the '
+    test('names the workspace alone when the tab is gone from the tree - the '
         'agent is still in that client, and half a true answer beats none', () {
       expect(agentContextLabel(_placed('w2:t99', 'w2'), _tree), 'Go Nexa');
     });

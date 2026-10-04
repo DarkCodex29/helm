@@ -66,7 +66,7 @@ void main() {
         );
   });
 
-  group('TerminalSession — the PTY matches the viewport', () {
+  group('TerminalSession - the PTY matches the viewport', () {
     test(
       'a session with a viewport waits for its first real size instead of '
       "opening the PTY at xterm's 80x24 default",
@@ -145,7 +145,7 @@ void main() {
     );
 
     test(
-      'a size reported before connect() is used without waiting — the '
+      'a size reported before connect() is used without waiting - the '
       'reconnect path, where the view laid out long ago',
       () async {
         final service = FakeSSHService()
@@ -273,7 +273,7 @@ void main() {
     );
 
     test(
-      'the first reported size RESUMES the waiting connect immediately — it '
+      'the first reported size RESUMES the waiting connect immediately - it '
       'does not sit out the layout deadline first',
       () {
         // Timing, not just the value: a connect that only unblocks when

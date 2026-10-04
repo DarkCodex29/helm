@@ -225,7 +225,7 @@ void main() {
 
     testWidgets(
       'orders tabs by their tab-bar number, NOT by the order herdr sent '
-      'them — MEASURED live, herdr hoists the focused tab to the front, so '
+      'them - MEASURED live, herdr hoists the focused tab to the front, so '
       'arrival order would reshuffle the list under the user\'s thumb every '
       'time they tapped a row',
       (tester) async {
@@ -265,7 +265,7 @@ void main() {
 
     testWidgets(
       'marks the tab the host is actually looking at IN WORDS, so the tree '
-      'says where you already are — a colour-only marker would be no '
+      'says where you already are - a colour-only marker would be no '
       'marker at all to a screen reader, and this is the one row in the '
       'tree that does not need tapping',
       (tester) async {
@@ -309,7 +309,7 @@ void main() {
   group('tapping a workspace header', () {
     testWidgets(
       'focuses the tab the host says this client was last looking at, by '
-      'the active_tab_id it reported — not the first tab in the tab bar',
+      'the active_tab_id it reported - not the first tab in the tab bar',
       (tester) async {
         final session = await _pumpOpenDrawer(tester, tree: _realTree);
 
@@ -345,7 +345,7 @@ void main() {
 
     testWidgets(
       'falls back to the first tab by number when active_tab_id names a tab '
-      'this tree does not carry — the atomicity race '
+      'this tree does not carry - the atomicity race '
       "MuxWorkspaceTreeAvailable's own doc names, degraded honestly rather "
       'than refused',
       (tester) async {
@@ -388,7 +388,7 @@ void main() {
     );
 
     testWidgets(
-      'closes the drawer once the resolved tab is actually up — the same '
+      'closes the drawer once the resolved tab is actually up - the same '
       'success-report order a tab row\'s own tap follows',
       (tester) async {
         final session = await _pumpOpenDrawer(tester, tree: _realTree);
@@ -404,7 +404,7 @@ void main() {
 
     testWidgets(
       'a focus that did not happen on the host reuses the SAME failure '
-      'wording _focusTab already reports for a tab row — one error path, '
+      'wording _focusTab already reports for a tab row - one error path, '
       'not a second one that could drift from it',
       (tester) async {
         final session = await _pumpOpenDrawer(
@@ -427,7 +427,7 @@ void main() {
   group('tapping a tab', () {
     testWidgets(
       'asks the host to focus THAT tab, by the id the host itself reported '
-      '— not by label, not by list position',
+      '- not by label, not by list position',
       (tester) async {
         final session = await _pumpOpenDrawer(tester, tree: _realTree);
 
@@ -441,7 +441,7 @@ void main() {
     );
 
     testWidgets(
-      'closes the drawer once the tab is actually up — closing IS the '
+      'closes the drawer once the tab is actually up - closing IS the '
       'success report, so it is the last thing that happens',
       (tester) async {
         final session = await _pumpOpenDrawer(tester, tree: _realTree);
@@ -458,7 +458,7 @@ void main() {
 
   group('a focus that did not happen', () {
     testWidgets(
-      'leaves the drawer OPEN — closing it would claim the user is now '
+      'leaves the drawer OPEN - closing it would claim the user is now '
       'looking at a project that never came up',
       (tester) async {
         final session = await _pumpOpenDrawer(
@@ -493,7 +493,7 @@ void main() {
     });
 
     testWidgets(
-      'a vanished tab reads DIFFERENTLY from a host we could not reach — '
+      'a vanished tab reads DIFFERENTLY from a host we could not reach - '
       'one says this tree is stale, the other says helm could not ask',
       (tester) async {
         final texts = <String, String>{};
@@ -561,7 +561,7 @@ void main() {
     );
 
     testWidgets(
-      'an EMPTY tree and an UNREACHABLE host must not look the same — one '
+      'an EMPTY tree and an UNREACHABLE host must not look the same - one '
       'is a measurement, the other is an admission',
       (tester) async {
         final wordings = <String, String>{};
@@ -590,7 +590,7 @@ void main() {
     );
 
     testWidgets('a disconnected session says THAT, not that herdr could not be '
-        'reached — helm never opened a connection to reach it over', (
+        'reached - helm never opened a connection to reach it over', (
       tester,
     ) async {
       final session = await _pumpOpenDrawer(

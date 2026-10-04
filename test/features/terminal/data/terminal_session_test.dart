@@ -78,7 +78,7 @@ const _secureStorageChannel = MethodChannel(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('TerminalSession.connect — guard and status', () {
+  group('TerminalSession.connect - guard and status', () {
     test('is a no-op when already connecting', () async {
       final service = FakeSSHService();
       final session = TerminalSession(
@@ -176,11 +176,11 @@ void main() {
     });
   });
 
-  group('TerminalSession.connect — attach without a stdin race (5.3/5.4)', () {
+  group('TerminalSession.connect - attach without a stdin race (5.3/5.4)', () {
     test(
       'attaches via an exec request with the pseudo-terminal allocated up '
       'front, instead of writing the multiplexer command into an '
-      'already-open shell\'s stdin — session-attach spec\'s "Attach '
+      'already-open shell\'s stdin - session-attach spec\'s "Attach '
       'Without a Stdin Race" requirement',
       () async {
         final service = FakeSSHService();
@@ -273,7 +273,7 @@ void main() {
     );
   });
 
-  group('TerminalSession.connect — failure path', () {
+  group('TerminalSession.connect - failure path', () {
     test(
       'sets status to error, writes a message built from '
       'SSHService.describeError, and rethrows',
@@ -304,7 +304,7 @@ void main() {
     );
   });
 
-  group('TerminalSession._bridgeIO — stdout/stderr to terminal', () {
+  group('TerminalSession._bridgeIO - stdout/stderr to terminal', () {
     late FakeSSHService service;
     late FakeSSHSession fakeSession;
     late RecordingTerminal terminal;
@@ -397,7 +397,7 @@ void main() {
     );
   });
 
-  group('TerminalSession.onResize — direct calls', () {
+  group('TerminalSession.onResize - direct calls', () {
     test('does nothing before any session exists', () {
       final service = FakeSSHService();
       final session = TerminalSession(
@@ -412,7 +412,7 @@ void main() {
     });
   });
 
-  group('TerminalSession — disconnect via client.done', () {
+  group('TerminalSession - disconnect via client.done', () {
     test(
       'a normal client.done completion runs _handleDisconnect: status '
       'flips to disconnected and the terminal reports it',
@@ -507,7 +507,7 @@ void main() {
   });
 
   group(
-    'TerminalSession — attach exit status (C1: distinguishing detach '
+    'TerminalSession - attach exit status (C1: distinguishing detach '
     'from a killed session)',
     () {
       test(
@@ -545,7 +545,7 @@ void main() {
           expect(
             terminal.writes,
             contains(
-              '\r\n[Helm] Disconnected — the session ended (you may have '
+              '\r\n[Helm] Disconnected - the session ended (you may have '
               'detached, or it was closed on the host)\r\n',
             ),
           );
@@ -581,7 +581,7 @@ void main() {
           expect(
             terminal.writes,
             contains(
-              '\r\n[Helm] Disconnected — the session exited abnormally '
+              '\r\n[Helm] Disconnected - the session exited abnormally '
               '(exit code 1)\r\n',
             ),
           );
@@ -623,7 +623,7 @@ void main() {
           expect(
             terminal.writes,
             contains(
-              '\r\n[Helm] Disconnected — the session exited abnormally '
+              '\r\n[Helm] Disconnected - the session exited abnormally '
               '(signal KILL)\r\n',
             ),
           );
@@ -695,7 +695,7 @@ void main() {
           expect(disconnectWrites, hasLength(1));
           expect(
             disconnectWrites.single,
-            '\r\n[Helm] Disconnected — the session ended (you may have '
+            '\r\n[Helm] Disconnected - the session ended (you may have '
             'detached, or it was closed on the host)\r\n',
           );
         },
@@ -761,7 +761,7 @@ void main() {
     );
   });
 
-  group('TerminalSession.reconnect — guards', () {
+  group('TerminalSession.reconnect - guards', () {
     test('is a no-op when already connecting', () async {
       final service = FakeSSHService();
       final session = TerminalSession(
@@ -794,7 +794,7 @@ void main() {
   });
 
   group(
-    'TerminalSession.reconnect — full body '
+    'TerminalSession.reconnect - full body '
     '(requires mocking flutter_secure_storage: see comment on '
     '_secureStorageChannel above)',
     () {
@@ -838,7 +838,7 @@ void main() {
           expect(service.disconnectCalls, [oldClient]);
           expect(
             terminal.writes,
-            contains('[Helm] No SSH key found — cannot reconnect\r\n'),
+            contains('[Helm] No SSH key found - cannot reconnect\r\n'),
           );
           // No second connect attempt: reconnect() returns right after the
           // "no key" message, per terminal_session.dart:119-122.
@@ -886,7 +886,7 @@ void main() {
     },
   );
 
-  group('TerminalSession.reconnect — testability gap (discovery)', () {
+  group('TerminalSession.reconnect - testability gap (discovery)', () {
     test(
       '[DISCOVERY] with no secure-storage channel handler registered, '
       'reconnect() propagates the resulting exception uncaught -- '

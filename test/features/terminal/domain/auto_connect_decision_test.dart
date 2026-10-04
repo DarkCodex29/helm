@@ -28,7 +28,7 @@ void main() {
 
     test(
       'declines when NO profile is marked default, even though profiles '
-      'exist — the promise is attached to the flag, not to having a '
+      'exist - the promise is attached to the flag, not to having a '
       'profile at all, so an unmarked list must leave launch untouched',
       () {
         // ConnectionProfileRepository.getDefault() answers this question
@@ -66,7 +66,7 @@ void main() {
     });
 
     test(
-      'stands down while a crash-recovery offer is outstanding — the '
+      'stands down while a crash-recovery offer is outstanding - the '
       'restore would reopen the very same profile, and two sessions is '
       'the failure mode this whole decision exists to prevent',
       () {
@@ -84,7 +84,7 @@ void main() {
     );
 
     test(
-      'stands down when a session for that profile is already open — a '
+      'stands down when a session for that profile is already open - a '
       'completed recovery leaves exactly that state behind',
       () {
         final decision = decideAutoConnect(
@@ -102,7 +102,7 @@ void main() {
 
     test(
       'an open session for a DIFFERENT profile does not block the default '
-      'one — the guard is per profile, not "any tab exists"',
+      'one - the guard is per profile, not "any tab exists"',
       () {
         final decision = decideAutoConnect(
           profiles: [_profile('a', isDefault: true), _profile('z')],
@@ -117,7 +117,7 @@ void main() {
 
     test(
       'a missing default outranks a pending recovery as the reported '
-      'reason — there is nothing to auto-connect to either way',
+      'reason - there is nothing to auto-connect to either way',
       () {
         final decision = decideAutoConnect(
           profiles: [_profile('a')],
@@ -133,7 +133,7 @@ void main() {
     );
 
     test(
-      'with corrupt data marking two profiles default, the first wins — '
+      'with corrupt data marking two profiles default, the first wins - '
       'the same tie-break the repository already applies',
       () {
         final decision = decideAutoConnect(

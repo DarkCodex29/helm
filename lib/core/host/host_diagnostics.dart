@@ -380,7 +380,7 @@ class HostDiagnostics {
       // TEXT ONLY — never executed. See the class doc comment above.
       remediationCopy:
           'Update this profile to connect by $stableName instead of '
-          '$connectHost — the MagicDNS name follows this host across a '
+          '$connectHost - the MagicDNS name follows this host across a '
           'reinstall or a re-login; the raw address does not.',
     );
   }

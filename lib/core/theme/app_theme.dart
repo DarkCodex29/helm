@@ -30,6 +30,27 @@ class AppTheme {
   /// on a warning is how a red stops meaning anything.
   static const Color warning = Color(0xFFD29922);
 
+  // ── Status icon vocabulary ──────────────────
+  //
+  // One icon per status, named here so two surfaces cannot drift apart
+  // while meaning the same thing. They already had: a warning banner used
+  // `warning_amber_rounded` and the transfer strip used
+  // `warning_amber_outlined` for the identical idea.
+  //
+  // OUTLINE is the family, and that is measured rather than picked: the
+  // other three status icons in the app were already `error_outline`,
+  // `info_outline` and `check_circle_outline`. The rounded warning was the
+  // only one off the pattern, so it moved rather than the other three.
+  //
+  // This is a different axis from [AgentStateStyle], which owns a per-STATE
+  // vocabulary (blocked, working, done, idle) and is internally consistent.
+  // Do not merge the two: an agent that needs a human is not a warning
+  // banner, and giving them one icon would erase that distinction.
+  static const IconData warningIcon = Icons.warning_amber_outlined;
+  static const IconData errorIcon = Icons.error_outline;
+  static const IconData infoIcon = Icons.info_outline;
+  static const IconData successIcon = Icons.check_circle_outline;
+
   /// Backdrop painted behind the disconnection overlay. Fully opaque on
   /// purpose: this is the only consumer in the codebase, and it was
   /// introduced at 80% alpha for a single-line overlay where the dimmed

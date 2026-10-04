@@ -99,7 +99,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'merely RENDERING the tab strip asks the host who is running — no '
+    'merely RENDERING the tab strip asks the host who is running - no '
     'drawer opened, no tap, no gesture of any kind',
     (tester) async {
       final adapter = FakeAgentAdapter()
@@ -164,7 +164,7 @@ void main() {
 
   testWidgets(
     'the gate still holds: with NOTHING rendering the session, the host is '
-    'never asked — this is what keeps traffic at zero when unobserved and '
+    'never asked - this is what keeps traffic at zero when unobserved and '
     'must not be traded away for populating on open',
     (tester) async {
       final adapter = FakeAgentAdapter()

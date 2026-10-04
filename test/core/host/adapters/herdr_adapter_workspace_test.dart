@@ -119,7 +119,7 @@ void main() {
     });
 
     test('scopes both queries to the session, because a socket-backed query '
-        "answers only for the socket it connects to — the same MEASURED trap "
+        "answers only for the socket it connects to - the same MEASURED trap "
         'that made an unscoped `agent list` report zero agents', () async {
       // The session ref is shell-quoted, like every other host-supplied
       // string that reaches a remote shell (AD-3).
@@ -209,7 +209,7 @@ void main() {
     });
 
     test('reuses the agent-status vocabulary rather than parsing it a second '
-        'time — the host sends one enum, helm must read one enum', () async {
+        'time - the host sends one enum, helm must read one enum', () async {
       final result = await HerdrAdapter(
         _healthyRunner(),
       ).workspaces!.listWorkspaceTree();
@@ -222,7 +222,7 @@ void main() {
       ]);
     });
 
-    test('a dead server is a TYPED state, never an empty tree — an empty tree '
+    test('a dead server is a TYPED state, never an empty tree - an empty tree '
         'reads as "this host has no workspaces", which is a different claim '
         'from "we could not ask"', () async {
       final runner = FakeHostCommandRunner()
@@ -234,7 +234,7 @@ void main() {
     });
 
     test('a tab query that failed cannot be published as workspaces with no '
-        'tabs — that would compose a LIE out of one truth and one failure, '
+        'tabs - that would compose a LIE out of one truth and one failure, '
         'and it would read as "every client has no projects"', () async {
       final runner = FakeHostCommandRunner()
         ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
@@ -276,9 +276,9 @@ void main() {
     });
   });
 
-  group('listWorkspaceTree — a transport that never answered', () {
+  group('listWorkspaceTree - a transport that never answered', () {
     test(
-      'a workspace list that timed out is UNREACHABLE, never a crash — the '
+      'a workspace list that timed out is UNREACHABLE, never a crash - the '
       'variant already names "the transport gave up" as one of its cases',
       () async {
         final runner = FakeHostCommandRunner()
@@ -297,7 +297,7 @@ void main() {
 
     test(
       'a tab list that timed out after a good workspace list is UNREACHABLE '
-      'too — half a tree is the one thing this result refuses to report',
+      'too - half a tree is the one thing this result refuses to report',
       () async {
         final runner = FakeHostCommandRunner()
           ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
@@ -337,7 +337,7 @@ void main() {
       expect(runner.runCalls, ["herdr --session 'helm-0' tab focus 'w2:t3'"]);
     });
 
-    test('exit 0 is the success — the response body is never parsed', () async {
+    test('exit 0 is the success - the response body is never parsed', () async {
       // Deliberately NOT valid JSON: success is decided by the exit status,
       // so a body helm never reads must not be able to break the one
       // operation the user is waiting on.
@@ -376,7 +376,7 @@ void main() {
     );
 
     test('a transport that never reported an exit status is a failure, never '
-        'a success — nothing is known about whether the tab moved', () async {
+        'a success - nothing is known about whether the tab moved', () async {
       final runner = FakeHostCommandRunner()
         ..whenRun(
           "herdr tab focus 'w1:t1'",
@@ -413,7 +413,7 @@ void main() {
   group('multiplexers that have no workspaces', () {
     test('tmux and zellij decline the capability THROUGH THE TYPE, so a '
         'caller cannot reach the tree without first admitting they have '
-        'none — "this multiplexer has no workspaces" can never be read as '
+        'none - "this multiplexer has no workspaces" can never be read as '
         '"this multiplexer reported no workspaces"', () {
       for (final adapter in [
         TmuxAdapter(FakeHostCommandRunner()),

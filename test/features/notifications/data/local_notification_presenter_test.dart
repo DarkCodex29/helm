@@ -13,7 +13,7 @@ import 'package:helm/features/terminal/presentation/widgets/agent_state_chip.dar
 const int _sessionHoldNotificationId = 42;
 
 void main() {
-  group('notificationIdForKey — one slot per thing, not one for all', () {
+  group('notificationIdForKey - one slot per thing, not one for all', () {
     test('two different keys land on two different ids', () {
       // The whole bug this replaces: a single constant id meant the second
       // agent to speak silently erased the first, which reads as grouping
@@ -218,7 +218,7 @@ void main() {
     });
 
     test(
-      'no permission is requested — the ask stays at onAgentTrackingStarted',
+      'no permission is requested - the ask stays at onAgentTrackingStarted',
       () {
         final ios = kAgentAlertInitializationSettings.iOS!;
         expect(ios.requestAlertPermission, isFalse);

@@ -185,7 +185,7 @@ class _ErrorCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline, color: theme.colorScheme.error, size: 18),
+          Icon(AppTheme.errorIcon, color: theme.colorScheme.error, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -217,7 +217,7 @@ class _EmptyProfilesState extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Text(
-            'No profiles yet — tap + to add one',
+            'No profiles yet - tap + to add one',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
             ),

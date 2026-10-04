@@ -10,6 +10,7 @@
 // `terminal_session_advisory_dismissal_test.dart`.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/features/terminal/presentation/widgets/host_advisory_card.dart';
 
@@ -112,7 +113,15 @@ void main() {
     await tester.pumpWidget(_host(const [_warning, _info]));
 
     // Two different icons, so severity is legible without reading the copy.
-    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.info_outline), findsOneWidget);
+    //
+    // Asserted through AppTheme rather than against icon literals: the
+    // vocabulary moved there so two surfaces could not drift apart, and a
+    // test naming `Icons.warning_amber_rounded` would fail on a change
+    // that keeps this guarantee perfectly intact.
+    expect(find.byIcon(AppTheme.warningIcon), findsOneWidget);
+    expect(find.byIcon(AppTheme.infoIcon), findsOneWidget);
+    // The property this test is actually about: whatever the two are,
+    // they must not be the same glyph.
+    expect(AppTheme.warningIcon, isNot(AppTheme.infoIcon));
   });
 }

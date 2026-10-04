@@ -168,7 +168,7 @@ HostAdvisory _offPathAdvisory(String name, String absPath) => HostAdvisory(
   detail:
       '$name is installed at $absPath, but a non-interactive SSH shell on '
       'this host cannot find it by name. Helm attaches through the full '
-      'path, so this session works — but typing "$name" in your own shell '
+      'path, so this session works - but typing "$name" in your own shell '
       'there may not.',
   remediationCopy:
       'Add the directory containing $name to PATH in the shell startup '

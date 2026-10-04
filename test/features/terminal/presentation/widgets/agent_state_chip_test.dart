@@ -42,7 +42,7 @@ void main() {
     });
 
     testWidgets(
-      'fills only the blocked badge — every other state stays quiet so the '
+      'fills only the blocked badge - every other state stays quiet so the '
       'one needing a human is the one that draws the eye',
       (tester) async {
         await tester.pumpWidget(
@@ -85,7 +85,7 @@ void main() {
   });
 
   group('AgentRow', () {
-    testWidgets('shows the agent label and its state in words — there is '
+    testWidgets('shows the agent label and its state in words - there is '
         'room here, so nothing hides in a tooltip', (tester) async {
       await tester.pumpWidget(
         _host(AgentRow(agent: _agent(AgentState.blocked, label: 'opencode'))),
@@ -146,7 +146,7 @@ void main() {
     });
   });
 
-  group('AgentRow — the context that tells two identical agents apart', () {
+  group('AgentRow - the context that tells two identical agents apart', () {
     testWidgets('renders the context it was given', (tester) async {
       await tester.pumpWidget(
         _host(
@@ -161,7 +161,7 @@ void main() {
     });
 
     testWidgets(
-      'adds nothing at all without a context — an agent helm cannot place '
+      'adds nothing at all without a context - an agent helm cannot place '
       'is still a real agent, and the row falls back to what it showed',
       (tester) async {
         await tester.pumpWidget(
@@ -203,7 +203,7 @@ void main() {
 
     testWidgets(
       'truncates a real long context instead of overflowing a 280dp drawer '
-      '— "Facturación Electrónica" is one of the owner\'s actual tabs',
+      '- "Facturación Electrónica" is one of the owner\'s actual tabs',
       (tester) async {
         const long = 'Facturación Electrónica · Go Nexa';
         await tester.pumpWidget(
@@ -263,7 +263,7 @@ void main() {
     });
   });
 
-  group('AgentRow — tapping it is how the user reaches that agent', () {
+  group('AgentRow - tapping it is how the user reaches that agent', () {
     testWidgets('reports the tap to its owner', (tester) async {
       var taps = 0;
       await tester.pumpWidget(
@@ -277,7 +277,7 @@ void main() {
     });
 
     testWidgets(
-      'is inert without a handler — a row nobody can act on must not look '
+      'is inert without a handler - a row nobody can act on must not look '
       'or behave as though it were pressable',
       (tester) async {
         await tester.pumpWidget(

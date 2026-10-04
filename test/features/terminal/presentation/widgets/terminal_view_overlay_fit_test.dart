@@ -75,7 +75,7 @@ void main() {
   });
 
   testWidgets(
-    'with room to spare, the message is on screen and unchanged — the fit '
+    'with room to spare, the message is on screen and unchanged - the fit '
     'must not be bought by hiding what the overlay says',
     (tester) async {
       await _pumpAtHeight(tester, 400);
@@ -87,7 +87,7 @@ void main() {
   );
 
   testWidgets(
-    'tapping the overlay still triggers a reconnect — making it fit must '
+    'tapping the overlay still triggers a reconnect - making it fit must '
     'not swallow the one gesture it exists to offer',
     (tester) async {
       await _pumpAtHeight(tester, 400);

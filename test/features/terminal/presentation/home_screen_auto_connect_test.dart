@@ -96,7 +96,7 @@ Future<FakeSSHService> _pumpHome(
 
 void main() {
   testWidgets(
-    'launching with a default profile dials it with no taps at all — the '
+    'launching with a default profile dials it with no taps at all - the '
     'user opening the app must not be met by "No active sessions" when '
     'they already told us which host to open',
     (tester) async {
@@ -127,7 +127,7 @@ void main() {
   );
 
   testWidgets(
-    'launching with NO profile marked default changes nothing — the empty '
+    'launching with NO profile marked default changes nothing - the empty '
     'state stands and nothing is dialed',
     (tester) async {
       final ssh = await _pumpHome(tester, profiles: [_unmarkedProfile]);
@@ -146,7 +146,7 @@ void main() {
 
   testWidgets(
     'launching with a crash-recovery offer outstanding does NOT dial the '
-    'default profile — accepting that offer reopens this very profile, '
+    'default profile - accepting that offer reopens this very profile, '
     'and dialing beside it is how one host ends up with two sessions',
     (tester) async {
       // The guard lives in decideAutoConnect, but only HomeScreen knows

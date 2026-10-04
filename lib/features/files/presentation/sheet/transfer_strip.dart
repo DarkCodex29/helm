@@ -125,7 +125,7 @@ class _UploadStatusBar extends StatelessWidget {
   Widget _line(FileUploadItem item) => switch (item.status) {
     FileUploadStatus.uploading => _UploadRunningLine(state: item),
     FileUploadStatus.completed => _EndingLine(
-      icon: Icons.check_circle_outline,
+      icon: AppTheme.successIcon,
       color: _accent,
       message: switch (item.outcome) {
         UploadCompleted(:final name) when name != item.name =>
@@ -145,14 +145,14 @@ class _UploadStatusBar extends StatelessWidget {
       message: 'Cancelled ${item.name}.',
     ),
     FileUploadStatus.destinationExists => _EndingLine(
-      icon: Icons.warning_amber_outlined,
+      icon: AppTheme.warningIcon,
       color: _danger,
       message:
           'Could not find a free name for ${item.name} after checking '
           '100 names. Try a different name.',
     ),
     FileUploadStatus.failed => _EndingLine(
-      icon: Icons.error_outline,
+      icon: AppTheme.errorIcon,
       color: _danger,
       // The name is PREFIXED rather than folded into the reason: every
       // string `describeUploadFailure` returns is written to stand alone
@@ -304,7 +304,7 @@ class _DownloadStatusBar extends StatelessWidget {
       message: 'Download cancelled.',
     ),
     FileDownloadStatus.failed => _EndingLine(
-      icon: Icons.error_outline,
+      icon: AppTheme.errorIcon,
       color: _danger,
       message: describeDownloadFailure(state.failure),
     ),
@@ -443,7 +443,7 @@ class _PublishLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, color, message, offersFolder) = switch (outcome) {
       PublishedToFolder(:final folderName, :final fileName) => (
-        Icons.check_circle_outline,
+        AppTheme.successIcon,
         _accent,
         'Saved to $folderName as $fileName.',
         false,

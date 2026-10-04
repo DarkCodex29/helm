@@ -197,7 +197,7 @@ Future<({TerminalSession session, FakeSSHSession attach})> _connect({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('refreshSessionVitality — reachability', () {
+  group('refreshSessionVitality - reachability', () {
     test(
       'a multiplexer that cannot list panes reports UNSUPPORTED naming '
       'itself, never a verdict',
@@ -273,7 +273,7 @@ void main() {
 
     test(
       'a second call while one is still in flight does NOT open a second '
-      'channel — the guard is what bounds the leak `.timeout` would '
+      'channel - the guard is what bounds the leak `.timeout` would '
       'otherwise create, exactly as it does for the agent poll',
       () async {
         final gated = _GatedHostCommandRunner(_runner(), _paneListCommand);
@@ -316,7 +316,7 @@ void main() {
     });
   });
 
-  group('refreshSessionVitality — the verdict', () {
+  group('refreshSessionVitality - the verdict', () {
     test(
       'the measured resurrected-empty session reads as VIRGIN: untouched '
       'panes at home, and an authoritative empty agent list',
@@ -395,7 +395,7 @@ void main() {
     );
 
     test(
-      'a host that never reported its home directory is INDETERMINATE — and '
+      'a host that never reported its home directory is INDETERMINATE - and '
       'costs NO round-trip, because home cannot arrive later on a '
       'connection that already probed',
       () async {
@@ -423,7 +423,7 @@ void main() {
   group('the one-shot trigger', () {
     test(
       'an authoritative agent snapshot drives the verdict exactly once per '
-      'connection — a later poll must not re-ask a question whose answer '
+      'connection - a later poll must not re-ask a question whose answer '
       'cannot change',
       () async {
         final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
@@ -477,7 +477,7 @@ void main() {
     );
 
     test(
-      'disconnecting reverts the verdict to NOT PROBED — a stale VIRGIN on '
+      'disconnecting reverts the verdict to NOT PROBED - a stale VIRGIN on '
       'screen would keep asserting something about a host nobody can ask',
       () async {
         final connected = await _connect(

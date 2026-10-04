@@ -102,7 +102,7 @@ class TabsNotifier extends Notifier<TabsState> {
         // answer to "open this session" when it is already open.
         final index = state.tabs.indexWhere((t) => t.id == tabId);
         if (index != -1) {
-          _log.i('Session $sessionName is already open — focusing its tab');
+          _log.i('Session $sessionName is already open - focusing its tab');
           state = state.copyWith(activeIndex: index);
           return;
         }
@@ -117,7 +117,7 @@ class TabsNotifier extends Notifier<TabsState> {
 
     final privateKey = await keyService.getPrivateKey();
     if (privateKey == null) {
-      _log.e('No SSH private key found — cannot open tab');
+      _log.e('No SSH private key found - cannot open tab');
       return;
     }
 

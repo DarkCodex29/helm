@@ -309,7 +309,7 @@ class SSHService {
 
   static String _summaryFor(Object error) {
     if (error is HostKeyMismatchException) {
-      return 'Host key verification failed — the server presented a '
+      return 'Host key verification failed - the server presented a '
           'different ${error.keyType} key than the one Helm pinned';
     }
     if (error is HostKeyAuthorizationRequiredException) {
@@ -329,10 +329,10 @@ class SSHService {
       // down, or the network in between.
       final detail = (error.osError?.message ?? error.message).toLowerCase();
       if (detail.contains('refused')) {
-        return 'Connection refused — something answered and declined it';
+        return 'Connection refused - something answered and declined it';
       }
       if (detail.contains('resolve') || detail.contains('nodename')) {
-        return 'Could not reach the host — its name did not resolve';
+        return 'Could not reach the host - its name did not resolve';
       }
       // Only `address` is a host. `message` is prose describing the
       // failure ("Connection timed out"), and interpolating it here once
@@ -340,11 +340,11 @@ class SSHService {
       // reads like a hostname and names nothing.
       final host = error.address?.host;
       return host == null
-          ? 'Could not reach the host — nothing answered'
-          : 'Could not reach $host — nothing answered';
+          ? 'Could not reach the host - nothing answered'
+          : 'Could not reach $host - nothing answered';
     }
     if (error is TimeoutException) {
-      return 'Could not reach the host — it did not answer in time';
+      return 'Could not reach the host - it did not answer in time';
     }
     if (error is SSHError) return 'SSH error';
     return 'Connection failed (${error.runtimeType})';
@@ -388,7 +388,7 @@ class SSHService {
           '${error.host}:${error.port} once.\r\n'
           'This update changed how Helm computes host key fingerprints, so '
           'the value stored for this server can no longer be compared. This '
-          'is not necessarily a sign that the key changed — every server '
+          'is not necessarily a sign that the key changed - every server '
           'Helm already trusted needs confirming once.\r\n'
           '${error.keyType} fingerprint: ${error.receivedFingerprint}\r\n'
           '${command == null ? '' : 'To check it, run this on the server '
@@ -412,7 +412,7 @@ class SSHService {
           'This server was already trusted for '
           '${error.knownKeyTypes.join(', ')}, and has now presented a '
           '${error.keyType} key, which Helm has never seen for it. That is '
-          'often legitimate — a re-keyed server, or an administrator adding '
+          'often legitimate - a re-keyed server, or an administrator adding '
           'a newer algorithm alongside an older one. It can also be someone '
           'on the network offering an algorithm your server does not use, '
           'so that their key looks new rather than wrong.\r\n'

@@ -79,7 +79,7 @@ Future<TerminalSession> _session({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('focusAgent — the happy path is the only one that says it worked', () {
+  group('focusAgent - the happy path is the only one that says it worked', () {
     test('passes the agent target through to the multiplexer verbatim', () async {
       final adapter = FakeAgentAdapter();
       final session = await _session(adapter: adapter);
@@ -97,7 +97,7 @@ void main() {
 
     test(
       'a vanished target is reported as such and NOT as a failure to reach '
-      'the host — the drawer showed a row that is gone, which is a '
+      'the host - the drawer showed a row that is gone, which is a '
       'different thing to tell the user',
       () async {
         final adapter = FakeAgentAdapter()
@@ -127,7 +127,7 @@ void main() {
     });
   });
 
-  group('focusAgent — every refusal reports that it did NOT happen', () {
+  group('focusAgent - every refusal reports that it did NOT happen', () {
     test(
       'an agent-blind multiplexer FAILS rather than pretending, and is '
       'never asked in the first place',
@@ -184,7 +184,7 @@ void main() {
     );
   });
 
-  group('focusAgent — the channel budget, which a thumb sets the rate of', () {
+  group('focusAgent - the channel budget, which a thumb sets the rate of', () {
     test(
       'a wedged host is abandoned at kAgentFocusTimeout and reports FAILED, '
       'so the drawer is never left waiting on an answer that never comes',
@@ -223,7 +223,7 @@ void main() {
 
     test(
       'a second tap while one focus is still in flight opens NO second '
-      'channel — a repeated tap on a wedged host must not spend the '
+      'channel - a repeated tap on a wedged host must not spend the '
       'connection the terminal itself needs',
       () async {
         final adapter = FakeAgentAdapter()..whenFocusHangs();
@@ -247,7 +247,7 @@ void main() {
     test(
       'a focus ABANDONED at the timeout still holds the guard, so a wedged '
       'host leaks at most ONE remote invocation however often the row is '
-      'tapped — the 773888f failure with a thumb as its trigger',
+      'tapped - the 773888f failure with a thumb as its trigger',
       () async {
         final adapter = FakeAgentAdapter()..whenFocusHangs();
         final session = await _session(adapter: adapter);

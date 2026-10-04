@@ -541,7 +541,7 @@ class KnownHostsService {
       if (legacy != null) {
         _log.w(
           'Host key for $host:$port ($keyType) was pinned in a superseded '
-          'format and cannot be compared — re-authorization required',
+          'format and cannot be compared - re-authorization required',
         );
         return HostKeyVerification(
           verdict: HostKeyVerdict.unverifiablePin,
@@ -561,7 +561,7 @@ class KnownHostsService {
       if (knownKeyTypes.isNotEmpty) {
         _log.w(
           'Host $host:$port is pinned for ${knownKeyTypes.join(', ')} but '
-          'presented $keyType, which has never been seen — explicit '
+          'presented $keyType, which has never been seen - explicit '
           'authorization required',
         );
         return HostKeyVerification(
@@ -608,7 +608,7 @@ class KnownHostsService {
     }
 
     _log.e(
-      'Host key mismatch for $host:$port ($keyType) — '
+      'Host key mismatch for $host:$port ($keyType) - '
       'expected $stored but received $received',
     );
     return HostKeyVerification(

@@ -72,7 +72,7 @@ void main() {
   });
 
   group('agents capability', () {
-    test('is null — TmuxAdapter does not support agent state', () {
+    test('is null - TmuxAdapter does not support agent state', () {
       expect(adapter.agents, isNull);
     });
 
@@ -88,7 +88,7 @@ void main() {
   });
 
   group('panes capability', () {
-    test('is null — TmuxAdapter cannot report pane revision or cwd', () {
+    test('is null - TmuxAdapter cannot report pane revision or cwd', () {
       expect(adapter.panes, isNull);
     });
 

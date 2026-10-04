@@ -78,7 +78,7 @@ void main() {
   testWidgets(
     'a smaller font size yields more measured columns than the default, so '
     'the real metrics TerminalView lays out with are the source of the '
-    'column count a font-size control would preview — never a second, '
+    'column count a font-size control would preview - never a second, '
     'hand-computed estimate',
     (tester) async {
       final defaultSession = _session(

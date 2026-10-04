@@ -132,7 +132,7 @@ class _AdvisoryRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            isWarning ? Icons.warning_amber_rounded : Icons.info_outline,
+            isWarning ? AppTheme.warningIcon : AppTheme.infoIcon,
             color: accent,
             size: 18,
           ),

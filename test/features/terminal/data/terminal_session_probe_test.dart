@@ -100,7 +100,7 @@ Future<({List<String> commands, TerminalSession session})> _connect({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('TerminalSession.connect — runs the probe', () {
+  group('TerminalSession.connect - runs the probe', () {
     test('probes over the already-open connection, not a second one', () async {
       final runner = _probeRunner(_realHostProbeOutput);
       final service = FakeSSHService();
@@ -154,7 +154,7 @@ void main() {
     });
   });
 
-  group('TerminalSession.connect — honors the persisted multiplexer', () {
+  group('TerminalSession.connect - honors the persisted multiplexer', () {
     test('attaches with zellij when the profile asks for zellij', () async {
       final result = await _connect(
         profile: _profile(multiplexer: 'zellij'),
@@ -223,7 +223,7 @@ void main() {
     });
   });
 
-  group('TerminalSession.connect — discloses a substitution', () {
+  group('TerminalSession.connect - discloses a substitution', () {
     test('does not silently run a different multiplexer', () async {
       final terminal = RecordingTerminal();
       final result = await _connect(
@@ -288,7 +288,7 @@ void main() {
     });
   });
 
-  group('TerminalSession.connect — a failed probe never blocks a session', () {
+  group('TerminalSession.connect - a failed probe never blocks a session', () {
     test('still attaches when the probe throws', () async {
       // FakeHostCommandRunner throws StateError for an unregistered
       // script, standing in for a transport that drops mid-probe.
@@ -339,7 +339,7 @@ void main() {
     });
   });
 
-  group('TerminalSession — advisories survive the multiplexer redraw', () {
+  group('TerminalSession - advisories survive the multiplexer redraw', () {
     // The connect-time terminal notice is written into the same buffer the
     // multiplexer is about to take over. Verified on a real host: tmux
     // clears the screen on attach, so the notice is gone before the user
@@ -387,7 +387,7 @@ void main() {
     });
   });
 
-  group('TerminalSession — advisories reach the failure path', () {
+  group('TerminalSession - advisories reach the failure path', () {
     test('a healthy connect surfaces nothing', () async {
       final result = await _connect(
         profile: _profile(multiplexer: 'tmux'),
@@ -490,7 +490,7 @@ void main() {
     });
 
     test('surfaces a raw-Tailscale-address warning using the profile\'s own '
-        'host string — proves the connect host reaches HostAdvisor.collect, '
+        'host string - proves the connect host reaches HostAdvisor.collect, '
         'not just that HostDiagnostics can take one as a parameter', () async {
       final service = FakeSSHService();
       service.queueConnectSuccess(
@@ -581,7 +581,7 @@ void main() {
     });
   });
 
-  group('TerminalSession — advisory collection outlives nothing', () {
+  group('TerminalSession - advisory collection outlives nothing', () {
     test('does not publish after dispose', () async {
       // Observed on a real device: closing a tab disposes the session
       // while the advisory collect is still awaiting host round-trips.
@@ -621,7 +621,7 @@ void main() {
     });
   });
 
-  group('TerminalSession — host state is bound to the live connection', () {
+  group('TerminalSession - host state is bound to the live connection', () {
     test('exposes a runner while connected', () async {
       final result = await _connect(runner: _probeRunner(_realHostProbeOutput));
 
@@ -642,7 +642,7 @@ void main() {
     );
   });
 
-  group('TerminalSession.connect — no session reference', () {
+  group('TerminalSession.connect - no session reference', () {
     test('does not probe when there is nothing to attach to', () async {
       final runner = _probeRunner(_realHostProbeOutput);
       final service = FakeSSHService();

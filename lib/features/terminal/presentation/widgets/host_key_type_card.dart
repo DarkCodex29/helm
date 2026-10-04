@@ -130,7 +130,7 @@ class HostKeyTypeCard extends StatelessWidget {
               // warning wearing a different colour.
               'This server is already trusted for $known, and has now '
               'presented a ${authorization.keyType} key that Helm has never '
-              'seen for it. That is often legitimate — a re-keyed server, '
+              'seen for it. That is often legitimate - a re-keyed server, '
               'or an administrator adding a newer algorithm. It can also be '
               'someone on the network offering an algorithm your server '
               'does not use, so their key looks new rather than wrong.',
