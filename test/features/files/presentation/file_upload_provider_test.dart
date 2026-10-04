@@ -92,12 +92,15 @@ void main() {
     });
   });
 
-  group('a destination that already exists', () {
+  group('exhausted destination candidates', () {
     test(
       'is its OWN state, distinct from a generic failure, and reports false',
       () async {
         final session = FakeSftpSession(
-          stats: {'/home/gian/report.docx': SftpFileAttrs()},
+          stats: {
+            for (var i = 0; i < 100; i++)
+              '/home/gian/report${i == 0 ? '' : '($i)'}.docx': SftpFileAttrs(),
+          },
         );
 
         final completed = await notifier().start(
