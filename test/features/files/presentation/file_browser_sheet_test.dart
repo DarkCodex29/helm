@@ -16,6 +16,7 @@ import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/files/data/external_viewer.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
@@ -48,9 +49,9 @@ Future<ProviderContainer> _pumpSheet(
 }) async {
   final container = ProviderContainer();
   addTearDown(container.dispose);
-  container.read(fileDownloadProvider.notifier).debugUseViewer(
-    (file) => _viewer(file),
-  );
+  container
+      .read(fileDownloadProvider.notifier)
+      .debugUseViewer((file) => _viewer(file));
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -60,6 +61,7 @@ Future<ProviderContainer> _pumpSheet(
           body: FileBrowserSheet(
             service: service,
             downloadService: downloadService ?? _downloadService(),
+            uploadService: _uploadService(),
           ),
         ),
       ),
@@ -124,6 +126,14 @@ SftpDownloadService _downloadService({
   );
 }
 
+/// An upload service nothing in this file's scenarios exercises — this
+/// file's tests are entirely about the LISTING and DOWNLOAD halves of the
+/// sheet, so the fake session behind it needs no scripted behaviour beyond
+/// existing. The upload affordance itself is covered in
+/// `file_browser_upload_test.dart`.
+SftpUploadService _uploadService() =>
+    SftpUploadService.withOpener(() async => FakeSftpSession());
+
 void main() {
   setUp(() {
     _staging = Directory.systemTemp.createTempSync('helm_sheet_test');
@@ -135,7 +145,9 @@ void main() {
   });
 
   group('listing outcomes', () {
-    testWidgets('an empty directory says so, and shows no error', (tester) async {
+    testWidgets('an empty directory says so, and shows no error', (
+      tester,
+    ) async {
       await _pumpSheet(tester, _service(directories: {'/home/gian': const []}));
 
       expect(_byId(FilesSemantics.emptyDirectory), findsOneWidget);
@@ -143,17 +155,18 @@ void main() {
       expect(find.text('This directory is empty'), findsOneWidget);
     });
 
-    testWidgets('a refused directory shows an error, and never the empty panel', (
-      tester,
-    ) async {
-      await _pumpSheet(
-        tester,
-        _service(deniedPaths: const {'/home/gian'}, home: '/home/gian'),
-      );
+    testWidgets(
+      'a refused directory shows an error, and never the empty panel',
+      (tester) async {
+        await _pumpSheet(
+          tester,
+          _service(deniedPaths: const {'/home/gian'}, home: '/home/gian'),
+        );
 
-      expect(_byId(FilesSemantics.listingError), findsOneWidget);
-      expect(_byId(FilesSemantics.emptyDirectory), findsNothing);
-    });
+        expect(_byId(FilesSemantics.listingError), findsOneWidget);
+        expect(_byId(FilesSemantics.emptyDirectory), findsNothing);
+      },
+    );
 
     testWidgets('permission denied names permission, not a generic failure', (
       tester,
@@ -166,7 +179,9 @@ void main() {
       );
     });
 
-    testWidgets('a path that vanished says so in its own words', (tester) async {
+    testWidgets('a path that vanished says so in its own words', (
+      tester,
+    ) async {
       await _pumpSheet(tester, _service(directories: const {}));
 
       expect(
@@ -175,14 +190,18 @@ void main() {
       );
     });
 
-    testWidgets('a dropped connection says so in its own words', (tester) async {
+    testWidgets('a dropped connection says so in its own words', (
+      tester,
+    ) async {
       await _pumpSheet(
         tester,
         _service(listError: SftpAbortError('SFTP channel closed')),
       );
 
       expect(
-        find.text('The connection dropped before this directory could be read.'),
+        find.text(
+          'The connection dropped before this directory could be read.',
+        ),
         findsOneWidget,
       );
     });
@@ -209,7 +228,9 @@ void main() {
       expect(titles, ['projects', 'notes.md']);
     });
 
-    testWidgets('a file row states its kind and human-readable size', (tester) async {
+    testWidgets('a file row states its kind and human-readable size', (
+      tester,
+    ) async {
       await _pumpSheet(
         tester,
         _service(
@@ -272,7 +293,9 @@ void main() {
       expect(find.text('/home/gian'), findsOneWidget);
     });
 
-    testWidgets('at the root, the up action is present but disabled', (tester) async {
+    testWidgets('at the root, the up action is present but disabled', (
+      tester,
+    ) async {
       await _pumpSheet(
         tester,
         _service(directories: {'/': const []}, home: '/'),
@@ -288,12 +311,12 @@ void main() {
       expect(up.onPressed, isNull);
     });
 
-    testWidgets('below the root, the up action moves to the parent', (tester) async {
+    testWidgets('below the root, the up action moves to the parent', (
+      tester,
+    ) async {
       await _pumpSheet(
         tester,
-        _service(
-          directories: {'/home/gian': const [], '/home': const []},
-        ),
+        _service(directories: {'/home/gian': const [], '/home': const []}),
       );
 
       await tester.tap(
@@ -349,16 +372,19 @@ void main() {
       expect(describeRemoteEntry(entry), 'File');
     });
 
-    test('reports a real zero-byte file as 0 B, which is not the same thing', () {
-      const entry = RemoteEntry(
-        name: 'empty',
-        path: '/empty',
-        kind: RemoteEntryKind.file,
-        size: 0,
-      );
+    test(
+      'reports a real zero-byte file as 0 B, which is not the same thing',
+      () {
+        const entry = RemoteEntry(
+          name: 'empty',
+          path: '/empty',
+          kind: RemoteEntryKind.file,
+          size: 0,
+        );
 
-      expect(describeRemoteEntry(entry), 'File · 0 B');
-    });
+        expect(describeRemoteEntry(entry), 'File · 0 B');
+      },
+    );
 
     test('names what a symlink resolves to', () {
       const entry = RemoteEntry(
@@ -578,10 +604,7 @@ void main() {
     });
 
     test('has a sentence for a reason that never arrived', () {
-      expect(
-        describeDownloadFailure(null),
-        contains('did not say why'),
-      );
+      expect(describeDownloadFailure(null), contains('did not say why'));
     });
   });
 
@@ -590,10 +613,7 @@ void main() {
       tester,
     ) async {
       final session = FakeSftpSession(directories: {'/home/gian': const []});
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(find.byTooltip('New folder'));
       await tester.pumpAndSettle();
@@ -607,10 +627,7 @@ void main() {
 
     testWidgets('cancelling the dialog creates nothing', (tester) async {
       final session = FakeSftpSession(directories: {'/home/gian': const []});
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(find.byTooltip('New folder'));
       await tester.pumpAndSettle();
@@ -624,10 +641,7 @@ void main() {
 
     testWidgets('rejects an invalid name without a round trip', (tester) async {
       final session = FakeSftpSession(directories: {'/home/gian': const []});
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(find.byTooltip('New folder'));
       await tester.pumpAndSettle();
@@ -649,10 +663,7 @@ void main() {
           '/home/gian': [fakeSftpName('old.txt', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -680,10 +691,7 @@ void main() {
           '/home/gian': [fakeSftpName('old.txt', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -709,10 +717,7 @@ void main() {
           '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -737,10 +742,7 @@ void main() {
           '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -767,10 +769,7 @@ void main() {
           '/home/gian/empty-dir': const [],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -792,10 +791,7 @@ void main() {
           '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -821,10 +817,7 @@ void main() {
           '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(
@@ -857,10 +850,7 @@ void main() {
           ],
         },
       );
-      await _pumpSheet(
-        tester,
-        SftpFileService.withOpener(() async => session),
-      );
+      await _pumpSheet(tester, SftpFileService.withOpener(() async => session));
 
       await tester.tap(
         find.descendant(

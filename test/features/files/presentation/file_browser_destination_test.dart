@@ -22,6 +22,7 @@ import 'package:helm/features/files/data/download_destination_store.dart';
 import 'package:helm/features/files/data/external_viewer.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/presentation/file_browser_sheet.dart';
@@ -33,7 +34,8 @@ import '../../../helpers/fake_document_tree_gateway.dart';
 import '../../../helpers/fake_sftp_session.dart';
 
 const _folder = DownloadDestination(
-  uri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
+  uri:
+      'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
   name: 'Helm',
 );
 
@@ -63,6 +65,9 @@ SftpDownloadService _downloadService(String path) =>
       idleTimeout: const Duration(milliseconds: 200),
     );
 
+SftpUploadService _uploadService() =>
+    SftpUploadService.withOpener(() async => FakeSftpSession());
+
 /// Pumps the sheet with a destination service the test controls.
 Future<ProviderContainer> _pumpSheet(
   WidgetTester tester,
@@ -83,9 +88,9 @@ Future<ProviderContainer> _pumpSheet(
     ],
   );
   addTearDown(container.dispose);
-  container.read(fileDownloadProvider.notifier).debugUseViewer(
-    (_) async => viewer,
-  );
+  container
+      .read(fileDownloadProvider.notifier)
+      .debugUseViewer((_) async => viewer);
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -95,6 +100,7 @@ Future<ProviderContainer> _pumpSheet(
           body: FileBrowserSheet(
             service: _emptyService(),
             downloadService: _downloadService(downloadPath),
+            uploadService: _uploadService(),
           ),
         ),
       ),
@@ -278,10 +284,7 @@ void main() {
       );
       // The download half of the strip stays silent, because the download
       // did not fail.
-      expect(
-        find.text(describeDownloadFailure(null)),
-        findsNothing,
-      );
+      expect(find.text(describeDownloadFailure(null)), findsNothing);
       expect(
         container.read(fileDownloadProvider).status,
         FileDownloadStatus.opened,

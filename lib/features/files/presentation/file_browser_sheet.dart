@@ -4,14 +4,18 @@ import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_listing.dart';
+import 'package:helm/features/files/domain/remote_path.dart';
 import 'package:helm/features/files/domain/remote_write_outcome.dart';
+import 'package:helm/features/files/domain/upload_outcome.dart';
 import 'package:helm/features/files/presentation/providers/download_destination_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_browser_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_download_provider.dart';
+import 'package:helm/features/files/presentation/providers/file_upload_provider.dart';
 
 // The drawer's palette, repeated rather than imported because this app has
 // no token file yet and every surface spells these out — see
@@ -32,10 +36,9 @@ const _danger = AppTheme.error;
 /// connection through a URL would mean either a global lookup or a route
 /// that can be deep-linked into a session that no longer exists.
 ///
-/// This slice reads, DOWNLOADS, and WRITES: it can create a directory,
-/// rename an entry, and delete one. Upload — streaming bytes INTO the
-/// host — is still not offered; see `SftpSession`'s doc comment for why
-/// that boundary is deliberate rather than an oversight.
+/// This slice reads, DOWNLOADS, WRITES and UPLOADS: it can create a
+/// directory, rename an entry, delete one, and send a local file to the
+/// host.
 ///
 /// Every download passes through a staging directory the app sweeps on a
 /// 24-hour retention ([SftpDownloadService.defaultDownloadDirectory]), and
@@ -47,6 +50,7 @@ class FileBrowserSheet extends ConsumerStatefulWidget {
   const FileBrowserSheet({
     required this.service,
     required this.downloadService,
+    required this.uploadService,
     super.key,
   });
 
@@ -57,18 +61,36 @@ class FileBrowserSheet extends ConsumerStatefulWidget {
   /// not share the browse session's channel.
   final SftpDownloadService downloadService;
 
+  /// Sends a local file to the host. A SEPARATE service again, for the
+  /// identical reason [downloadService] is: [SftpUploadService] opens its
+  /// own channel per transfer.
+  ///
+  /// REQUIRED rather than optional. This sheet is reachable only from
+  /// [HomeScreen._buildBrowseAction], which renders nothing at all unless
+  /// [TerminalSession.uploadService] is non-null — a live session always
+  /// has one the moment it has a [downloadService], since both are built
+  /// in the same `connect()` step. An optional parameter here would invite
+  /// a caller to construct this sheet without one and silently lose the
+  /// upload affordance, which is exactly the unreachable-capability defect
+  /// this whole task exists to close.
+  final SftpUploadService uploadService;
+
   /// Opens the browser over the current route.
   static Future<void> show(
     BuildContext context, {
     required SftpFileService service,
     required SftpDownloadService downloadService,
+    required SftpUploadService uploadService,
   }) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          FileBrowserSheet(service: service, downloadService: downloadService),
+      builder: (_) => FileBrowserSheet(
+        service: service,
+        downloadService: downloadService,
+        uploadService: uploadService,
+      ),
     );
   }
 
@@ -97,11 +119,16 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
   /// download runs outside a build, where `ref` is off-limits.
   late final FileDownloadNotifier _downloads;
 
+  /// Captured for the same reason as [_downloads]: the tap that starts an
+  /// upload runs outside a build too.
+  late final FileUploadNotifier _uploads;
+
   @override
   void initState() {
     super.initState();
     _browser = ref.read(fileBrowserProvider.notifier);
     _downloads = ref.read(fileDownloadProvider.notifier);
+    _uploads = ref.read(fileUploadProvider.notifier);
     // Deferred to the first frame: `open` writes to the provider, and a
     // provider must not be mutated while the widget tree is still
     // building.
@@ -135,6 +162,37 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     if (ref.read(fileDownloadProvider).isRunning) return;
     setState(() => _selected = null);
     await _downloads.start(widget.downloadService, entry);
+  }
+
+  /// Picks a local file and uploads it into the directory currently shown.
+  ///
+  /// Refuses while [FileUploadState.isRunning], mirroring [_download]'s
+  /// own refusal and for the identical reason: the strip shows one
+  /// transfer, and starting a second would abandon the one on screen with
+  /// nothing left to show its progress.
+  ///
+  /// A DECLINED PICK ends here silently — [UploadSourcePicker.pick]
+  /// already folds "nothing to upload" and "this platform cannot pick" into
+  /// the same null, and neither is a failure worth a toast.
+  ///
+  /// Refreshes the listing on completion, matching every other write this
+  /// sheet performs: a browser that still omitted the uploaded file would
+  /// tell the user their upload did nothing when it worked.
+  Future<void> _upload() async {
+    if (ref.read(fileUploadProvider).isRunning) return;
+    final current = ref.read(fileBrowserProvider).path;
+    if (current == null) return;
+
+    final source = await ref.read(uploadSourcePickerProvider).pick();
+    if (source == null) return;
+
+    final destinationPath = remoteJoin(current, source.name);
+    final completed = await _uploads.start(
+      widget.uploadService,
+      destinationPath,
+      source,
+    );
+    if (completed) await _browser.refresh();
   }
 
   /// Opens the system folder picker.
@@ -303,7 +361,9 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
   Widget build(BuildContext context) {
     final state = ref.watch(fileBrowserProvider);
     final download = ref.watch(fileDownloadProvider);
+    final upload = ref.watch(fileUploadProvider);
     final notifier = _browser;
+    final picker = ref.watch(uploadSourcePickerProvider);
 
     return Semantics(
       identifier: FilesSemantics.sheet,
@@ -328,6 +388,10 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
                 // the folder in.
                 onCreateFolder: state.status == FileBrowserStatus.ready
                     ? _createFolder
+                    : null,
+                showUpload: picker.supportsPicking,
+                onUpload: state.status == FileBrowserStatus.ready
+                    ? _upload
                     : null,
               ),
               Expanded(
@@ -361,6 +425,11 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
                 ),
               ),
               const _DestinationBar(),
+              _UploadStatusBar(
+                state: upload,
+                onCancel: _uploads.cancel,
+                onDismiss: _uploads.dismiss,
+              ),
               _DownloadStatusBar(
                 state: download,
                 onCancel: _downloads.cancel,
@@ -449,7 +518,129 @@ class _NamePromptDialogState extends State<_NamePromptDialog> {
   }
 }
 
-// ── Transfer strip ─────────────────────────────────────────────────────────
+// Upload strip
+
+/// Reports the one upload the sheet can have in flight.
+///
+/// A SEPARATE strip from [_DownloadStatusBar] rather than a shared one,
+/// see [FilesSemantics.uploadStatus] for why: the two transfers run
+/// through independent notifiers and can both have something to say at
+/// once.
+///
+/// Every [UploadOutcome] variant gets its OWN message here, including
+/// [UploadDestinationExists], which reads as something the user can act
+/// on (pick a different file, or rename what is already there) rather than
+/// a generic failure, matching the enum's own doc comment.
+class _UploadStatusBar extends StatelessWidget {
+  const _UploadStatusBar({
+    required this.state,
+    required this.onCancel,
+    required this.onDismiss,
+  });
+
+  final FileUploadState state;
+  final VoidCallback onCancel;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.status == FileUploadStatus.idle) return const SizedBox.shrink();
+
+    return Semantics(
+      identifier: FilesSemantics.uploadStatus,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
+        decoration: const BoxDecoration(
+          color: _raised,
+          border: Border(top: BorderSide(color: _border)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: _line()),
+            if (state.isRunning)
+              Semantics(
+                identifier: FilesSemantics.uploadCancelButton,
+                child: TextButton(
+                  onPressed: onCancel,
+                  style: TextButton.styleFrom(foregroundColor: _mutedText),
+                  child: const Text('Cancel'),
+                ),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.close, size: 16),
+                color: _mutedText,
+                tooltip: 'Dismiss',
+                onPressed: onDismiss,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _line() => switch (state.status) {
+    FileUploadStatus.uploading => _UploadRunningLine(state: state),
+    FileUploadStatus.completed => _EndingLine(
+      icon: Icons.check_circle_outline,
+      color: _accent,
+      message: 'Uploaded ${state.name ?? 'the file'}.',
+    ),
+    FileUploadStatus.cancelled => const _EndingLine(
+      icon: Icons.block,
+      color: _mutedText,
+      message: 'Upload cancelled.',
+    ),
+    FileUploadStatus.destinationExists => _EndingLine(
+      icon: Icons.warning_amber_outlined,
+      color: _danger,
+      message:
+          '${state.name ?? 'A file'} with that name already exists here. '
+          'Rename it on the host, or choose a different file.',
+    ),
+    FileUploadStatus.failed => _EndingLine(
+      icon: Icons.error_outline,
+      color: _danger,
+      message: describeUploadFailure(state.failure),
+    ),
+    // Filtered out above; listed so a new status is a compile error here
+    // rather than a blank strip.
+    FileUploadStatus.idle => const SizedBox.shrink(),
+  };
+}
+
+class _UploadRunningLine extends StatelessWidget {
+  const _UploadRunningLine({required this.state});
+
+  final FileUploadState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Uploading ${state.name ?? ''} · ${state.percent}%',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: _primaryText, fontSize: 12),
+        ),
+        const SizedBox(height: 6),
+        LinearProgressIndicator(
+          value: state.percent / 100,
+          minHeight: 3,
+          backgroundColor: _border,
+          valueColor: const AlwaysStoppedAnimation(_accent),
+        ),
+      ],
+    );
+  }
+}
+
+// Transfer strip
 
 /// Reports the one transfer the sheet can have in flight.
 ///
@@ -912,6 +1103,25 @@ String describeDownloadFailure(DownloadFailure? failure) => switch (failure) {
   null => 'The file could not be downloaded, and the host did not say why.',
 };
 
+/// One sentence per reason an upload stopped, mirroring
+/// [describeDownloadFailure] exactly: written from the [UploadFailure]
+/// alone, never from [UploadFailed.detail] — a server-supplied string must
+/// not become UI copy.
+String describeUploadFailure(UploadFailure? failure) => switch (failure) {
+  UploadFailure.permissionDenied =>
+    'You do not have permission to write to this directory.',
+  UploadFailure.notFound => 'This directory no longer exists on the host.',
+  UploadFailure.disconnected =>
+    'The connection dropped before the file finished uploading.',
+  UploadFailure.stalled =>
+    'The upload stopped receiving acknowledgements and was abandoned.',
+  UploadFailure.sourceUnreadable => 'The local file could not be read.',
+  UploadFailure.sizeMismatch =>
+    'The file did not upload completely and was discarded.',
+  UploadFailure.unknown ||
+  null => 'The file could not be uploaded, and the host did not say why.',
+};
+
 /// One sentence per locally-rejected name, matching [describeDownloadFailure]
 /// in being written from the enum alone — there is no server round trip to
 /// carry a message, which is the whole point of validating locally.
@@ -967,6 +1177,8 @@ class _PathBar extends StatelessWidget {
     required this.onUp,
     required this.onRefresh,
     required this.onCreateFolder,
+    required this.showUpload,
+    required this.onUpload,
   });
 
   final String? path;
@@ -978,6 +1190,20 @@ class _PathBar extends StatelessWidget {
   /// showing a readable directory — see `FileBrowserSheet.build` for why
   /// a failed or still-loading listing has no directory to create one in.
   final VoidCallback? onCreateFolder;
+
+  /// Whether this platform can pick a local file to upload at all.
+  ///
+  /// A platform without a picker gets NO BUTTON, not a disabled one —
+  /// [UploadSourcePicker]'s own class comment makes the same choice for
+  /// the picker itself: a control that always fails is worse than no
+  /// control. [onUpload] still decides whether THIS PICKER-CAPABLE
+  /// platform's button is enabled right now.
+  final bool showUpload;
+
+  /// Opens the local file picker. Null while the browser is not showing a
+  /// readable directory, mirroring [onCreateFolder]. Read only when
+  /// [showUpload] is true.
+  final Future<void> Function()? onUpload;
 
   @override
   Widget build(BuildContext context) {
@@ -1027,6 +1253,18 @@ class _PathBar extends StatelessWidget {
               onPressed: onCreateFolder,
             ),
           ),
+          if (showUpload)
+            Semantics(
+              identifier: FilesSemantics.uploadButton,
+              child: IconButton(
+                icon: const Icon(Icons.upload_file_outlined, size: 18),
+                color: onUpload == null
+                    ? _mutedText.withValues(alpha: 0.4)
+                    : _mutedText,
+                tooltip: 'Upload a file',
+                onPressed: onUpload,
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 18),
             color: _mutedText,

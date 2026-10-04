@@ -206,6 +206,27 @@ class FilesSemantics {
   /// The action, in the path bar, that opens the "create a folder" prompt.
   static const createFolderButton = 'helm.files.create_folder_button';
 
+  /// The action, in the path bar, that opens the system file picker to
+  /// upload a local file into the directory shown.
+  ///
+  /// Absent on a platform with no picker to offer — the same rule
+  /// [downloadFolderButton] follows for a platform with no folder to
+  /// choose: a control that always fails is worse than no control.
+  static const uploadButton = 'helm.files.upload_button';
+
+  /// The strip reporting one upload in flight or just finished.
+  ///
+  /// A SEPARATE identifier from [downloadStatus] rather than one shared
+  /// strip, because the two transfers run through independent notifiers
+  /// and can each have something to say at once — uploading a file while
+  /// a previous download still awaits acknowledgement is a state this
+  /// sheet can be in.
+  static const uploadStatus = 'helm.files.upload_status';
+
+  /// The action that stops a running upload, mirroring
+  /// [downloadCancelButton].
+  static const uploadCancelButton = 'helm.files.upload_cancel_button';
+
   /// The confirm action inside the create-folder dialog.
   static const createFolderConfirmButton =
       'helm.files.create_folder_confirm_button';
