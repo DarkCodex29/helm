@@ -19,7 +19,7 @@ para atenderlos desde cualquier lado.
   restablecé la disposición con el botón de reinicio
 - Posición y tamaño guardados en este dispositivo (`shared_preferences`), no por servidor
   ni en la exportación de perfiles; la posición se adapta al girar la pantalla
-- Tamaño entre 370 y 600 píxeles lógicos de ancho y entre 144 y 480 de alto, limitado
+- Tamaño entre 370 y 600 píxeles lógicos de ancho y entre 372 y 480 de alto, limitado
   al espacio disponible; en ventanas más chicas, los límites se reducen y las teclas
   se pueden recorrer con desplazamiento
 - El panel se superpone al terminal: mostrarlo, moverlo o redimensionarlo no cambia

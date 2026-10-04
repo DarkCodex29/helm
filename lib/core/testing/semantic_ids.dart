@@ -352,4 +352,11 @@ class KeyboardLayoutSemantics {
   static const resize = 'helm.terminal.keyboard_resize';
   static const reset = 'helm.terminal.keyboard_reset';
   static const limit = 'helm.terminal.keyboard_limit';
+
+  /// Dismisses the panel from the panel's own footer.
+  ///
+  /// Separate from [TerminalSemantics.keyboardToggle], which now only
+  /// SHOWS the keyboard: the floating button overlays the terminal, so
+  /// while the panel is up the two would collide over its resize grip.
+  static const hide = 'helm.terminal.keyboard_hide';
 }

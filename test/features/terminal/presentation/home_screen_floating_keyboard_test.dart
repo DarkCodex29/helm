@@ -149,7 +149,11 @@ void main() {
           tester.view.viewInsets = const FakeViewPadding(bottom: 660);
           addTearDown(tester.view.resetViewInsets);
         } else {
-          tester.view.physicalSize = const Size(600, 240);
+          // 80 shorter than before: removing the FAB's reserved shelf
+          // gave that height back to the terminal, so reaching the
+          // under-96dp body this case is about now needs a shorter
+          // viewport rather than the same one.
+          tester.view.physicalSize = const Size(600, 160);
           tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
           addTearDown(tester.view.resetPadding);
         }
@@ -173,16 +177,18 @@ void main() {
   }
   for (final label in ['ESC', 'TAB', '←', 'q', '⌫']) {
     testWidgets('D1 scroll starting on $label emits no bytes', (tester) async {
-      final session = await _pumpHome(tester, const Size(400, 800));
-      final container = ProviderScope.containerOf(
-        tester.element(find.byType(HomeScreen)),
-      );
-      container
-          .read(keyboardProvider.notifier)
-          .setGeometry(const KeyboardGeometry(.5, .5, 384, 144));
+      // A viewport SHORTER than keyboardMinimumHeight, deliberately.
+      //
+      // The panel can no longer be shrunk into a scrolling state at
+      // ordinary sizes: it stops at the height where every row fits at
+      // the 44dp floor, so the grid simply does not scroll there any
+      // more. That removed most of this defect's surface — but not all
+      // of it, because a viewport too short to hold the floor still
+      // scrolls. This keeps the guard pointed at the case that remains.
+      final session = await _pumpHome(tester, const Size(400, 300));
       await tester.pumpAndSettle();
       final scroll = find
-          .ancestor(
+          .descendant(
             of: find.byType(TerminalKeyboard),
             matching: find.byType(SingleChildScrollView),
           )
@@ -376,7 +382,6 @@ void main() {
     tester,
   ) async {
     await _pumpHome(tester, const Size(400, 800));
-    expect(find.byType(FloatingActionButton), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(AppBar),
@@ -385,13 +390,47 @@ void main() {
       findsNothing,
     );
     final terminalRect = tester.getRect(find.byType(HelmTerminalView));
+    // Measured with the panel HIDDEN, which is the only state the
+    // floating button exists in now.
+    final notifier = ProviderScope.containerOf(
+      tester.element(find.byType(HomeScreen)),
+    ).read(keyboardProvider.notifier);
+    notifier.toggleVisibility();
+    await tester.pumpAndSettle();
     final fabRect = tester.getRect(find.byType(FloatingActionButton));
-    expect(fabRect.top, greaterThanOrEqualTo(terminalRect.bottom));
+    notifier.toggleVisibility();
+    await tester.pumpAndSettle();
+    // The FAB FLOATS over the terminal rather than sitting on a reserved
+    // shelf below it.
+    //
+    // The shelf was a `bottomNavigationBar: SizedBox(height: 80)`, which
+    // the Scaffold subtracts from the body — so it cost 80dp of terminal
+    // height in EVERY frame, keyboard open or closed, to avoid a corner
+    // overlay that costs nothing most of the time. Reported on a real
+    // S22 as "al poner el FAB, se recorta esa parte". Trading permanent
+    // output for an occasional overlap is the trade backwards.
     expect(
-      fabRect.overlaps(tester.getRect(find.byType(TerminalKeyboard))),
-      isFalse,
+      fabRect.overlaps(terminalRect),
+      isTrue,
+      reason: 'a floating action button overlays; it does not reserve space',
     );
-    await tester.tap(find.byType(FloatingActionButton));
+    // And the terminal now reaches the bottom of the body it was given.
+    expect(
+      terminalRect.bottom,
+      greaterThan(fabRect.top),
+      reason: 'the 80dp shelf no longer eats the last rows',
+    );
+    // Dismissing lives on the PANEL now, so the floating button is absent
+    // while the panel is up: leaving it there put it over the panel's
+    // resize grip, the one control that recovers a badly sized panel.
+    expect(find.byType(FloatingActionButton), findsNothing);
+    await tester.tap(
+      find.byWidgetPredicate(
+        (w) =>
+            w is Semantics &&
+            w.properties.identifier == 'helm.terminal.keyboard_hide',
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(TerminalKeyboard), findsNothing);
     expect(find.byTooltip('Show keyboard'), findsOneWidget);
@@ -406,6 +445,12 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     await _pumpHome(tester, const Size(400, 800));
+    // The toggle now means one thing — SHOW — so it exists only while the
+    // panel is hidden. Dismissing lives on the panel's own footer.
+    ProviderScope.containerOf(
+      tester.element(find.byType(HomeScreen)),
+    ).read(keyboardProvider.notifier).toggleVisibility();
+    await tester.pumpAndSettle();
     final toggle = find.byWidgetPredicate(
       (widget) =>
           widget is Semantics &&
@@ -568,15 +613,106 @@ void main() {
     'short landscape panel scrolls rather than shrinking paid-for keys',
     (tester) async {
       await _pumpHome(tester, const Size(600, 300));
-      expect(find.byType(FloatingActionButton), findsOneWidget);
+      // No floating button while the panel is up: dismissing moved onto
+      // the panel's own footer so the two cannot collide.
+      expect(find.byType(FloatingActionButton), findsNothing);
+      // The scroll moved INSIDE the grid and became a last resort: the
+      // panel now scales its keys down to the 44dp floor first, and only
+      // scrolls once even that floor cannot fit. A 300dp-tall viewport is
+      // that case, so this still scrolls — for a reason now, rather than
+      // always.
       expect(
-        find.ancestor(
+        find.descendant(
           of: find.byType(TerminalKeyboard),
           matching: find.byType(SingleChildScrollView),
         ),
         findsOneWidget,
       );
+      // And the reason is checkable: the keys are AT the floor, not below
+      // it. Scrolling to protect a floor the layout already broke would
+      // protect nothing.
+      expect(
+        tester
+            .getSize(
+              find
+                  .ancestor(
+                    of: find.text('q'),
+                    matching: find.byType(AnimatedContainer),
+                  )
+                  .first,
+            )
+            .height,
+        44.0,
+      );
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('shrinking the panel scales the keys instead of hiding them', (
+    tester,
+  ) async {
+    // "No es responsive, recorta" — measured on a real S22.
+    //
+    // `keyHeight` was derived from the panel's WIDTH and the key grid was
+    // handed to a SingleChildScrollView, which gives its child UNBOUNDED
+    // height. So the grid never learned how tall the panel was: shrinking
+    // it vertically left the keys at full size and scrolled the overflow
+    // out of sight. That same scroll is what made a drag over a key emit
+    // that key — one layout decision, two defects.
+    //
+    // The contract: a short panel makes keys SMALLER, down to the 44dp
+    // floor, and every row stays on screen.
+    await _pumpHome(tester, const Size(800, 900));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomeScreen)),
+    );
+    final notifier = container.read(keyboardProvider.notifier);
+
+    // Both heights sit ABOVE keyboardMinimumHeight (372): this test is
+    // about the ordinary path where every row fits and only the key size
+    // changes. Picking 260 first tested the exceptional scrolling path
+    // while claiming to test this one.
+    notifier.setGeometry(const KeyboardGeometry(.5, .5, 420, 440));
+    await tester.pumpAndSettle();
+    Size keySize() => tester.getSize(
+      find
+          .ancestor(
+            of: find.text('q'),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first,
+    );
+    final tallKey = keySize();
+
+    notifier.setGeometry(const KeyboardGeometry(.5, .5, 420, 380));
+    await tester.pumpAndSettle();
+    final shortKey = keySize();
+
+    expect(
+      shortKey.height,
+      lessThan(tallKey.height),
+      reason: 'a shorter panel must scale the keys down, not clip them',
+    );
+    expect(
+      shortKey.height,
+      greaterThanOrEqualTo(44.0),
+      reason: 'the paid-for touch floor still holds',
+    );
+    // The last row is the proof it was not merely scrolled away.
+    expect(find.text('123'), findsOneWidget);
+    final panel = tester.getRect(_panel);
+    final lastRow = tester.getRect(
+      find
+          .ancestor(
+            of: find.text('123'),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first,
+    );
+    expect(
+      lastRow.bottom,
+      lessThanOrEqualTo(panel.bottom),
+      reason: 'every row stays inside the panel',
+    );
+  });
 }

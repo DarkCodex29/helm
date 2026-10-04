@@ -93,13 +93,18 @@ void main() {
     // Import the arithmetic width constant rather than reimplementing its sum.
     expect(double.parse(widths!.group(1)!), keyboardMinimumWidth);
     expect(double.parse(widths.group(2)!), keyboardMaximumWidth);
-    for (final entry in {'minHeight': 1, 'maxHeight': 2}.entries) {
-      final bound = capture(
-        keyboard,
-        'final ${entry.key} = math\\.min\\(([0-9.]+),',
-      );
-      expect(double.parse(heights!.group(entry.value)!), double.parse(bound));
-    }
+    // Read from the CONSTANT, the way the widths above already are,
+    // rather than scraping `math.min(144.0,` out of the source. The
+    // minimum became a derived named constant and the regex stopped
+    // matching — a check that depends on how a number is spelled breaks
+    // on a refactor that does not change the number's meaning.
+    expect(double.parse(heights!.group(1)!), keyboardMinimumHeight);
+    expect(
+      double.parse(heights.group(2)!),
+      double.parse(
+        capture(keyboard, r'final maxHeight = math\.min\(([0-9.]+),'),
+      ),
+    );
   });
 
   test('README free-name budget matches the bounded search', () {

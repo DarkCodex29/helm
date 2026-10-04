@@ -154,20 +154,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // value draws a visible seam around it during resize and scroll.
         backgroundColor: HelmTerminalTheme.background,
         drawer: const ShortcutsDrawer(),
-        // A fixed shelf keeps the FAB off the terminal's last output row
-        // in BOTH states. Toggling the overlay never resizes the PTY.
-        bottomNavigationBar: tabsState.hasTabs
-            ? const SafeArea(top: false, child: SizedBox(height: 80))
-            : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
-        floatingActionButton: tabsState.hasTabs
+        // NO reserved shelf. This used to be a
+        // `bottomNavigationBar: SizedBox(height: 80)`, chosen to keep the
+        // FAB off the terminal's last output row in both states.
+        //
+        // The Scaffold subtracts that from the body, so it cost 80dp of
+        // terminal height in EVERY frame — keyboard open or closed — to
+        // avoid a corner overlay that costs nothing most of the time.
+        // Reported on a real S22 as "al poner el FAB, se recorta esa
+        // parte", and the report is right: trading permanent output for
+        // an occasional overlap is the trade backwards. A floating action
+        // button overlays by definition; reserving space for one defeats
+        // what it is.
+        //
+        // Toggling the keyboard still never resizes the PTY. Removing the
+        // shelf changes the terminal's height ONCE, upward, which is the
+        // direction that gives rows back.
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        // Present ONLY while the keyboard is hidden. It floats over the
+        // terminal, so leaving it up alongside the panel put it on top of
+        // the panel's resize grip — the one control a user needs to undo
+        // a bad size. Dismissing now lives in the panel's own footer, so
+        // each control sits where the thing it acts on is, and neither
+        // reserves space from the terminal.
+        floatingActionButton: tabsState.hasTabs && !kbVisible
             ? Semantics(
                 identifier: TerminalSemantics.keyboardToggle,
                 child: FloatingActionButton(
-                  tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
+                  tooltip: 'Show keyboard',
                   onPressed: () =>
                       ref.read(keyboardProvider.notifier).toggleVisibility(),
-                  child: Icon(kbVisible ? Icons.keyboard_hide : Icons.keyboard),
+                  child: const Icon(Icons.keyboard),
                 ),
               )
             : null,

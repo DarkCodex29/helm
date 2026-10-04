@@ -22,6 +22,21 @@ const keyboardMinimumWidth = 7 * 48.0 + 16 + 6 * 3;
 // Bound expansion to a useful keyboard, not a screen-sized input surface.
 const keyboardMaximumWidth = 600.0;
 
+/// The shortest panel that can still show EVERY row at the 44dp floor.
+///
+/// 48 for the move handle, 48 for the footer, 100 of grid chrome, and
+/// four rows at the floor. Derived the same way [keyboardMinimumWidth] is
+/// derived from the seven top-bar keys, and for the same reason: the
+/// minimum was a flat 144, far below what the grid needs, so a user could
+/// shrink the panel into a state that CROPS rows permanently and no
+/// amount of scaling could recover. Measured on a real S22 as "no es
+/// responsive, recorta".
+///
+/// Below this the grid scrolls, which is now the exceptional path — a
+/// viewport too short to hold the floor at all — rather than the ordinary
+/// one.
+const keyboardMinimumHeight = 48.0 + 48.0 + 100.0 + 4 * 44.0;
+
 class FloatingKeyboardPanel extends ConsumerStatefulWidget {
   const FloatingKeyboardPanel({
     super.key,
@@ -61,7 +76,7 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
     final maxWidth = math.min(keyboardMaximumWidth, available);
     final minWidth = math.min(keyboardMinimumWidth, maxWidth);
     final maxHeight = math.min(480.0, widget.viewport.height);
-    final minHeight = math.min(144.0, maxHeight);
+    final minHeight = math.min(keyboardMinimumHeight, maxHeight);
     if (maxWidth <= 0 || maxHeight < 96) return const SizedBox.shrink();
     final width = (geometry?.width ?? 384.0).clamp(minWidth, maxWidth);
     final height = (geometry?.height ?? 368.0).clamp(minHeight, maxHeight);
@@ -181,11 +196,40 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
                     false,
                   ),
                 ),
-                Expanded(child: SingleChildScrollView(child: keys)),
+                // BOUNDED height, deliberately. This used to be
+                // `SingleChildScrollView(child: keys)`, which hands its
+                // child INFINITE height — so the grid could never learn
+                // how tall the panel was, kept its keys at full size when
+                // the panel shrank, and scrolled the overflow out of
+                // sight. Measured on a real S22: shrinking the panel
+                // cropped rows instead of scaling them.
+                //
+                // The grid decides for itself whether it must scroll, and
+                // only once the 44dp floor no longer fits.
+                Expanded(child: keys),
                 SizedBox(
                   height: 48,
                   child: Row(
                     children: [
+                      // HIDE lives here, not on the floating button.
+                      //
+                      // The FAB floats over the terminal now, so while the
+                      // panel is up the two collide — and what the FAB
+                      // lands on is the resize grip, the one affordance a
+                      // user needs to recover a badly sized panel. Putting
+                      // the control that dismisses the panel ON the panel
+                      // removes the collision instead of arranging around
+                      // it, and the FAB goes back to meaning one thing:
+                      // bring the keyboard back.
+                      Semantics(
+                        identifier: KeyboardLayoutSemantics.hide,
+                        child: IconButton(
+                          tooltip: 'Hide keyboard',
+                          icon: const Icon(Icons.keyboard_hide, size: 20),
+                          color: AppTheme.onSurfaceMuted,
+                          onPressed: notifier.toggleVisibility,
+                        ),
+                      ),
                       Expanded(
                         child: Semantics(
                           identifier: KeyboardLayoutSemantics.limit,
@@ -280,17 +324,44 @@ class TerminalKeyboard extends ConsumerWidget {
         const horizontalPadding = 4.0;
         const keyGap = 3.0;
         const maxKeys = 11;
+        // Both layers lay out four rows of keys under the top bar.
+        const letterRows = 4;
         final keyWidth =
             (w - horizontalPadding * 2 - keyGap * (maxKeys - 1)) / maxKeys;
-        // Was `keyWidth * 1.15`, which tied the one axis with room to
-        // spare to the one that has none: an 11-column row fixes the
-        // width at ~31.5dp, and deriving the height from it inherited
-        // that ceiling for no reason. Height is now driven toward the
-        // 48dp touch minimum and only falls back to the ratio on a
-        // display wide enough to beat it.
-        final keyHeight = (keyWidth * 1.15).clamp(44.0, 56.0);
 
-        return Container(
+        // Height comes from the HEIGHT, which sounds obvious and was not
+        // the case: it was `keyWidth * 1.15`, so the one axis with room
+        // to spare inherited the ceiling of the one that has none, and
+        // the panel's own height was never consulted at all.
+        //
+        // Everything above and below the four letter rows, MEASURED
+        // rather than added up from the source. Reading the widgets gives
+        // 74 (top bar 5+48+5, letter padding 3+4, three 3dp gaps) and the
+        // truth is 100: at a 272dp grid with 49.5dp keys the column
+        // overflowed by exactly 26, so 26dp lives somewhere the arithmetic
+        // does not show. A number derived from reading would have been
+        // wrong in the direction that clips keys.
+        //
+        // If that chrome ever changes this is wrong again, which is why a
+        // test pins the minimum panel height against an overflow rather
+        // than trusting the constant.
+        const chrome = 100.0;
+        final room = constraints.maxHeight;
+        final keyHeight = room.isFinite
+            ? ((room - chrome) / letterRows).clamp(44.0, 56.0)
+            // Unbounded only outside the panel — a test pumping this
+            // widget on its own. Keep the old rule there rather than
+            // dividing by infinity.
+            : (keyWidth * 1.15).clamp(44.0, 56.0);
+
+        // Scroll ONLY when even the floor does not fit. That is the last
+        // resort, not the default: a scrollable key grid is what let a
+        // drag over a key emit that key, so it must cover as few states
+        // as possible.
+        final needed = chrome + keyHeight * letterRows;
+        final mustScroll = room.isFinite && needed > room;
+
+        final grid = Container(
           color: _bgColor,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -324,6 +395,7 @@ class TerminalKeyboard extends ConsumerWidget {
             ],
           ),
         );
+        return mustScroll ? SingleChildScrollView(child: grid) : grid;
       },
     );
   }
