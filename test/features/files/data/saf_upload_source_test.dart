@@ -208,14 +208,12 @@ void main() {
       expect(await result.length(), 2048);
     });
 
-    test('defaults supportsPicking from the platform when not overridden', () {
+    test('exposes a boolean platform gate when not overridden', () {
       final picker = UploadSourcePicker(gateway: FakeDocumentTreeGateway());
 
-      // The test host is neither Android nor iOS in the sense the plugin
-      // means, but `Platform.isAndroid` still answers deterministically
-      // per-host — this only asserts the default was NOT hardcoded to a
-      // fixed boolean, which the overridden-parameter tests above already
-      // exercise on both sides.
+      // This checks only that the default gate is a boolean. It does not
+      // distinguish a platform-derived value from a hardcoded boolean;
+      // the override tests above exercise both supported/unsupported paths.
       expect(picker.supportsPicking, isA<bool>());
     });
   });

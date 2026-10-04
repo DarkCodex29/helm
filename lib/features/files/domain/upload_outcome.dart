@@ -64,7 +64,7 @@ enum UploadFailure {
   /// The transport died: channel closed, client aborted, socket gone.
   disconnected,
 
-  /// The server stopped acknowledging writes for
+  /// The server stopped acknowledging writes or naming stats for
   /// [SftpUploadService.idleTimeout]. NOT "took too long" — a transfer
   /// still being acknowledged never reaches this.
   stalled,
