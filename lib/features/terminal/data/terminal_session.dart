@@ -25,6 +25,7 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
+import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:xterm/xterm.dart';
 
 /// Opens the exec channel used to attach to a multiplexer session,
@@ -88,6 +89,19 @@ typedef DownloadServiceFactory = SftpDownloadService Function(SSHClient client);
 
 SftpDownloadService _defaultDownloadServiceFactory(SSHClient client) =>
     SftpDownloadService(client);
+
+/// Builds the [SftpUploadService] used to send a local file to the device,
+/// bound to an already-connected [SSHClient].
+///
+/// A FOURTH factory beside [DownloadServiceFactory] rather than a
+/// capability added to it, for the identical reason: the upload service
+/// opens its own SFTP session per transfer, same as the download service
+/// does, so neither can share the other's channel — see
+/// [SftpUploadService]'s class comment.
+typedef UploadServiceFactory = SftpUploadService Function(SSHClient client);
+
+SftpUploadService _defaultUploadServiceFactory(SSHClient client) =>
+    SftpUploadService(client);
 
 /// Fallback [MultiplexerAdapter] for the window before the probe has run.
 ///
@@ -396,6 +410,7 @@ class TerminalSession {
     HostRunnerFactory? hostRunnerFactory,
     FileServiceFactory? fileServiceFactory,
     DownloadServiceFactory? downloadServiceFactory,
+    UploadServiceFactory? uploadServiceFactory,
   }) : _sshService = sshService,
        _muxAdapterOverride = muxAdapter,
        _muxAdapter = muxAdapter ?? TmuxAdapter(_UnconnectedHostCommandRunner()),
@@ -405,6 +420,8 @@ class TerminalSession {
        _fileServiceFactory = fileServiceFactory ?? _defaultFileServiceFactory,
        _downloadServiceFactory =
            downloadServiceFactory ?? _defaultDownloadServiceFactory,
+       _uploadServiceFactory =
+           uploadServiceFactory ?? _defaultUploadServiceFactory,
        terminal = terminal ?? Terminal(maxLines: 5000) {
     // Wired HERE, not in _bridgeIO, and this is the whole fix for the
     // remote drawing wider than the screen.
@@ -446,6 +463,7 @@ class TerminalSession {
   final HostRunnerFactory _hostRunnerFactory;
   final FileServiceFactory _fileServiceFactory;
   final DownloadServiceFactory _downloadServiceFactory;
+  final UploadServiceFactory _uploadServiceFactory;
   final HostAdvisor _advisor = const HostAdvisor();
 
   /// True once [dispose] has run. Guards the fire-and-forget advisory
@@ -457,6 +475,7 @@ class TerminalSession {
   HostCommandRunner? _hostRunner;
   SftpFileService? _fileService;
   SftpDownloadService? _downloadService;
+  SftpUploadService? _uploadService;
   HostReport? _hostReport;
   MultiplexerSelection? _multiplexerSelection;
 
@@ -581,6 +600,12 @@ class TerminalSession {
   /// and closes one — so unlike [fileService] there is nothing to close in
   /// teardown, only a reference to drop.
   SftpDownloadService? get downloadService => _downloadService;
+
+  /// Uploads a local file onto the host, or null when not connected.
+  ///
+  /// Holds no session of its own between transfers, mirroring
+  /// [downloadService] exactly — same reasoning, opposite direction.
+  SftpUploadService? get uploadService => _uploadService;
 
   /// Exposes the active [SSHClient] for one-shot command execution.
   /// Returns null if not connected.
@@ -868,6 +893,7 @@ class TerminalSession {
       _hostRunner = _hostRunnerFactory(result.client);
       _fileService = _fileServiceFactory(result.client);
       _downloadService = _downloadServiceFactory(result.client);
+      _uploadService = _uploadServiceFactory(result.client);
 
       final sessionRef = tmuxSessionName;
       if (sessionRef != null) {
@@ -1129,6 +1155,7 @@ class TerminalSession {
     // [SftpDownloadService] holds no session between transfers — so this
     // is only the reference going away.
     _downloadService = null;
+    _uploadService = null;
 
     final service = _fileService;
     _fileService = null;

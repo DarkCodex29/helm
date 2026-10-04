@@ -3,6 +3,7 @@ import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_listing.dart';
 import 'package:helm/features/files/domain/remote_path.dart';
+import 'package:helm/features/files/domain/remote_write_outcome.dart';
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,8 @@ class FileBrowserState {
   /// a no-op rather than an escape.
   bool get canGoUp {
     final current = path;
-    return current != null && remoteParentOf(current) != remoteNormalize(current);
+    return current != null &&
+        remoteParentOf(current) != remoteNormalize(current);
   }
 }
 
@@ -130,6 +132,56 @@ class FileBrowserNotifier extends Notifier<FileBrowserState> {
     final current = state.path;
     if (current == null) return;
     await _load(current);
+  }
+
+  /// Creates a directory named [name] inside the directory currently
+  /// shown.
+  ///
+  /// Returns the outcome so the sheet can report it, and refreshes the
+  /// listing on success — see [refresh]'s comment network: a browser that
+  /// kept showing the directory as it looked BEFORE the create would be
+  /// lying about what the server now holds.
+  Future<MkdirOutcome> createFolder(String name) async {
+    final service = _service;
+    final current = state.path;
+    if (service == null || current == null) {
+      return const MkdirFailed(RemoteWriteFailure.disconnected);
+    }
+
+    final outcome = await service.mkdir(current, name);
+    if (outcome is MkdirCreated) await refresh();
+    return outcome;
+  }
+
+  /// Renames [entry] to [newName].
+  ///
+  /// Refreshes on success, for the same reason [createFolder] does.
+  Future<RenameOutcome> renameEntry(RemoteEntry entry, String newName) async {
+    final service = _service;
+    if (service == null) {
+      return const RenameFailed(RemoteWriteFailure.disconnected);
+    }
+
+    final outcome = await service.rename(entry, newName);
+    if (outcome is RenameCompleted) await refresh();
+    return outcome;
+  }
+
+  /// Deletes [entry].
+  ///
+  /// Refreshes on success, for the same reason [createFolder] does — and
+  /// here it is the entire point of the method existing rather than a mere
+  /// nicety: a browser that still showed a deleted file would tell the
+  /// user their delete did nothing, when it actually worked.
+  Future<DeleteOutcome> deleteEntry(RemoteEntry entry) async {
+    final service = _service;
+    if (service == null) {
+      return const DeleteFailed(RemoteWriteFailure.disconnected);
+    }
+
+    final outcome = await service.delete(entry);
+    if (outcome is DeleteCompleted) await refresh();
+    return outcome;
   }
 
   /// Forgets the session and the directory it was showing.

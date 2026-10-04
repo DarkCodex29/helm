@@ -18,10 +18,36 @@ class FakeDocumentTreeGateway implements DocumentTreeGateway {
     this.writeGrant = true,
     this.folderPresent = true,
     this.copyError,
+    this.filePick,
+    this.fileContents = const {},
+    this.readChunkSize,
+    this.readChunkGap = Duration.zero,
   });
 
   /// What the picker returns. Null models the user declining.
   final DownloadDestination? picks;
+
+  /// What [pickFile] returns. Null models the user declining an upload
+  /// pick, exactly as [picks] models declining a folder pick.
+  PickedDocument? filePick;
+
+  /// Bytes [readFile] streams back, keyed by [PickedDocument.uri]. A URI
+  /// absent here answers with an error, mirroring [FakeSftpSession.files]
+  /// refusing an unregistered path rather than pretending one exists.
+  final Map<String, List<int>> fileContents;
+
+  /// Splits each entry in [fileContents] into chunks of this size before
+  /// yielding, mirroring what a real SAF stream does for anything larger
+  /// than one buffer — and the only way a test can observe more than one
+  /// upload progress step, or cancel mid-transfer, without a real device.
+  /// Null streams the whole entry as a single chunk.
+  final int? readChunkSize;
+
+  /// Delay before each chunk [readFile] yields, for exercising a
+  /// cancellation that must land between chunks rather than before the
+  /// stream starts or after it finishes — the same role
+  /// [FakeRemoteFile.chunkGap] plays for a download.
+  final Duration readChunkGap;
 
   /// What [hasWriteGrant] answers. False models a revoked or wiped grant.
   bool writeGrant;
@@ -81,6 +107,41 @@ class FakeDocumentTreeGateway implements DocumentTreeGateway {
 
   @override
   Future<void> releaseFolder(String uri) async => releasedUris.add(uri);
+
+  var pickFileCalls = 0;
+  final readUris = <String>[];
+  Object? readError;
+
+  @override
+  Future<PickedDocument?> pickFile() async {
+    pickFileCalls++;
+    return filePick;
+  }
+
+  @override
+  Stream<List<int>> readFile(String uri) async* {
+    readUris.add(uri);
+    final error = readError;
+    if (error != null) throw error;
+    final content = fileContents[uri];
+    if (content == null) {
+      throw StateError('FakeDocumentTreeGateway has no content for $uri');
+    }
+
+    final size = readChunkSize;
+    if (size == null) {
+      yield content;
+      return;
+    }
+
+    for (var start = 0; start < content.length; start += size) {
+      if (readChunkGap > Duration.zero) {
+        await Future<void>.delayed(readChunkGap);
+      }
+      final end = (start + size).clamp(0, content.length);
+      yield content.sublist(start, end);
+    }
+  }
 
   static String _derive(String fileName) {
     final dot = fileName.lastIndexOf('.');

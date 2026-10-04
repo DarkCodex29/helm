@@ -338,9 +338,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       builder: (context, status, _) {
         final service = session.fileService;
         final downloads = session.downloadService;
+        final uploads = session.uploadService;
         if (status != ConnectionStatus.connected ||
             service == null ||
-            downloads == null) {
+            downloads == null ||
+            uploads == null) {
           return const SizedBox.shrink();
         }
         return Semantics(
@@ -357,6 +359,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               context,
               service: service,
               downloadService: downloads,
+              uploadService: uploads,
             ),
           ),
         );

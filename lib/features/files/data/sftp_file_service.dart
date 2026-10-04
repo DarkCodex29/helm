@@ -7,6 +7,7 @@ import 'package:helm/features/files/data/sftp_session.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_listing.dart';
 import 'package:helm/features/files/domain/remote_path.dart';
+import 'package:helm/features/files/domain/remote_write_outcome.dart';
 
 /// Reads the remote filesystem over SFTP.
 ///
@@ -107,6 +108,175 @@ class SftpFileService {
 
     entries.sort(compareRemoteEntries);
     return RemoteListingLoaded(entries);
+  }
+
+  /// Creates a directory at [path]'s parent, named [name].
+  ///
+  /// NEVER THROWS, matching [list]'s contract: every failure comes back as
+  /// a member of [MkdirOutcome].
+  ///
+  /// Validated locally FIRST, against [validateRemoteName] — an empty,
+  /// separator-bearing or `.`/`..` name is rejected before any round trip,
+  /// because the server cannot tell this app anything about those cases
+  /// that the string itself does not already say.
+  ///
+  /// Then checked against the server with a `stat`, BEFORE `mkdir` is ever
+  /// called — see [MkdirAlreadyExists] for why that is the only way to
+  /// name this outcome at all, rather than folding it into
+  /// [RemoteWriteFailure.unknown].
+  Future<MkdirOutcome> mkdir(String parentPath, String name) async {
+    final rejection = validateRemoteName(name);
+    if (rejection != null) return MkdirInvalidName(rejection);
+
+    final path = remoteJoin(parentPath, name);
+
+    final SftpSession session;
+    try {
+      session = await _obtainSession();
+    } catch (error) {
+      _log.w('Could not open an SFTP session to create $path: $error');
+      return MkdirFailed(
+        RemoteWriteFailure.disconnected,
+        detail: _describe(error),
+      );
+    }
+
+    if (await _exists(session, path)) return const MkdirAlreadyExists();
+
+    try {
+      await session.mkdir(path);
+    } catch (error) {
+      _invalidateIfFatal(error);
+      return MkdirFailed(_classifyWrite(error), detail: _describe(error));
+    }
+
+    return MkdirCreated(path);
+  }
+
+  /// Renames or moves [entry] to [newName] within its current parent
+  /// directory.
+  ///
+  /// NEVER THROWS, matching [list]'s contract.
+  ///
+  /// The SAME trap as [mkdir] applies here, doubled: a destination that
+  /// already exists is refused by this app regardless of what
+  /// `SftpClient.rename` would have done on its own — see
+  /// [RenameDestinationExists] for why the server's own behaviour cannot
+  /// be trusted to answer this consistently across servers.
+  ///
+  /// MEASURED, not inferred. OpenSSH 10.3p1's own `sftp-server` binary was
+  /// driven directly (`sftp -D /usr/libexec/sftp-server`, which needs no
+  /// network and no authentication) against a scratch tree on 2026-10-03:
+  /// renaming a file onto an EXISTING one reported no error at all and the
+  /// source simply ceased to exist. The destination had been silently
+  /// replaced, exactly as dartssh2 3.3.1 documents for the
+  /// `posix-rename@openssh.com` path it prefers (`sftp_client.dart:189-209`).
+  ///
+  /// So the pre-check below is not defensive habit against a hypothetical
+  /// server. Without it, this app destroys a file the user never named.
+  Future<RenameOutcome> rename(RemoteEntry entry, String newName) async {
+    final rejection = validateRemoteName(newName);
+    if (rejection != null) return RenameInvalidName(rejection);
+    if (newName.trim() == entry.name) return const RenameUnchanged();
+
+    final parent = remoteParentOf(entry.path);
+    final destination = remoteJoin(parent, newName.trim());
+
+    final SftpSession session;
+    try {
+      session = await _obtainSession();
+    } catch (error) {
+      _log.w('Could not open an SFTP session to rename ${entry.path}: $error');
+      return RenameFailed(
+        RemoteWriteFailure.disconnected,
+        detail: _describe(error),
+      );
+    }
+
+    if (await _exists(session, destination)) {
+      return const RenameDestinationExists();
+    }
+
+    try {
+      await session.rename(entry.path, destination);
+    } catch (error) {
+      _invalidateIfFatal(error);
+      return RenameFailed(_classifyWrite(error), detail: _describe(error));
+    }
+
+    return RenameCompleted(destination);
+  }
+
+  /// Deletes [entry] from the server.
+  ///
+  /// NEVER THROWS, matching [list]'s contract: a caller that treats a
+  /// silent catch as success would believe a file was removed when it was
+  /// not, which is the exact failure mode this whole method exists to
+  /// prevent — see the class-level warning this slice's author left in
+  /// the PR description about delete being the one operation here that
+  /// destroys data on someone else's machine.
+  ///
+  /// Dispatches to `SSH_FXP_REMOVE` or `SSH_FXP_RMDIR` depending on
+  /// [RemoteEntry.kind] — SFTP has no single "delete whatever this is"
+  /// request, and calling the wrong one always fails
+  /// (`sftp_client.dart:157-179`). A symlink is removed with `remove`
+  /// regardless of what it points at: unlinking a symlink never touches
+  /// its target, on this protocol or any POSIX one.
+  ///
+  /// A non-empty directory is refused outright — see
+  /// [DeleteDirectoryNotEmpty] — which this method checks with its own
+  /// `listdir` BEFORE calling `rmdir`, so the refusal can be reported
+  /// precisely rather than as [RemoteWriteFailure.unknown].
+  ///
+  /// MEASURED against OpenSSH 10.3p1's `sftp-server` on 2026-10-03, by
+  /// driving the binary directly (`sftp -D /usr/libexec/sftp-server`):
+  /// `rmdir` on a non-empty directory answers a bare `Failure`, the same
+  /// generic status an unrelated refusal would carry. `mkdir` onto an
+  /// existing directory answers `Failure` too. The control case, `rmdir`
+  /// on an empty directory, succeeded.
+  ///
+  /// That is the whole argument for the local pre-checks: the server does
+  /// refuse, but it refuses in a way that cannot be told apart from a
+  /// permission problem or a vanished parent, so helm would have to show
+  /// the user "something went wrong" for a condition it can name exactly.
+  Future<DeleteOutcome> delete(RemoteEntry entry) async {
+    final SftpSession session;
+    try {
+      session = await _obtainSession();
+    } catch (error) {
+      _log.w('Could not open an SFTP session to delete ${entry.path}: $error');
+      return DeleteFailed(
+        RemoteWriteFailure.disconnected,
+        detail: _describe(error),
+      );
+    }
+
+    final removesDirectory = entry.kind == RemoteEntryKind.directory;
+
+    if (removesDirectory) {
+      final List<SftpName> children;
+      try {
+        children = await session.listdir(entry.path);
+      } catch (error) {
+        _invalidateIfFatal(error);
+        return DeleteFailed(_classifyWrite(error), detail: _describe(error));
+      }
+      final hasRealChildren = children.any((n) => !isDotEntry(n.filename));
+      if (hasRealChildren) return const DeleteDirectoryNotEmpty();
+    }
+
+    try {
+      if (removesDirectory) {
+        await session.rmdir(entry.path);
+      } else {
+        await session.remove(entry.path);
+      }
+    } catch (error) {
+      _invalidateIfFatal(error);
+      return DeleteFailed(_classifyWrite(error), detail: _describe(error));
+    }
+
+    return const DeleteCompleted();
   }
 
   /// Where a browser for this connection should open, or null when the
@@ -249,7 +419,8 @@ class SftpFileService {
   static RemoteListingFailure _classify(Object error) {
     if (error is SftpStatusError) {
       return switch (error.code) {
-        SftpStatusCode.permissionDenied => RemoteListingFailure.permissionDenied,
+        SftpStatusCode.permissionDenied =>
+          RemoteListingFailure.permissionDenied,
         SftpStatusCode.noSuchFile => RemoteListingFailure.notFound,
         SftpStatusCode.noConnection ||
         SftpStatusCode.connectionLost => RemoteListingFailure.disconnected,
@@ -259,6 +430,51 @@ class SftpFileService {
     // Everything else here means the transport, not the request: an
     // aborted client, a closed channel, a socket that went away.
     return RemoteListingFailure.disconnected;
+  }
+
+  /// The write-side twin of [_classify], over the exact same wire evidence
+  /// — an [SftpStatusError]'s code, or its absence meaning the transport
+  /// itself is gone. Kept as a separate function rather than a shared one
+  /// returning a common supertype: [RemoteListingFailure] and
+  /// [RemoteWriteFailure] read and write travel identical status codes
+  /// today, but a reader and a writer are free to diverge — a future
+  /// write-only status would have no reason to grow a read-side member.
+  static RemoteWriteFailure _classifyWrite(Object error) {
+    if (error is SftpStatusError) {
+      return switch (error.code) {
+        SftpStatusCode.permissionDenied => RemoteWriteFailure.permissionDenied,
+        SftpStatusCode.noSuchFile => RemoteWriteFailure.notFound,
+        SftpStatusCode.noConnection ||
+        SftpStatusCode.connectionLost => RemoteWriteFailure.disconnected,
+        _ => RemoteWriteFailure.unknown,
+      };
+    }
+    return RemoteWriteFailure.disconnected;
+  }
+
+  /// Whether [path] already answers to something on the server.
+  ///
+  /// `stat` rather than `listdir`-and-search: one round trip either way,
+  /// but this one works even when the caller cannot list the PARENT
+  /// directory — a session may be denied `listdir` on `/srv` while still
+  /// being able to `stat` a specific child of it, since SFTP enforces
+  /// those as separate operations.
+  ///
+  /// `SSH_FX_NO_SUCH_FILE` means "free"; anything else — a permission
+  /// refusal on the stat itself, a dropped channel — is treated as
+  /// "cannot tell", and this method answers false rather than guessing.
+  /// `false` here does not promise the path is free: it only means this
+  /// check did not find evidence it is taken, and the mkdir/rename call
+  /// that follows is still the one that can fail on its own if the
+  /// server disagrees.
+  Future<bool> _exists(SftpSession session, String path) async {
+    try {
+      await session.stat(path);
+      return true;
+    } catch (error) {
+      _invalidateIfFatal(error);
+      return false;
+    }
   }
 
   /// [error]'s message, without the type prefix its `toString` adds.

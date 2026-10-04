@@ -16,6 +16,23 @@ class PublishedFile {
   final String name;
 }
 
+/// A local file the user chose to upload.
+///
+/// [length] is read ONCE, at pick time, and handed straight to
+/// [SftpUploadService.upload] — see [UploadSource.length] for why that
+/// single reading is the number every later check is computed against.
+class PickedDocument {
+  const PickedDocument({
+    required this.uri,
+    required this.name,
+    required this.length,
+  });
+
+  final String uri;
+  final String name;
+  final int length;
+}
+
 /// Everything this app does with a user-chosen storage tree.
 ///
 /// An interface rather than direct plugin calls, for the same reason
@@ -61,6 +78,17 @@ abstract interface class DocumentTreeGateway {
   /// forever, so the app would still appear in the folder's access list
   /// having deliberately given up the ability to use it.
   Future<void> releaseFolder(String uri);
+
+  /// Asks the user to choose a local file, returning null if they decline.
+  Future<PickedDocument?> pickFile();
+
+  /// Streams the bytes of [PickedDocument.uri].
+  ///
+  /// A FRESH read each call: nothing here is seekable, matching
+  /// [UploadSource.openRead]'s own contract — this method exists so
+  /// `SafUploadSource` can implement that contract without importing
+  /// `saf_stream` itself.
+  Stream<List<int>> readFile(String uri);
 }
 
 /// The real gateway, over `saf_util` and `saf_stream`.
@@ -162,6 +190,23 @@ class SafDocumentTreeGateway implements DocumentTreeGateway {
   Future<void> releaseFolder(String uri) =>
       _util.releasePersistedPermission(uri, read: true, write: true);
 
+  @override
+  Future<PickedDocument?> pickFile() async {
+    final picked = await _util.pickFile();
+    if (picked == null) return null;
+    return PickedDocument(
+      uri: picked.uri,
+      name: picked.name,
+      length: picked.length,
+    );
+  }
+
+  @override
+  Stream<List<int>> readFile(String uri) async* {
+    final stream = await _stream.readFileStream(uri);
+    yield* stream;
+  }
+
   /// A MIME type for [fileName], chosen to AGREE WITH ITS EXTENSION.
   ///
   /// This is not decoration and it is not for the benefit of a viewer.
@@ -196,8 +241,7 @@ class SafDocumentTreeGateway implements DocumentTreeGateway {
     'docx':
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'xls': 'application/vnd.ms-excel',
-    'xlsx':
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'ppt': 'application/vnd.ms-powerpoint',
     'pptx':
         'application/vnd.openxmlformats-officedocument.presentationml.presentation',

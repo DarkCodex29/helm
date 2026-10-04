@@ -82,24 +82,30 @@ void main() {
     expect(session.fileService, isNull);
   });
 
-  test('a connected session exposes a file service bound to its client', () async {
-    final session = await connectedSession();
+  test(
+    'a connected session exposes a file service bound to its client',
+    () async {
+      final session = await connectedSession();
 
-    expect(session.fileService, isNotNull);
+      expect(session.fileService, isNotNull);
 
-    await session.dispose();
-  });
+      await session.dispose();
+    },
+  );
 
-  test('dispose closes the SFTP session so its channel is not leaked', () async {
-    final session = await connectedSession();
-    // Force the lazy open: no channel exists until something browses.
-    await session.fileService!.list('/home/gian');
-    expect(opened, hasLength(1));
+  test(
+    'dispose closes the SFTP session so its channel is not leaked',
+    () async {
+      final session = await connectedSession();
+      // Force the lazy open: no channel exists until something browses.
+      await session.fileService!.list('/home/gian');
+      expect(opened, hasLength(1));
 
-    await session.dispose();
+      await session.dispose();
 
-    expect(opened.single.closed, isTrue);
-  });
+      expect(opened.single.closed, isTrue);
+    },
+  );
 
   test('dispose clears the file service, since its client is gone', () async {
     final session = await connectedSession();
@@ -109,20 +115,23 @@ void main() {
     expect(session.fileService, isNull);
   });
 
-  test('a disposed session cannot browse through a service handed out earlier', () async {
-    final session = await connectedSession();
-    final service = session.fileService!;
-    await service.list('/home/gian');
+  test(
+    'a disposed session cannot browse through a service handed out earlier',
+    () async {
+      final session = await connectedSession();
+      final service = session.fileService!;
+      await service.list('/home/gian');
 
-    await session.dispose();
-    final listing = await service.list('/home/gian');
+      await session.dispose();
+      final listing = await service.list('/home/gian');
 
-    expect(
-      (listing as RemoteListingFailed).reason,
-      RemoteListingFailure.disconnected,
-    );
-    expect(opened, hasLength(1));
-  });
+      expect(
+        (listing as RemoteListingFailed).reason,
+        RemoteListingFailure.disconnected,
+      );
+      expect(opened, hasLength(1));
+    },
+  );
 
   group('reconnect', () {
     tearDown(() {
@@ -130,24 +139,27 @@ void main() {
           .setMockMethodCallHandler(_secureStorageChannel, null);
     });
 
-    test('closes the old SFTP session, whose client is being torn down', () async {
-      // reconnect() builds its own unconfigurable SSHKeyService, so the
-      // storage channel has to be answered directly — see the same note in
-      // terminal_session_test.dart. Answering "no key" stops reconnect
-      // right after teardown, which is the half under test here.
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(_secureStorageChannel, (_) async => null);
+    test(
+      'closes the old SFTP session, whose client is being torn down',
+      () async {
+        // reconnect() builds its own unconfigurable SSHKeyService, so the
+        // storage channel has to be answered directly — see the same note in
+        // terminal_session_test.dart. Answering "no key" stops reconnect
+        // right after teardown, which is the half under test here.
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(_secureStorageChannel, (_) async => null);
 
-      final session = await connectedSession();
-      await session.fileService!.list('/home/gian');
-      // reconnect() no-ops while the session still reports connected.
-      session.statusNotifier.value = ConnectionStatus.disconnected;
+        final session = await connectedSession();
+        await session.fileService!.list('/home/gian');
+        // reconnect() no-ops while the session still reports connected.
+        session.statusNotifier.value = ConnectionStatus.disconnected;
 
-      await session.reconnect();
+        await session.reconnect();
 
-      expect(opened.single.closed, isTrue);
-      expect(session.fileService, isNull);
-    });
+        expect(opened.single.closed, isTrue);
+        expect(session.fileService, isNull);
+      },
+    );
   });
 }
 
@@ -179,6 +191,29 @@ class _RecordingSftpSession implements SftpSession {
   @override
   Future<SftpReadHandle> openRead(String path) async =>
       throw UnsupportedError('This fake does not serve transfers');
+
+  /// Same reasoning as [openRead]: this session exists to exercise
+  /// reconnect/close plumbing, never a write, so every write throws
+  /// loudly rather than silently pretending to succeed.
+  @override
+  Future<SftpWriteHandle> openWrite(String path) async =>
+      throw UnsupportedError('This fake does not serve transfers');
+
+  @override
+  Future<void> mkdir(String path) async =>
+      throw UnsupportedError('This fake does not serve writes');
+
+  @override
+  Future<void> remove(String path) async =>
+      throw UnsupportedError('This fake does not serve writes');
+
+  @override
+  Future<void> rmdir(String path) async =>
+      throw UnsupportedError('This fake does not serve writes');
+
+  @override
+  Future<void> rename(String oldPath, String newPath) async =>
+      throw UnsupportedError('This fake does not serve writes');
 
   @override
   Future<void> close() async => closed = true;
