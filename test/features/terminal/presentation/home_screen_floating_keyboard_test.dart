@@ -2,6 +2,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -394,6 +395,37 @@ void main() {
     await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pumpAndSettle();
     expect(find.text('Reset keyboard layout'), findsOneWidget);
+  });
+
+  testWidgets('every overflow row starts its icon on the same edge', (
+    tester,
+  ) async {
+    final session = await _pumpHome(tester, const Size(400, 800));
+    // Hold only renders for a connected session, and it is half of the
+    // pair that drifted.
+    session.statusNotifier.value = ConnectionStatus.connected;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+
+    // Rows built different ways drifted: the pin sat left of
+    // the other two. A menu is a COLUMN, and a column whose icons do not
+    // share a left edge reads as broken before it reads as anything else.
+    final lefts = <String, double>{};
+    for (final entry in {
+      'reset': Icons.restart_alt,
+      'browse': Icons.folder_outlined,
+      'hold': Icons.push_pin_outlined,
+    }.entries) {
+      final icon = find.byIcon(entry.value);
+      if (icon.evaluate().isEmpty) continue;
+      lefts[entry.key] = tester.getRect(icon).left;
+    }
+    expect(lefts.length, greaterThanOrEqualTo(2));
+    final first = lefts.values.first;
+    for (final e in lefts.entries) {
+      expect(e.value, closeTo(first, 0.5), reason: '${e.key} is out of line');
+    }
   });
 
   testWidgets('FAB shows and hides the panel without covering output', (

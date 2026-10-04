@@ -1,32 +1,40 @@
-/// UNVERIFIED AGAINST A RUNNING SERVER — read this before relying on it.
+/// MEASURED INERT on herdr 0.9.0 — this plumbing does not do what it was
+/// built to do, and the measurement is recorded here rather than acted on
+/// because removing it is the owner's call.
 ///
-/// This plumbing sets `HERDR_CONFIG_PATH` on the attach command so the phone
-/// can carry its own herdr config while the desktop keeps `config.toml`. The
-/// variable itself is real and honoured: measured with a control on herdr
-/// 0.8.2, a valid file answers `config: ok` and an invalid enum answers
-/// `unknown variant`, so herdr genuinely parses the file it is pointed at.
+/// It sets `HERDR_CONFIG_PATH` on the attach command so the phone could
+/// carry its own herdr config while the desktop keeps `config.toml`. An
+/// earlier note called the variable "real and honoured" on the evidence
+/// that a valid file answers `config: ok` and an invalid enum answers
+/// `unknown variant`. That evidence was real and the conclusion did not
+/// follow: it measured `herdr config check`, which is NOT the process that
+/// renders chrome.
 ///
-/// What was NOT established is whether it changes anything when the server
-/// for that session is ALREADY RUNNING. Tried on device against a live
-/// session, herdr's chrome did not change, and herdr's own documentation
-/// points at server-side rendering: `herdr server reload-config` "applies
-/// most UI settings", the window title "renders on the Herdr server", and
-/// `hostname`/`datetime`/`command` tab-bar entries "resolve on the Herdr
-/// server". If the server owns the config, a client pointed elsewhere
-/// changes nothing and this whole path is inert for its stated purpose.
+/// Settled with two experiments on throwaway sessions, so nothing moved on
+/// the owner's screen:
 ///
-/// It was not proven either way, because the only decisive experiments —
-/// reloading config or starting a second server — move the owner's screen
-/// while he is working in it. So the code stays and the claim does not: it
-/// is documented as an open question rather than reverted on a hypothesis
-/// or left asserting something nobody measured.
+///  - A/B on a FRESH session, control versus a config with
+///    `sidebar_collapsed_mode = "hidden"` and `sidebar_start_collapsed`:
+///    byte-identical renders, sidebar drawn in both.
+///  - A config whose enum value cannot parse — `config check` rejects it,
+///    and a server started with it comes up CLEAN.
 ///
-/// The fallback is separately proven and is what makes leaving it safe: no
-/// file, an unrunnable probe, a truncated probe, an empty value, and a
-/// non-herdr multiplexer each emit the previous command byte for byte.
+/// A server that starts happily on a config it would have rejected never
+/// read it. So the variable is honoured by `config check` and ignored by
+/// the server, which means per-client chrome is not reachable this way:
+/// the herdr server owns the chrome, and every client of a session sees
+/// the one `config.toml` it started with.
 ///
-/// To settle it: restart herdr, attach from the phone, and see whether the
-/// sidebar and tab row differ from the desktop's.
+/// Consequence for the phone: hiding herdr's tab row or sidebar there
+/// WITHOUT hiding it on the Mac is not possible on 0.9.0 through config.
+/// `hide_tab_bar_when_single_tab` is the only tab-row switch and is
+/// conditional — with ten tabs in a workspace its condition is simply
+/// false, which is why setting it appeared to do nothing.
+///
+/// The fallback is separately proven and is what makes leaving the code
+/// here harmless: no file, an unrunnable probe, a truncated probe, an
+/// empty value, and a non-herdr multiplexer each emit the previous command
+/// byte for byte. It is dead weight, not a hazard.
 library;
 
 import 'package:helm/core/host/probe/host_report.dart';

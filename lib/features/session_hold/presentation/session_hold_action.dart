@@ -103,6 +103,14 @@ class SessionHoldAction extends ConsumerWidget {
               child: asMenuItem
                   ? ListTile(
                       dense: true,
+                      // Zero, matching the menu's other rows. A ListTile's
+                      // default inset plus the PopupMenuItem's own left
+                      // the icon 12px left of its neighbours — measured,
+                      // 112 against 124. Rows in a column that do not
+                      // share a left edge read as broken before they read
+                      // as anything else, so the padding belongs in ONE
+                      // place: the menu item, for every row alike.
+                      contentPadding: EdgeInsets.zero,
                       leading: icon,
                       title: Text(label),
                       // Pops the menu first so the row does not act while

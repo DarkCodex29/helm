@@ -399,7 +399,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     entries.add(
       PopupMenuItem<VoidCallback>(
         enabled: false,
-        padding: EdgeInsets.zero,
         // The hold action keeps its OWN widget rather than becoming a
         // plain row here. Its label and icon depend on whether THIS
         // session is the held one, and that is two listenables deep;
