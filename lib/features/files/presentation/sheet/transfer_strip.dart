@@ -71,13 +71,29 @@ class _UploadStatusBar extends StatelessWidget {
                   if (state.doneCount > 0)
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 80),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final item in state.items)
-                              if (item.isTerminal) _line(item),
-                          ],
+                      // NEWEST FIRST, and a visible scrollbar.
+                      //
+                      // Queue order put late receipts at the bottom of an
+                      // 80-pixel box with no scrollbar and no cue, so a
+                      // failure at the end of a batch sat below the fold
+                      // while the user saw only the early successes — and
+                      // a failure is the receipt they need. Flagged as
+                      // cosmetic by an adversarial review; see
+                      // odd/reviews/queue-and-strip.md.
+                      //
+                      // Reversing rather than auto-scrolling: no
+                      // controller, no animation to race, and correct at
+                      // every moment rather than one frame after each new
+                      // receipt arrives.
+                      child: Scrollbar(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final item in state.items.reversed)
+                                if (item.isTerminal) _line(item),
+                            ],
+                          ),
                         ),
                       ),
                     ),

@@ -204,6 +204,24 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     final picker = ref.read(uploadSourcePickerProvider);
     _pickingUpload = true;
     try {
+      // NOT torn down when the sheet is. This route belongs to the ROOT
+      // navigator, so removing the sheet underneath leaves the modal on
+      // screen until someone dismisses it. An adversarial review raised
+      // it; see odd/reviews/queue-and-strip.md.
+      //
+      // Left as it is, deliberately. Both fixes are worse than the
+      // symptom: popping from `dispose` means holding a `NavigatorState`
+      // and removing a route while this element is being unmounted, which
+      // is the shape that already produced two crashes in this widget
+      // (see where `dispose` would be), and it can pop a route that is no
+      // longer this dialog. `useRootNavigator: false` does not help
+      // either, because a later route on the same navigator does not
+      // leave when an earlier one is removed.
+      //
+      // What is left is a modal the user can tap away, whose answer is
+      // already discarded by the `!mounted` guards below. The trigger is
+      // external route removal, the same precondition the write dialogs
+      // needed, which is why nothing has ever hit it.
       final choice = await showDialog<_UploadSource>(
         context: context,
         builder: (_) => const _UploadSourceDialog(),

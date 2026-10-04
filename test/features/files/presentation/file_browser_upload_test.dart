@@ -260,6 +260,54 @@ void main() {
       },
     );
 
+    testWidgets('the newest receipt sits above older ones', (tester) async {
+      // Receipts used to render in queue order inside an 80-pixel scroll
+      // box with no scrollbar, no overflow cue and no auto-scroll, so a
+      // failure late in a batch sat BELOW the fold while the user saw
+      // only the early successes. An adversarial review flagged it as
+      // cosmetic; see odd/reviews/queue-and-strip.md.
+      //
+      // Newest-first rather than auto-scrolling: no controller, no
+      // timing, and correct at every moment rather than after an
+      // animation. The failure a user needs is the most recent one.
+      final gateway = FakeDocumentTreeGateway();
+      SafUploadSource source(String name) => SafUploadSource(
+        gateway,
+        PickedDocument(uri: 'content://$name', name: name, length: 1),
+      );
+      await _pumpSheet(
+        tester,
+        FakeSftpSession(directories: {'/home/gian': []}),
+        initialUploads: FileUploadState(
+          items: [
+            FileUploadItem(
+              id: 1,
+              source: source('first.jpg'),
+              destinationPath: '/first.jpg',
+              status: FileUploadStatus.completed,
+              percent: 100,
+              outcome: const UploadCompleted('/first.jpg', bytes: 1),
+            ),
+            FileUploadItem(
+              id: 2,
+              source: source('last.jpg'),
+              destinationPath: '/last.jpg',
+              status: FileUploadStatus.failed,
+              outcome: const UploadFailed(UploadFailure.permissionDenied),
+            ),
+          ],
+        ),
+      );
+
+      final newest = tester.getTopLeft(find.textContaining('last.jpg')).dy;
+      final oldest = tester.getTopLeft(find.text('Uploaded first.jpg.')).dy;
+      expect(
+        newest,
+        lessThan(oldest),
+        reason: 'the most recent receipt must not be the one below the fold',
+      );
+    });
+
     testWidgets(
       'completed history does not hide the active item or pending counts',
       (tester) async {
