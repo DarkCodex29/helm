@@ -23,11 +23,13 @@ abstract interface class UploadSource {
 /// (`SftpFileWriter.abort()`) that this service deliberately does not
 /// drive; see [SftpWriteHandle] for why.
 class UploadCancellation {
-  var _cancelled = false;
+  final _requested = Completer<void>();
 
-  bool get isCancelled => _cancelled;
+  bool get isCancelled => _requested.isCompleted;
 
-  void cancel() => _cancelled = true;
+  void cancel() {
+    if (!isCancelled) _requested.complete();
+  }
 }
 
 /// Uploads one local file to the remote host over SFTP, and reports how
@@ -56,10 +58,9 @@ class SftpUploadService {
 
   final SftpSessionOpener _openSession;
 
-  /// How long ONE chunk may go unacknowledged before giving up. PER-CHUNK
-  /// rather than [SftpDownloadService]'s independent Timer: this service
-  /// always has exactly one `writeChunk` outstanding, so `.timeout()` on
-  /// that single await IS the watchdog.
+  /// How long ONE write chunk or naming stat may go unacknowledged before
+  /// giving up. Like the chunk watchdog, `.timeout()` bounds each naming
+  /// round trip independently, not the total duration of an active search.
   final Duration idleTimeout;
 
   static const _defaultIdleTimeout = Duration(seconds: 30);
@@ -130,9 +131,20 @@ class SftpUploadService {
     if (cancellation?.isCancelled ?? false) return const UploadCancelled();
 
     final requestedPath = destinationPath;
-    final resolvedPath = await _freePath(session, destinationPath);
-    if (resolvedPath == null) return const UploadDestinationExists();
-    destinationPath = resolvedPath;
+    final ({String path, int index})? resolved;
+    try {
+      resolved = await _freePath(
+        session,
+        destinationPath,
+        cancellation: cancellation,
+      );
+    } on _NameSearchCancelled {
+      return const UploadCancelled();
+    } on TimeoutException {
+      return const UploadFailed(UploadFailure.stalled);
+    }
+    if (resolved == null) return const UploadDestinationExists();
+    destinationPath = resolved.path;
 
     final int length;
     try {
@@ -173,6 +185,8 @@ class SftpUploadService {
         partialPath: partialPath,
         destinationPath: destinationPath,
         requestedPath: requestedPath,
+        candidateIndex: resolved.index,
+        cancellation: cancellation,
         length: length,
       );
     } finally {
@@ -192,6 +206,8 @@ class SftpUploadService {
     required String partialPath,
     required String destinationPath,
     required String requestedPath,
+    required int candidateIndex,
+    required UploadCancellation? cancellation,
     required int length,
   }) async {
     switch (result.status) {
@@ -229,17 +245,38 @@ class SftpUploadService {
     }
 
     try {
-      // Re-resolve from the ORIGINAL name after streaming: a writer may
-      // have taken a candidate meanwhile. Never compound counters.
-      final finalPath = await _freePath(session, requestedPath);
+      // Recheck the selected candidate: a writer may have taken it during
+      // streaming. Earlier occupied names need not be retried even if now
+      // free; we promise a free name, not the lowest available counter.
+      // Derive counters from the ORIGINAL request, never compound them.
+      final finalPath = await _freePath(
+        session,
+        requestedPath,
+        startIndex: candidateIndex,
+        cancellation: cancellation,
+      );
       if (finalPath == null) {
         await _discard(session, partialPath);
         return const UploadDestinationExists();
       }
-      destinationPath = finalPath;
+      destinationPath = finalPath.path;
+      // Cancellation is a request: up to rename dispatch, discard even a
+      // fully streamed partial rather than publish something cancelled.
+      // Once rename is dispatched, completion may win; do not remove the
+      // published destination. No await separates this check and dispatch.
+      if (cancellation?.isCancelled ?? false) {
+        await _discard(session, partialPath);
+        return const UploadCancelled();
+      }
       // The stat/rename race remains; see upload's no-replace caveat.
       await session.rename(partialPath, destinationPath);
       return UploadCompleted(destinationPath, bytes: result.written);
+    } on _NameSearchCancelled {
+      await _discard(session, partialPath);
+      return const UploadCancelled();
+    } on TimeoutException {
+      await _discard(session, partialPath);
+      return const UploadFailed(UploadFailure.stalled);
     } catch (error) {
       _log.w('Could not place the upload at $destinationPath: $error');
       await _discard(session, partialPath);
@@ -320,7 +357,12 @@ class SftpUploadService {
   /// directories while accommodating ordinary gallery-name collisions.
   static const _nameCandidates = 100;
 
-  Future<String?> _freePath(SftpSession session, String requestedPath) async {
+  Future<({String path, int index})?> _freePath(
+    SftpSession session,
+    String requestedPath, {
+    int startIndex = 0,
+    UploadCancellation? cancellation,
+  }) async {
     final slash = requestedPath.lastIndexOf('/');
     final name = requestedPath.substring(slash + 1);
     final dot = name.lastIndexOf('.');
@@ -329,9 +371,26 @@ class SftpUploadService {
     final stem =
         requestedPath.substring(0, slash + 1) + name.substring(0, split);
     final extension = name.substring(split);
-    for (var i = 0; i < _nameCandidates; i++) {
+    for (var i = startIndex; i < _nameCandidates; i++) {
+      if (cancellation?.isCancelled ?? false) {
+        throw const _NameSearchCancelled();
+      }
       final candidate = i == 0 ? requestedPath : '$stem($i)$extension';
-      if (!await _exists(session, candidate)) return candidate;
+      // Bound OUTSIDE _exists: its legacy catch-all must not turn a
+      // watchdog timeout into permission to publish at an unchecked name.
+      final stat = _exists(session, candidate).timeout(idleTimeout);
+      final exists = cancellation == null
+          ? await stat
+          : await Future.any([
+              stat,
+              cancellation._requested.future.then<bool>((_) {
+                throw const _NameSearchCancelled();
+              }),
+            ]);
+      if (cancellation?.isCancelled ?? false) {
+        throw const _NameSearchCancelled();
+      }
+      if (!exists) return (path: candidate, index: i);
     }
     return null;
   }
@@ -367,6 +426,10 @@ class SftpUploadService {
     if (error is SftpError) return error.message;
     return error.toString();
   }
+}
+
+class _NameSearchCancelled implements Exception {
+  const _NameSearchCancelled();
 }
 
 enum _PumpStatus { completed, cancelled, stalled, sourceFailed, remoteFailed }

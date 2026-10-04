@@ -70,6 +70,17 @@ List<List<int>> _chunked(List<int> bytes, int count) {
   ];
 }
 
+class _ScriptedStatSession extends FakeSftpSession {
+  Future<SftpFileAttrs> Function(String path, int call)? onStat;
+  var statCalls = 0;
+
+  @override
+  Future<SftpFileAttrs> stat(String path, {bool followLink = true}) {
+    final call = ++statCalls;
+    return onStat?.call(path, call) ?? super.stat(path, followLink: followLink);
+  }
+}
+
 void main() {
   SftpUploadService serviceFor(
     FakeSftpSession session, {
@@ -165,6 +176,187 @@ void main() {
       expect(outcome, isA<UploadCompleted>());
       expect((outcome as UploadCompleted).bytes, 0);
     });
+  });
+
+  group('interruptible name resolution', () {
+    test(
+      'cancellation during final stat discards the complete partial',
+      () async {
+        final cancellation = UploadCancellation();
+        final session = _ScriptedStatSession();
+        session.onStat = (path, call) async {
+          if (call == 2) cancellation.cancel();
+          throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+        };
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.renamedPaths, isEmpty);
+        expect(session.removedPaths, ['/foto.jpg.helmpart']);
+        expect(session.writtenBytes, isEmpty);
+        expect(session.closed, isTrue);
+        expect(session.openedWriteHandles.single.closed, isTrue);
+      },
+    );
+
+    test('cancellation interrupts an outstanding preflight stat', () async {
+      final cancellation = UploadCancellation();
+      final entered = Completer<void>();
+      final pending = Completer<SftpFileAttrs>();
+      final session = _ScriptedStatSession();
+      session.onStat = (_, _) {
+        entered.complete();
+        return pending.future;
+      };
+      final upload = serviceFor(session).upload(
+        _FakeUploadSource([
+          [1],
+        ]),
+        '/foto.jpg',
+        cancellation: cancellation,
+      );
+      await entered.future;
+      cancellation.cancel();
+      // Test guard is longer than the service's short cancellation response,
+      // but much shorter than its default 30-second idle watchdog.
+      final outcome = await upload.timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () => const UploadFailed(UploadFailure.unknown),
+      );
+      pending.complete(SftpFileAttrs());
+      expect(outcome, isA<UploadCancelled>());
+      expect(session.statCalls, 1);
+      expect(session.openedWritePaths, isEmpty);
+      expect(session.closed, isTrue);
+    });
+
+    test(
+      'cancellation interrupts a hung final stat and removes the partial',
+      () async {
+        final cancellation = UploadCancellation();
+        final entered = Completer<void>();
+        final pending = Completer<SftpFileAttrs>();
+        final session = _ScriptedStatSession();
+        session.onStat = (_, call) async {
+          if (call == 2) {
+            entered.complete();
+            return pending.future;
+          }
+          throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+        };
+        final upload = serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        await entered.future;
+        cancellation.cancel();
+        final outcome = await upload.timeout(
+          const Duration(milliseconds: 200),
+          onTimeout: () => const UploadFailed(UploadFailure.unknown),
+        );
+        pending.complete(SftpFileAttrs());
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.renamedPaths, isEmpty);
+        expect(session.removedPaths, ['/foto.jpg.helmpart']);
+        expect(session.writtenBytes, isEmpty);
+        expect(session.closed, isTrue);
+      },
+    );
+
+    test(
+      'cancellation on an occupied candidate stops before the next stat',
+      () async {
+        final cancellation = UploadCancellation();
+        final session = _ScriptedStatSession();
+        session.onStat = (_, _) async {
+          cancellation.cancel();
+          return SftpFileAttrs();
+        };
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.statCalls, 1);
+        expect(session.openedWritePaths, isEmpty);
+      },
+    );
+
+    for (final finalPhase in [false, true]) {
+      test(
+        'hung ${finalPhase ? 'final' : 'preflight'} stat is bounded',
+        () async {
+          final session = _ScriptedStatSession();
+          final pending = Completer<SftpFileAttrs>();
+          session.onStat = (_, call) async {
+            if (!finalPhase || call == 2) return pending.future;
+            throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+          };
+          final outcome =
+              await serviceFor(
+                    session,
+                    idleTimeout: const Duration(milliseconds: 10),
+                  )
+                  .upload(
+                    _FakeUploadSource([
+                      [1],
+                    ]),
+                    '/foto.jpg',
+                  )
+                  .timeout(
+                    const Duration(milliseconds: 200),
+                    onTimeout: () => const UploadFailed(UploadFailure.unknown),
+                  );
+          pending.complete(SftpFileAttrs());
+          expect(outcome, isA<UploadFailed>());
+          expect((outcome as UploadFailed).reason, UploadFailure.stalled);
+          expect(session.renamedPaths, isEmpty);
+          expect(
+            session.removedPaths,
+            finalPhase ? ['/foto.jpg.helmpart'] : isEmpty,
+          );
+          expect(session.closed, isTrue);
+        },
+      );
+    }
+
+    test(
+      'final search rechecks selected candidate without replaying collisions',
+      () async {
+        final session = FakeSftpSession(
+          stats: {
+            '/foto.jpg': SftpFileAttrs(),
+            '/foto(1).jpg': SftpFileAttrs(),
+          },
+        );
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          onProgress: (_) => session.mkdir('/foto(2).jpg'),
+        );
+        expect((outcome as UploadCompleted).path, '/foto(3).jpg');
+        expect(session.statedPaths, [
+          '/foto.jpg',
+          '/foto(1).jpg',
+          '/foto(2).jpg',
+          '/foto(2).jpg',
+          '/foto(3).jpg',
+        ]);
+      },
+    );
   });
 
   group('the destination guard', () {
