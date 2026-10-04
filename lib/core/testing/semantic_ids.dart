@@ -340,3 +340,12 @@ class ProfileEditSemantics {
   static String fontSizeOption(int fontSize) =>
       'helm.profile_edit.font_size_option_$fontSize';
 }
+
+/// Device-local floating keyboard layout controls.
+class KeyboardLayoutSemantics {
+  const KeyboardLayoutSemantics._();
+  static const move = 'helm.terminal.keyboard_move';
+  static const resize = 'helm.terminal.keyboard_resize';
+  static const reset = 'helm.terminal.keyboard_reset';
+  static const limit = 'helm.terminal.keyboard_limit';
+}

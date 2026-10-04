@@ -1,11 +1,209 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/theme/app_theme.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/features/terminal/data/keyboard_geometry_store.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:xterm/xterm.dart';
+
+/// 7 top-bar targets * 48dp + 16dp padding + 6 gaps * 3dp = 370dp.
+/// Letters retain their 44dp HEIGHT clamp. Eleven 44dp-wide letters would
+/// need 522dp (11*44 + 8 + 10*3); an unclamped proportional height of 44
+/// would need 458.87dp (11*44/1.15 + 8 + 10*3). Both forbid the primary
+/// 384..412dp phone use case. Narrow letters and gap-sharing were knowingly
+/// accepted below; resizing must protect the targets we can actually afford.
+const keyboardMinimumWidth = 7 * 48.0 + 16 + 6 * 3;
+// Bound expansion to a useful keyboard, not a screen-sized input surface.
+const keyboardMaximumWidth = 600.0;
+
+class FloatingKeyboardPanel extends ConsumerStatefulWidget {
+  const FloatingKeyboardPanel({
+    super.key,
+    required this.viewport,
+    required this.terminal,
+  });
+  final Size viewport;
+  final Terminal terminal;
+  @override
+  ConsumerState<FloatingKeyboardPanel> createState() =>
+      _FloatingKeyboardPanelState();
+}
+
+class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
+  String? _limit;
+
+  @override
+  Widget build(BuildContext context) {
+    final geometry = ref.watch(keyboardProvider.select((s) => s.geometry));
+    final notifier = ref.read(keyboardProvider.notifier);
+    // Home's AppBar and fixed safe-area FAB shelf already consume vertical
+    // insets. Only the lateral safe insets remain inside this body's viewport.
+    final padding = MediaQuery.paddingOf(context);
+    final available = math.max(0.0, widget.viewport.width - padding.horizontal);
+    final maxWidth = math.min(keyboardMaximumWidth, available);
+    final minWidth = math.min(keyboardMinimumWidth, maxWidth);
+    final maxHeight = math.min(480.0, widget.viewport.height);
+    final minHeight = math.min(144.0, maxHeight);
+    if (maxWidth <= 0 || maxHeight < 96) return const SizedBox.shrink();
+    final width = (geometry?.width ?? 384.0).clamp(minWidth, maxWidth);
+    final height = (geometry?.height ?? 368.0).clamp(minHeight, maxHeight);
+    final travelX = available - width;
+    final travelY = widget.viewport.height - height;
+    final left = padding.left + (geometry?.x ?? .5) * travelX;
+    final top = geometry == null
+        ? math.max(0.0, travelY - 12)
+        : geometry.y * travelY;
+
+    void update(Offset delta, bool resize) {
+      var w = width;
+      var h = height;
+      var x = left - padding.left;
+      var y = top;
+      String? limit;
+      if (resize) {
+        final proposedW = width + delta.dx;
+        final proposedH = height + delta.dy;
+        // Permit expansion toward the edge by moving the panel inward.
+        w = proposedW.clamp(minWidth, maxWidth);
+        h = proposedH.clamp(minHeight, maxHeight);
+        if (proposedW < minWidth || proposedH < minHeight)
+          limit = 'Minimum size';
+        if (proposedW > maxWidth || proposedH > maxHeight)
+          limit = 'Maximum size';
+      } else {
+        x += delta.dx;
+        y += delta.dy;
+      }
+      x = x.clamp(0.0, available - w);
+      y = y.clamp(0.0, widget.viewport.height - h);
+      notifier.setGeometry(
+        KeyboardGeometry(
+          available == w ? .5 : x / (available - w),
+          widget.viewport.height == h ? 1 : y / (widget.viewport.height - h),
+          w,
+          h,
+        ),
+      );
+      setState(() => _limit = limit);
+    }
+
+    Widget grip(String label, String id, IconData icon, bool resize) =>
+        Semantics(
+          identifier: id,
+          label: label,
+          child: Tooltip(
+            message: label,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanUpdate: (details) => update(details.delta, resize),
+              onPanEnd: (_) => unawaited(notifier.saveGeometry()),
+              onPanCancel: () => unawaited(notifier.saveGeometry()),
+              child: SizedBox(
+                height: 48,
+                width: resize ? 48 : double.infinity,
+                child: Icon(icon, color: AppTheme.onSurfaceMuted),
+              ),
+            ),
+          ),
+        );
+
+    Widget keys = RepaintBoundary(
+      child: TerminalKeyboard(terminal: widget.terminal),
+    );
+    if (available < keyboardMinimumWidth) {
+      // Exceptional split-window path, NOT ordinary phone widths. Keep the
+      // paid-for grid intact rather than scaling keys; horizontal scroll is
+      // never introduced at >=370dp, including the 384dp regression viewport.
+      keys = SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(width: keyboardMinimumWidth, child: keys),
+      );
+    }
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          top: top,
+          width: width,
+          height: height,
+          child: Material(
+            key: const ValueKey('keyboard-panel'),
+            elevation: 8,
+            color: _bgColor,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                // Separate chrome: a key's touch-down can never begin a panel drag.
+                SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: grip(
+                          'Move keyboard',
+                          KeyboardLayoutSemantics.move,
+                          Icons.drag_handle,
+                          false,
+                        ),
+                      ),
+                      Semantics(
+                        identifier: KeyboardLayoutSemantics.reset,
+                        child: IconButton(
+                          tooltip: 'Reset keyboard layout',
+                          icon: const Icon(Icons.restart_alt),
+                          onPressed: () {
+                            setState(() => _limit = null);
+                            unawaited(notifier.resetGeometry());
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: SingleChildScrollView(child: keys)),
+                SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Semantics(
+                          identifier: KeyboardLayoutSemantics.limit,
+                          liveRegion: true,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            color: _limit == null
+                                ? _bgColor
+                                : AppTheme.surfaceVariant,
+                            child: Text(
+                              _limit ?? 'Drag corner to resize',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      grip(
+                        'Resize keyboard',
+                        KeyboardLayoutSemantics.resize,
+                        Icons.open_in_full,
+                        true,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 const _bgColor = AppTheme.surface;
 const _keyColor = AppTheme.surfaceVariant;
@@ -703,25 +901,28 @@ class _KeyButtonState extends State<_KeyButton> {
         // Row already reserves it, and negative margin keeps the painted
         // key exactly where it was.
         padding: const EdgeInsets.symmetric(vertical: _kTouchSlop),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 60),
-          curve: Curves.easeOut,
+        child: SizedBox(
           width: widget.width == double.infinity ? null : widget.width,
           height: widget.height,
-          decoration: BoxDecoration(
-            color: _pressed ? _keyActiveColor : resting,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(
-              color: _pressed ? _keyActiveColor : _borderColor,
+          // Tight geometry changes immediately; only the key fill animates.
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 60),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: _pressed ? _keyActiveColor : resting,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: _pressed ? _keyActiveColor : _borderColor,
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            widget.label,
-            style: TextStyle(
-              color: _pressed ? _keyActiveTextColor : restingText,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
+            alignment: Alignment.center,
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: _pressed ? _keyActiveTextColor : restingText,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ),
@@ -760,50 +961,52 @@ class _StickyKey extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+      child: SizedBox(
         width: width,
-        // Matches the 44 the other top-bar keys now use; CTRL sitting a
-        // whole 8dp shorter than its neighbours was the one place the
-        // strip visibly failed to line up.
         height: height ?? 44,
-        constraints: width == null
-            ? const BoxConstraints(minWidth: 44, maxWidth: 60)
-            : null,
-        padding: width == null
-            ? const EdgeInsets.symmetric(horizontal: 10)
-            : null,
-        decoration: BoxDecoration(
-          color: active
-              ? _keyActiveColor
-              : (tone == _KeyTone.letter ? _keyColor : _actionKeyColor),
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(
-            color: active ? _keyActiveColor : _borderColor,
-            width: active ? 1.5 : 1,
-          ),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: _keyActiveColor.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    spreadRadius: 0,
-                  ),
-                ]
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          // Matches the 44 the other top-bar keys now use; CTRL sitting a
+          // whole 8dp shorter than its neighbours was the one place the
+          // strip visibly failed to line up.
+          constraints: width == null
+              ? const BoxConstraints(minWidth: 44, maxWidth: 60)
               : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
+          padding: width == null
+              ? const EdgeInsets.symmetric(horizontal: 10)
+              : null,
+          decoration: BoxDecoration(
             color: active
-                ? _keyActiveTextColor
-                : (tone == _KeyTone.letter
-                      ? _keyTextColor
-                      : _actionKeyTextColor),
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
+                ? _keyActiveColor
+                : (tone == _KeyTone.letter ? _keyColor : _actionKeyColor),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+              color: active ? _keyActiveColor : _borderColor,
+              width: active ? 1.5 : 1,
+            ),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: _keyActiveColor.withValues(alpha: 0.4),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active
+                  ? _keyActiveTextColor
+                  : (tone == _KeyTone.letter
+                        ? _keyTextColor
+                        : _actionKeyTextColor),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
           ),
         ),
       ),

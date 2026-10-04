@@ -281,53 +281,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             session: activeTab.session,
             isActive: true,
           ),
-          // Bottom-centred; surrender margins on narrow screens to keep
-          // the paid-for 384dp key grid and seven >=48dp top-bar targets.
-          // Width is finite before the keyboard computes its eleven keys.
-          // Cap height too: landscape scrolls, never scales the 44dp floor.
-          Positioned(
-            left: ((constraints.maxWidth - 384) / 2).clamp(0.0, 8.0),
-            right: ((constraints.maxWidth - 384) / 2).clamp(0.0, 8.0),
-            bottom: 12,
-            child: IgnorePointer(
-              ignoring: !kbVisible,
-              child: ExcludeSemantics(
-                excluding: !kbVisible,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeOutCubic,
-                  child: kbVisible
-                      ? Align(
-                          key: ValueKey(activeTab.id),
-                          alignment: Alignment.bottomCenter,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: 600,
-                              maxHeight: (constraints.maxHeight - 24).clamp(
-                                0.0,
-                                double.infinity,
-                              ),
-                            ),
-                            child: Material(
-                              elevation: 8,
-                              borderRadius: BorderRadius.circular(12),
-                              clipBehavior: Clip.antiAlias,
-                              child: SingleChildScrollView(
-                                child: RepaintBoundary(
-                                  child: TerminalKeyboard(
-                                    terminal: activeTab.session.terminal,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ),
+          // Geometry only changes this overlay, never the terminal constraints.
+          if (kbVisible)
+            FloatingKeyboardPanel(
+              viewport: constraints.biggest,
+              terminal: activeTab.session.terminal,
             ),
-          ),
         ],
       ),
     );

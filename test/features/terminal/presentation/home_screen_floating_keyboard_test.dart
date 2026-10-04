@@ -74,7 +74,171 @@ Future<TerminalSession> _pumpHome(
   return session;
 }
 
+Finder get _panel => find.byKey(const ValueKey('keyboard-panel'));
+Finder get _move => find.byTooltip('Move keyboard');
+Finder get _resize => find.byTooltip('Resize keyboard');
+
 void main() {
+  testWidgets('safe lateral insets clamp movement after rotation', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(800, 800));
+    tester.view.padding = const FakeViewPadding(
+      left: 30,
+      right: 40,
+      top: 20,
+      bottom: 24,
+    );
+    addTearDown(tester.view.resetPadding);
+    await tester.pumpAndSettle();
+    await tester.drag(_move, const Offset(-2000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel).left, 30);
+    await tester.drag(_move, const Offset(2000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel).right, 760);
+    tester.view.physicalSize = const Size(500, 400);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel).right, lessThanOrEqualTo(460));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('subminimum split viewport scrolls only its intact grid', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(350, 600));
+    expect(tester.getSize(_panel).width, 350);
+    expect(tester.getSize(find.byType(TerminalKeyboard)).width, 370);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pressing a key does not move the panel', (tester) async {
+    final session = await _pumpHome(tester, const Size(400, 800));
+    final output = <String>[];
+    session.terminal.onOutput = output.add;
+    final rect = tester.getRect(_panel);
+    await tester.tap(find.text('q'));
+    await tester.pumpAndSettle();
+    expect(output, ['q']);
+    expect(tester.getRect(_panel), rect);
+  });
+
+  testWidgets('drag moves and survives a widget rebuild', (tester) async {
+    await _pumpHome(tester, const Size(800, 800));
+    expect(_move, findsOneWidget);
+    final before = tester.getRect(_panel);
+    await tester.drag(_move, const Offset(-80, -60));
+    await tester.pumpAndSettle();
+    final moved = tester.getRect(_panel);
+    expect(moved.left, lessThan(before.left));
+    expect(moved.top, lessThan(before.top));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomeScreen)),
+    );
+    container.read(keyboardProvider.notifier).toggleNumLayer();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel), moved);
+  });
+
+  testWidgets('drag clamps and rotation keeps the panel on screen', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(800, 800));
+    expect(_move, findsOneWidget);
+    await tester.drag(_move, const Offset(-2000, -2000));
+    await tester.pumpAndSettle();
+    var area = tester.getRect(find.byType(HelmTerminalView));
+    var panel = tester.getRect(_panel);
+    expect(panel.left, greaterThanOrEqualTo(area.left));
+    expect(panel.top, greaterThanOrEqualTo(area.top));
+    await tester.drag(_move, const Offset(2000, 2000));
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = const Size(400, 700);
+    await tester.pumpAndSettle();
+    area = tester.getRect(find.byType(HelmTerminalView));
+    panel = tester.getRect(_panel);
+    expect(panel.right, lessThanOrEqualTo(area.right));
+    expect(panel.bottom, lessThanOrEqualTo(area.bottom));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('minimum resize is refused with visible feedback and 44dp keys', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(800, 800));
+    expect(_resize, findsOneWidget);
+    await tester.drag(_resize, const Offset(-1000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(_panel).width, 370);
+    expect(find.text('Minimum size'), findsOneWidget);
+    final key = find
+        .ancestor(of: find.text('q'), matching: find.byType(AnimatedContainer))
+        .first;
+    expect(tester.getSize(key).height, greaterThanOrEqualTo(44));
+    for (final label in ['CTRL', 'ESC', 'TAB', '←', '↑', '↓', '→']) {
+      final target = find
+          .ancestor(
+            of: find.text(label),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first;
+      expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+    }
+  });
+
+  testWidgets('maximum resize is refused with visible feedback', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(1000, 900));
+    expect(_resize, findsOneWidget);
+    await tester.drag(_resize, const Offset(2000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(_panel).width, 600);
+    expect(find.text('Maximum size'), findsOneWidget);
+  });
+
+  testWidgets('one reset restores default geometry', (tester) async {
+    await _pumpHome(tester, const Size(800, 800));
+    expect(_move, findsOneWidget);
+    final original = tester.getRect(_panel);
+    await tester.drag(_move, const Offset(-80, -50));
+    await tester.pumpAndSettle();
+    await tester.drag(_resize, const Offset(80, 30));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel), isNot(original));
+    await tester.tap(find.byTooltip('Reset keyboard layout'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(_panel), original);
+  });
+
+  testWidgets('resizing sends zero PTY resize calls', (tester) async {
+    final service = FakeSSHService()
+      ..queueConnectSuccess(
+        SSHConnectionResult(
+          client: SSHClient(FakeSSHSocket(), username: 'tester'),
+          session: FakeSSHSession(),
+        ),
+      );
+    final session = await _pumpHome(
+      tester,
+      const Size(400, 800),
+      service: service,
+    );
+    await tester.runAsync(() => session.connect('test-pem'));
+    await tester.pumpAndSettle();
+    expect(_resize, findsOneWidget);
+    final columns = session.viewportColumns;
+    final rows = session.viewportRows;
+    final count = service.resizeCalls.length;
+    await tester.drag(_resize, const Offset(-100, -50));
+    await tester.pumpAndSettle();
+    expect(session.viewportColumns, columns);
+    expect(session.viewportRows, rows);
+    expect(service.resizeCalls.length, count);
+    debugPrint(
+      'PANEL RESIZE: ${columns}x$rows -> ${session.viewportColumns}x${session.viewportRows}; PTY resize calls=${service.resizeCalls.length - count}',
+    );
+  });
   testWidgets('FAB shows and hides the panel without covering output', (
     tester,
   ) async {
