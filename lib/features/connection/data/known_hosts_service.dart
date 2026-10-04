@@ -360,6 +360,55 @@ String? hostKeyVerificationCommand(String keyType) {
   return 'ssh-keygen -lf /etc/ssh/$file';
 }
 
+/// One pinned host key, as surfaced by [KnownHostsService.listPinnedHosts].
+///
+/// Covers both storage schemes, because a user deciding whether to forget a
+/// pin needs to see a legacy entry just as much as a current one — see
+/// [AppConstants.knownHostStorageKeyPrefix]. The two differ in what is
+/// actually known about them, and [keyType] carries that: a current pin
+/// always has one, a legacy pin never does, because the superseded storage
+/// key did not record it.
+class PinnedHost {
+  const PinnedHost({
+    required this.host,
+    required this.port,
+    required this.keyType,
+    required this.fingerprint,
+    required this.isLegacy,
+  });
+
+  final String host;
+  final int port;
+
+  /// The key algorithm this pin was recorded under, e.g. `ssh-ed25519`.
+  ///
+  /// Null exactly when [isLegacy] is true. A legacy entry's storage key is
+  /// `<prefix><host>:<port>` — see [AppConstants.knownHostStorageKeyPrefix]
+  /// — which has no key-type segment to read, so there is nothing to
+  /// report here. Not "unknown among several": there is no key type at
+  /// all for this record.
+  final String? keyType;
+
+  /// The pinned value, in OpenSSH `SHA256:<base64>` form.
+  ///
+  /// For a legacy pin this is the superseded value — see
+  /// [HostKeyVerdict.unverifiablePin] — shown so the user can tell this
+  /// entry apart from another host, NOT so it can be compared against
+  /// `ssh-keygen -lf`'s output. Surfaces built on this must not invite
+  /// that comparison for a legacy row.
+  final String fingerprint;
+
+  /// Whether this pin was written under the superseded, key-type-less
+  /// scheme — see [AppConstants.knownHostStorageKeyPrefix].
+  ///
+  /// A legacy pin still needs forgetting: its user may have rebuilt or
+  /// re-keyed the server before ever reconnecting through the current
+  /// build, and [KnownHostsService.removeHost] clears both schemes for a
+  /// host regardless, so there is one forget action either way — this
+  /// field only controls how the row is LABELLED.
+  final bool isLegacy;
+}
+
 /// Trust On First Use (TOFU) store for SSH host key fingerprints.
 ///
 /// The first time a host is contacted with a given key algorithm, that key
@@ -678,6 +727,127 @@ class KnownHostsService {
       key: _storageKey(host, port, keyType),
       value: fingerprint,
     );
+  }
+
+  /// Every host key pinned by this device, across both storage schemes.
+  ///
+  /// This is the Settings-facing enumeration: a user who needs to forget a
+  /// pin has to be able to SEE what is pinned first, and a keyed read
+  /// cannot answer "what hosts exist" any more than [_pinnedKeyTypes]
+  /// could answer "what key types exist" for one host. [readAll] is used
+  /// for the same reason it is there: it is the only enumeration the
+  /// plugin offers.
+  ///
+  /// Paying [readAll]'s whole-store decryption cost here is acceptable for
+  /// a reason specific to WHERE this is called from, not to the cost being
+  /// small: this runs only when the user opens the trusted-hosts screen in
+  /// Settings, a human-paced, deliberately-navigated-to action taken at
+  /// most a handful of times per session — never on the connection path,
+  /// never in a loop, and never behind a redirect a user did not choose.
+  /// [verifyHostKey]'s equivalent scan earns its keep by running at most
+  /// once per host and key type; this one earns its keep by running at
+  /// most once per tap on a settings row.
+  ///
+  /// A current-scheme key is `<v2 prefix><host>:<port>:<keyType>` and a
+  /// legacy one is `<v1 prefix><host>:<port>` — see
+  /// [AppConstants.knownHostV2StorageKeyPrefix] and
+  /// [AppConstants.knownHostStorageKeyPrefix]. Both the prefix check and
+  /// the field split have to respect that `helm_known_host_v2_` BEGINS
+  /// WITH `helm_known_host_`: a scan for legacy keys that merely checked
+  /// the v1 prefix would match every v2 key too, and a naive split would
+  /// then read `<port>:<keyType>` as if it were a legacy port. The v2
+  /// prefix is checked FIRST and unambiguously (longer, more specific
+  /// string), and only a key that is NOT v2 is then tested against the
+  /// v1 prefix — the same ordering [verifyHostKey] uses for the pair, and
+  /// for the same reason: the two prefixes overlap by construction and
+  /// only one direction of the check is safe.
+  ///
+  /// Fields are parsed from the RIGHT, not the left. The key itself can
+  /// contain colons — an IPv6 literal such as `fd7a:115c:a1e0::1` is
+  /// nothing unusual over Tailscale, which this app already integrates
+  /// with — so a left-to-right split on `:` would cut such a host off at
+  /// its first colon and read the rest as port and key type. The v2 shape
+  /// is fixed at exactly two trailing fields after the host
+  /// (`:<port>:<keyType>`), so the LAST colon-delimited segment is always
+  /// the key type, the one before it is always the port, and everything
+  /// before THAT — colons included — is the host. The v1 shape has
+  /// exactly one trailing field (`:<port>`), so the same right-to-left
+  /// reasoning applies with one split instead of two.
+  ///
+  /// Deliberately unguarded, like [_pinnedKeyTypes]: a failed enumeration
+  /// is not evidence that nothing is pinned, and swallowing it here would
+  /// show the user "no trusted hosts" when the honest answer is "could
+  /// not ask" — the empty-state/failure-state collapse this codebase
+  /// never allows. Letting it propagate is what lets the presentation
+  /// layer render the failure as unknown rather than as an empty list.
+  Future<List<PinnedHost>> listPinnedHosts() async {
+    final all = await _storage.readAll();
+    final v2Prefix = AppConstants.knownHostV2StorageKeyPrefix;
+    final v1Prefix = AppConstants.knownHostStorageKeyPrefix;
+
+    final pins = <PinnedHost>[];
+    for (final entry in all.entries) {
+      final key = entry.key;
+      if (key.startsWith(v2Prefix)) {
+        final rest = key.substring(v2Prefix.length);
+        final keyTypeSep = rest.lastIndexOf(':');
+        if (keyTypeSep < 0) continue; // Not a shape this scheme produces.
+        final keyType = rest.substring(keyTypeSep + 1);
+        final hostAndPort = rest.substring(0, keyTypeSep);
+        final portSep = hostAndPort.lastIndexOf(':');
+        if (portSep < 0) continue;
+        final host = hostAndPort.substring(0, portSep);
+        final port = int.tryParse(hostAndPort.substring(portSep + 1));
+        if (port == null) continue;
+        pins.add(
+          PinnedHost(
+            host: host,
+            port: port,
+            keyType: keyType,
+            fingerprint: entry.value,
+            isLegacy: false,
+          ),
+        );
+      } else if (key.startsWith(v1Prefix)) {
+        // Reached only for keys that are NOT v2, so this never re-reports
+        // a v2 entry under the legacy prefix it happens to begin with.
+        final hostAndPort = key.substring(v1Prefix.length);
+        final portSep = hostAndPort.lastIndexOf(':');
+        if (portSep < 0) continue;
+        final host = hostAndPort.substring(0, portSep);
+        final port = int.tryParse(hostAndPort.substring(portSep + 1));
+        if (port == null) continue;
+        pins.add(
+          PinnedHost(
+            host: host,
+            port: port,
+            keyType: null,
+            fingerprint: entry.value,
+            isLegacy: true,
+          ),
+        );
+      }
+    }
+
+    // Sorted because [FlutterSecureStorage.readAll] promises no order, and
+    // the one action this list exists to offer is FORGETTING a host's
+    // pinned key. A list that reshuffles between visits is a list where the
+    // row under the user's thumb is not the row they meant to tap, and the
+    // cost of that mistake is trusting an unverified key on the next
+    // connect. Same reason [_pinnedKeyTypes] sorts, with a sharper edge.
+    //
+    // Host, then port, then key type: a legacy pin carries no key type and
+    // sorts before the current-scheme pins for the same host:port, which
+    // puts the entry the user most likely wants to clear at the top of its
+    // own group.
+    pins.sort((a, b) {
+      final byHost = a.host.compareTo(b.host);
+      if (byHost != 0) return byHost;
+      final byPort = a.port.compareTo(b.port);
+      if (byPort != 0) return byPort;
+      return (a.keyType ?? '').compareTo(b.keyType ?? '');
+    });
+    return pins;
   }
 
   /// Forgets the pinned key for this host, port and key type.

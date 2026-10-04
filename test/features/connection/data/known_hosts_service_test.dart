@@ -1,11 +1,33 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 
 import '../../../helpers/fake_secure_storage.dart';
+
+/// A [FlutterSecureStorage] stand-in whose [readAll] always fails.
+///
+/// Pins the distinction `listPinnedHosts` is required to keep: a store
+/// that could not be read is not evidence it holds nothing, so this proves
+/// the method propagates the failure rather than returning an empty list.
+class _FailingSecureStorage extends FlutterSecureStorage {
+  const _FailingSecureStorage();
+
+  @override
+  Future<Map<String, String>> readAll({
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) {
+    throw StateError('keychain unavailable');
+  }
+}
 
 /// Real `ssh-keygen -lf` output, not a fabricated string.
 ///
@@ -1201,6 +1223,147 @@ void main() {
       expect(
         storage.values[_v2Key('bravo.example.com', 22, _ed25519Type)],
         _rsaFingerprint,
+      );
+    });
+  });
+
+  group('listPinnedHosts', () {
+    test('is empty when nothing has ever been pinned', () async {
+      expect(await service.listPinnedHosts(), isEmpty);
+    });
+
+    test('orders pins deterministically, whatever order the store '
+        'hands them back in', () async {
+      // Inserted deliberately out of order. `readAll()` returns whatever
+      // the platform keystore gives it, and Dart maps preserve insertion
+      // order, so this stands in for a store that answers in an order
+      // helm does not control.
+      //
+      // Order is not cosmetic on this screen: its one action is to FORGET
+      // a host's pinned key. A list that reshuffles between visits is a
+      // list where the row under the user's thumb is not the row they
+      // meant to tap.
+      storage.values[_v2Key('charlie.example.com', 22, _ed25519Type)] =
+          _ed25519Fingerprint;
+      storage.values[_v2Key('alpha.example.com', 2222, _rsaType)] =
+          _rsaFingerprint;
+      storage.values[_v2Key('alpha.example.com', 22, _ed25519Type)] =
+          _ed25519Fingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(
+        pins.map((p) => '${p.host}:${p.port}'),
+        ['alpha.example.com:22', 'alpha.example.com:2222', 'charlie.example.com:22'],
+      );
+    });
+
+    test('enumerates several pinned hosts', () async {
+      storage.values[_v2Key('alpha.example.com', 22, _ed25519Type)] =
+          _ed25519Fingerprint;
+      storage.values[_v2Key('bravo.example.com', 2222, _rsaType)] =
+          _rsaFingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(pins, hasLength(2));
+      expect(
+        pins,
+        containsAll([
+          isA<PinnedHost>()
+              .having((p) => p.host, 'host', 'alpha.example.com')
+              .having((p) => p.port, 'port', 22)
+              .having((p) => p.keyType, 'keyType', _ed25519Type)
+              .having((p) => p.fingerprint, 'fingerprint', _ed25519Fingerprint),
+          isA<PinnedHost>()
+              .having((p) => p.host, 'host', 'bravo.example.com')
+              .having((p) => p.port, 'port', 2222)
+              .having((p) => p.keyType, 'keyType', _rsaType)
+              .having((p) => p.fingerprint, 'fingerprint', _rsaFingerprint),
+        ]),
+      );
+    });
+
+    test('parses an IPv6 host without mangling its colons', () async {
+      // A real Tailscale CGNAT-range literal, the same shape the codebase
+      // already uses elsewhere for IPv6 test data (see
+      // `host_diagnostics_test.dart`). Parsing from the right is what this
+      // pins: splitting `<host>:<port>:<keyType>` left-to-right would cut
+      // this host off after its first colon.
+      const ipv6Host = 'fd7a:115c:a1e0::1';
+      storage.values[_v2Key(ipv6Host, 22, _ed25519Type)] = _ed25519Fingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(pins, hasLength(1));
+      expect(pins.single.host, ipv6Host);
+      expect(pins.single.port, 22);
+      expect(pins.single.keyType, _ed25519Type);
+      expect(pins.single.fingerprint, _ed25519Fingerprint);
+    });
+
+    test('surfaces a legacy v1 pin, distinguishable from a v2 one', () async {
+      storage.values[_v1Key('old.example.com', 22)] = _rsaFingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(pins, hasLength(1));
+      final pin = pins.single;
+      expect(pin.host, 'old.example.com');
+      expect(pin.port, 22);
+      // No key type: a v1 pin predates the storage key carrying one, so
+      // there is nothing to report — not an unknown among several, there
+      // is no key type at all.
+      expect(pin.keyType, isNull);
+      expect(pin.isLegacy, isTrue);
+      expect(pin.fingerprint, _rsaFingerprint);
+    });
+
+    test('a v2 pin is never also reported as a legacy pin, even though its '
+        'key starts with the legacy prefix', () async {
+      // `helm_known_host_v2_` begins with `helm_known_host_` — the exact
+      // overlap `_pinnedKeyTypes` warns about. A naive "does this key
+      // start with the v1 prefix" scan would match this v2 entry too
+      // and report the same host twice, once correctly and once
+      // mangled (its "port" would actually be `<realPort>:<keyType>`).
+      storage.values[_v2Key('example.com', 22, _ed25519Type)] =
+          _ed25519Fingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(pins, hasLength(1));
+      expect(pins.single.isLegacy, isFalse);
+      expect(pins.single.port, 22);
+      expect(pins.single.keyType, _ed25519Type);
+    });
+
+    test('a migrated host with a leftover legacy entry reports both, not a '
+        'merged or duplicated one', () async {
+      // The interrupted-`acceptMigration` state: the v2 write landed and
+      // the v1 delete did not. Both are real, distinct records and the
+      // view must show both rather than collapsing or losing one.
+      storage.values[_v2Key('example.com', 22, _ed25519Type)] =
+          _ed25519Fingerprint;
+      storage.values[_v1Key('example.com', 22)] = _rsaFingerprint;
+
+      final pins = await service.listPinnedHosts();
+
+      expect(pins, hasLength(2));
+      expect(pins.where((p) => p.isLegacy), hasLength(1));
+      expect(pins.where((p) => !p.isLegacy), hasLength(1));
+    });
+
+    test('propagates a storage failure rather than reporting empty', () {
+      // A store that could not be read is not evidence that it holds
+      // nothing. Collapsing the two would show "no trusted hosts" when
+      // the honest answer is "could not ask" — exactly the trap
+      // `_pinnedKeyTypes` already refuses for the connection path.
+      final failing = _FailingSecureStorage();
+      final failingService = KnownHostsService(storage: failing);
+
+      expect(
+        () => failingService.listPinnedHosts(),
+        throwsA(isA<StateError>()),
       );
     });
   });
