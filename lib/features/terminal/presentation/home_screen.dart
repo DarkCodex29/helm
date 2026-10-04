@@ -41,10 +41,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with WidgetsBindingObserver, TickerProviderStateMixin {
+    with WidgetsBindingObserver {
   List<TabSnapshot>? _pendingRecovery;
-  late final AnimationController _kbAnimController;
-  late final Animation<double> _kbAnimation;
 
   /// Owns the [Scaffold] so the back handler can close the drawer.
   final _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -59,16 +57,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    _kbAnimController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    _kbAnimation = CurvedAnimation(
-      parent: _kbAnimController,
-      curve: Curves.easeOutCubic,
-    );
-    _kbAnimController.value = 1.0;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final repo = ref.read(sessionSnapshotRepoProvider);
@@ -113,7 +101,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
-    _kbAnimController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -148,12 +135,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
     final theme = Theme.of(context);
 
-    if (kbVisible) {
-      _kbAnimController.forward();
-    } else {
-      _kbAnimController.reverse();
-    }
-
     return PopScope(
       // HomeScreen is the only route on the stack, so an unhandled back
       // closes the app. While the drawer is open that is wrong: back
@@ -173,6 +154,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // value draws a visible seam around it during resize and scroll.
         backgroundColor: HelmTerminalTheme.background,
         drawer: const ShortcutsDrawer(),
+        // A fixed shelf keeps the FAB off the terminal's last output row
+        // in BOTH states. Toggling the overlay never resizes the PTY.
+        bottomNavigationBar: tabsState.hasTabs
+            ? const SafeArea(top: false, child: SizedBox(height: 80))
+            : null,
+        floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
+        floatingActionButton: tabsState.hasTabs
+            ? Semantics(
+                identifier: TerminalSemantics.keyboardToggle,
+                child: FloatingActionButton(
+                  tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
+                  onPressed: () =>
+                      ref.read(keyboardProvider.notifier).toggleVisibility(),
+                  child: Icon(kbVisible ? Icons.keyboard_hide : Icons.keyboard),
+                ),
+              )
+            : null,
         appBar: AppBar(
           backgroundColor: AppTheme.surface,
           elevation: 0,
@@ -274,24 +272,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
 
-    return Column(
-      children: [
-        Expanded(
-          child: HelmTerminalView(
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        fit: StackFit.expand,
+        children: [
+          HelmTerminalView(
             key: ValueKey(activeTab.id),
             session: activeTab.session,
             isActive: true,
           ),
-        ),
-        _buildKeyboardToggle(kbVisible),
-        SizeTransition(
-          sizeFactor: _kbAnimation,
-          axisAlignment: 1.0,
-          child: RepaintBoundary(
-            child: TerminalKeyboard(terminal: activeTab.session.terminal),
+          // Bottom-centred; surrender margins on narrow screens to keep
+          // the paid-for 384dp key grid and seven >=48dp top-bar targets.
+          // Width is finite before the keyboard computes its eleven keys.
+          // Cap height too: landscape scrolls, never scales the 44dp floor.
+          Positioned(
+            left: ((constraints.maxWidth - 384) / 2).clamp(0.0, 8.0),
+            right: ((constraints.maxWidth - 384) / 2).clamp(0.0, 8.0),
+            bottom: 12,
+            child: IgnorePointer(
+              ignoring: !kbVisible,
+              child: ExcludeSemantics(
+                excluding: !kbVisible,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeOutCubic,
+                  child: kbVisible
+                      ? Align(
+                          key: ValueKey(activeTab.id),
+                          alignment: Alignment.bottomCenter,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: 600,
+                              maxHeight: (constraints.maxHeight - 24).clamp(
+                                0.0,
+                                double.infinity,
+                              ),
+                            ),
+                            child: Material(
+                              elevation: 8,
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: SingleChildScrollView(
+                                child: RepaintBoundary(
+                                  child: TerminalKeyboard(
+                                    terminal: activeTab.session.terminal,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -364,33 +402,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         );
       },
-    );
-  }
-
-  Widget _buildKeyboardToggle(bool kbVisible) {
-    return Container(
-      height: 32,
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.divider, width: 1)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
-            icon: Icon(
-              kbVisible ? Icons.keyboard_hide : Icons.keyboard,
-              color: AppTheme.onSurfaceMuted,
-              size: 18,
-            ),
-            tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
-            onPressed: () =>
-                ref.read(keyboardProvider.notifier).toggleVisibility(),
-          ),
-        ],
-      ),
     );
   }
 

@@ -90,6 +90,10 @@ class ShortcutsSemantics {
 class TerminalSemantics {
   const TerminalSemantics._();
 
+  /// The floating keyboard toggle, outside the terminal's output area.
+  /// This checkout's former docked strip had no identifier to migrate.
+  static const keyboardToggle = 'helm.terminal.keyboard_toggle';
+
   /// The overlay shown whenever the session is not connected. Its
   /// presence is the assertion target for connection-failure flows.
   static const connectionStatusOverlay =
