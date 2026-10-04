@@ -535,6 +535,49 @@ void main() {
       });
     }
 
+    test('continues an existing counter instead of compounding one', () async {
+      // `foto(3).jpg` used to become `foto(3)(1).jpg`: the whole requested
+      // name was treated as the stem, so a name the service itself had
+      // produced earlier grew a second counter every round. Reported as
+      // cosmetic by an adversarial review — no data loss, just names that
+      // get uglier the more often a file is re-uploaded.
+      //
+      // Counting CONTINUES from the number already there rather than
+      // restarting at (1), because restarting would walk backwards into
+      // names that may belong to unrelated files.
+      final session = FakeSftpSession(
+        stats: {'/home/gian/foto(3).jpg': SftpFileAttrs()},
+      );
+
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/home/gian/foto(3).jpg',
+      );
+
+      expect(outcome, isA<UploadCompleted>());
+      expect((outcome as UploadCompleted).path, '/home/gian/foto(4).jpg');
+      expect(outcome.name, 'foto(4).jpg');
+    });
+
+    test('a plain name still starts its counter at one', () async {
+      // Guards the fix above against shifting the ordinary case: a name
+      // with no counter must still yield (1), not (0) or (2).
+      final session = FakeSftpSession(
+        stats: {'/home/gian/foto.jpg': SftpFileAttrs()},
+      );
+
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/home/gian/foto.jpg',
+      );
+
+      expect((outcome as UploadCompleted).path, '/home/gian/foto(1).jpg');
+    });
+
     test('never reads the source or opens anything, when refused', () async {
       final session = FakeSftpSession(
         stats: {

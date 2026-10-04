@@ -382,11 +382,27 @@ class SftpUploadService {
     final stem =
         requestedPath.substring(0, slash + 1) + name.substring(0, split);
     final extension = name.substring(split);
+    // A stem that ALREADY ends in a counter continues it instead of
+    // growing a second one: `foto(3).jpg` becomes `foto(4).jpg`, not
+    // `foto(3)(1).jpg`. Without this, a name this service produced
+    // earlier gained another counter on every later collision.
+    //
+    // It continues UPWARD rather than restarting at (1), because
+    // restarting would walk backwards into `foto(1).jpg` and `foto(2).jpg`
+    // — names that may well belong to unrelated files.
+    //
+    // The bound still admits [_nameCandidates] attempts; it is the range
+    // that shifts, not its size.
+    final counted = RegExp(r'^(.*)\((\d+)\)$').firstMatch(stem);
+    final base = counted?.group(1) ?? stem;
+    final offset = int.tryParse(counted?.group(2) ?? '') ?? 0;
     for (var i = startIndex; i < _nameCandidates; i++) {
       if (cancellation?.isCancelled ?? false) {
         throw const _NameSearchCancelled();
       }
-      final candidate = i == 0 ? requestedPath : '$stem($i)$extension';
+      final candidate = i == 0
+          ? requestedPath
+          : '$base(${offset + i})$extension';
       // Bound each stat independently, including cancellation races.
       final stat = _exists(session, candidate).timeout(idleTimeout);
       final exists = cancellation == null

@@ -15,6 +15,18 @@ final class UploadCompleted extends UploadOutcome {
   const UploadCompleted(this.path, {required this.bytes});
 
   /// The actual destination, which may differ from the requested path.
+  ///
+  /// MUST NAME A FILE, never end in a separator. Unguarded, deliberately:
+  /// an adversarial review noted that a trailing slash makes [name] the
+  /// empty string, which a receipt renders as "Uploaded ." The only guard
+  /// that catches it is an assert, and `path.endsWith('/')` is not a
+  /// constant expression — adding it would mean dropping `const` from
+  /// this constructor and churning every call site in production and
+  /// tests, to defend against a path this feature cannot produce. The
+  /// service only ever builds this from a rename it just performed.
+  ///
+  /// So the contract lives here instead. A caller that violates it gets an
+  /// empty name rather than an exception.
   final String path;
 
   /// The basename actually created on the host, not the requested name.
