@@ -1,3 +1,18 @@
+import java.io.FileInputStream
+import java.util.Properties
+
+// Release signing. Read from android/key.properties when present; that file
+// is gitignored (commit 51c2d9f) because it points at a real keystore whose
+// password is the owner's to choose and back up, not something this build
+// script can invent. Absent it, release builds fall back to the debug
+// keystore -- see the loud warning below for why that fallback stays loud.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasKeystoreProperties = keystorePropertiesFile.exists()
+if (hasKeystoreProperties) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
@@ -31,7 +46,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.darkcodex.helm"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -41,11 +55,43 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasKeystoreProperties) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasKeystoreProperties) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // No android/key.properties: fall back to the shared, public
+                // debug keystore so a fresh clone can still build. This is
+                // the exact state this file shipped in before -- silently --
+                // which is how a debug-signed APK almost became the one
+                // helm hands out. Anyone can forge an "update" signed with
+                // this same shared key, and helm stores SSH private keys.
+                // Loud by design: logger.error prints to stderr during
+                // configuration, on every Gradle invocation that touches
+                // this module, not only `flutter build apk --release`.
+                logger.error(
+                    "\n" +
+                        "=".repeat(70) + "\n" +
+                        "WARNING: release build is signed with the DEBUG keystore.\n" +
+                        "This APK must NOT be distributed -- anyone can forge an update\n" +
+                        "signed with this same shared, public key.\n" +
+                        "Create android/key.properties to sign with a real keystore.\n" +
+                        "See README.md for the exact keytool command.\n" +
+                        "=".repeat(70) + "\n",
+                )
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 }

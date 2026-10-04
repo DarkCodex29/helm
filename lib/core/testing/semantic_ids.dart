@@ -225,6 +225,37 @@ class SettingsSemantics {
   const SettingsSemantics._();
 
   static const addProfileButton = 'helm.settings.add_profile_button';
+
+  /// The row that opens `TrustedHostsScreen`. The only entry point to that
+  /// screen, so the E2E suite can guard it the same way
+  /// [ShortcutsSemantics.settingsButton] guards `/settings` itself.
+  static const trustedHostsButton = 'helm.settings.trusted_hosts_button';
+}
+
+/// Identifiers on `TrustedHostsScreen`.
+class TrustedHostsSemantics {
+  const TrustedHostsSemantics._();
+
+  /// The list AND every one of its "nothing to show" states — empty,
+  /// loading, and a storage read that failed. One identifier over all of
+  /// them, mirroring [ShortcutsSemantics.agentsSection] and
+  /// [FilesSemantics.listing]: a flow asserts on what the screen SAYS
+  /// (no trusted hosts vs. could not read them), never on the mere
+  /// presence of rows, which an empty list and a failed read would
+  /// otherwise look identical to.
+  static const listing = 'helm.trusted_hosts.listing';
+
+  /// The action that forgets one pinned host, addressed by the exact
+  /// identity it would remove rather than by position — the same pattern
+  /// [ShortcutsSemantics.workspaceHeaderButton] follows, for the same
+  /// reason: two rows can share a host name across different ports or key
+  /// types, but never an identity.
+  static String forgetButton(String host, int port, String? keyType) =>
+      'helm.trusted_hosts.forget_button_${host}_${port}_${keyType ?? 'legacy'}';
+
+  /// The destructive action inside the confirmation dialog, shared across
+  /// every row because only one dialog is ever open at a time.
+  static const confirmForgetButton = 'helm.trusted_hosts.confirm_forget_button';
 }
 
 /// Identifiers on `ProfileEditScreen`.

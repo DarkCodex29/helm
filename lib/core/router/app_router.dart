@@ -9,6 +9,7 @@ import 'package:helm/features/notifications/domain/session_alert.dart';
 import 'package:helm/features/notifications/presentation/pending_session_alert.dart';
 import 'package:helm/features/settings/presentation/profile_edit_screen.dart';
 import 'package:helm/features/settings/presentation/settings_screen.dart';
+import 'package:helm/features/settings/presentation/trusted_hosts_screen.dart';
 import 'package:helm/features/setup/presentation/first_time_setup_screen.dart';
 import 'package:helm/features/terminal/presentation/home_screen.dart';
 
@@ -86,6 +87,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'profile',
             builder: (context, _) => const ProfileEditScreen(),
+          ),
+          GoRoute(
+            path: 'trusted-hosts',
+            builder: (context, _) => const TrustedHostsScreen(),
           ),
         ],
       ),

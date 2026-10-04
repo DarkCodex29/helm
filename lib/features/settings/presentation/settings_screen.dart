@@ -98,6 +98,23 @@ class SettingsScreen extends ConsumerWidget {
                     },
                   ),
           ),
+          _sectionHeader(context, 'Security'),
+          Semantics(
+            identifier: SettingsSemantics.trustedHostsButton,
+            child: ListTile(
+              leading: Icon(
+                Icons.vpn_key_outlined,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+              ),
+              title: const Text('Trusted Hosts'),
+              subtitle: const Text('Review and forget pinned server keys'),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+              onTap: () => context.push('/settings/trusted-hosts'),
+            ),
+          ),
           _sectionHeader(context, 'About'),
           ListTile(
             title: const Text('Version'),
