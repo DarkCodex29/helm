@@ -178,6 +178,86 @@ void main() {
     });
   });
 
+  group('stat certainty', () {
+    test('explicit no-such-file permits the original fresh name', () async {
+      final session = _ScriptedStatSession();
+      session.onStat = (_, _) async {
+        throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
+      };
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/fresh.txt',
+      );
+      expect((outcome as UploadCompleted).path, '/fresh.txt');
+      expect(session.statCalls, 2);
+      expect(session.writtenBytes['/fresh.txt'], [1, 2]);
+      expect(session.openedWritePaths, ['/fresh.txt.helmpart']);
+      expect(session.renamedPaths, [('/fresh.txt.helmpart', '/fresh.txt')]);
+    });
+
+    for (final entry in <String, (Object, UploadFailure)>{
+      'permission denied': (
+        SftpStatusError(SftpStatusCode.permissionDenied, 'Permission denied'),
+        UploadFailure.permissionDenied,
+      ),
+      'transient non-status error': (
+        StateError('channel interrupted'),
+        UploadFailure.disconnected,
+      ),
+      'server failure': (
+        SftpStatusError(SftpStatusCode.failure, 'Server failure'),
+        UploadFailure.unknown,
+      ),
+    }.entries) {
+      for (final finalPhase in [false, true]) {
+        test(
+          '${entry.key} at ${finalPhase ? 'final' : 'preflight'} stat fails closed',
+          () async {
+            final session = _ScriptedStatSession();
+            final originalBytes = [9, 8];
+            session.writtenBytes['/occupied.txt'] = originalBytes;
+            session.onStat = (_, call) async {
+              if (!finalPhase || call == 2) throw entry.value.$1;
+              throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+            };
+            var sourceWasRead = false;
+            final outcome = await serviceFor(session).upload(
+              _FakeUploadSourceSpy([
+                [1, 2],
+              ], onRead: () => sourceWasRead = true),
+              '/occupied.txt',
+            );
+            expect(outcome, isA<UploadFailed>());
+            expect((outcome as UploadFailed).reason, entry.value.$2);
+            final error = entry.value.$1;
+            expect(
+              outcome.detail,
+              error is SftpError ? error.message : error.toString(),
+            );
+            expect(session.statCalls, finalPhase ? 2 : 1);
+            expect(sourceWasRead, finalPhase);
+            expect(session.renamedPaths, isEmpty);
+            expect(session.writtenBytes, {'/occupied.txt': originalBytes});
+            expect(
+              session.openedWritePaths,
+              finalPhase ? ['/occupied.txt.helmpart'] : isEmpty,
+            );
+            expect(
+              session.removedPaths,
+              finalPhase ? ['/occupied.txt.helmpart'] : isEmpty,
+            );
+            expect(session.closed, isTrue);
+            if (finalPhase) {
+              expect(session.openedWriteHandles.single.closed, isTrue);
+            }
+          },
+        );
+      }
+    }
+  });
+
   group('interruptible name resolution', () {
     test(
       'cancellation during final stat discards the complete partial',
@@ -699,6 +779,36 @@ void main() {
   });
 
   group('failures', () {
+    test('contains an unexpected session throw from progress', () async {
+      final session = _ScriptedStatSession();
+      session.onStat = (path, _) {
+        if (path == '/progress-probe') {
+          throw SftpStatusError(
+            SftpStatusCode.permissionDenied,
+            'Unexpected progress refusal',
+          );
+        }
+        return Future.error(SftpStatusError(SftpStatusCode.noSuchFile, 'free'));
+      };
+
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/fresh.txt',
+        // This callback's synchronous throw is outside the pump's normal
+        // write/source failure handlers, and must be contained by upload.
+        onProgress: (_) => session.stat('/progress-probe'),
+      );
+
+      expect(outcome, isA<UploadFailed>());
+      expect((outcome as UploadFailed).reason, UploadFailure.permissionDenied);
+      expect(outcome.detail, 'Unexpected progress refusal');
+      expect(session.renamedPaths, isEmpty);
+      expect(session.closed, isTrue);
+      expect(session.openedWriteHandles.single.closed, isTrue);
+    });
+
     test('a session that cannot be opened reports disconnected', () async {
       final service = SftpUploadService.withOpener(
         () async => throw SftpAbortError('SFTP channel closed'),

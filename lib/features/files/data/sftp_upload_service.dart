@@ -110,6 +110,14 @@ class SftpUploadService {
         onProgress: onProgress,
         cancellation: cancellation,
       );
+    } catch (error, stackTrace) {
+      // Reaching this boundary is a bug being contained, not a normal ending.
+      _log.e(
+        'Unexpected upload failure for $destinationPath',
+        error,
+        stackTrace,
+      );
+      return UploadFailed(_classify(error), detail: _describe(error));
     } finally {
       try {
         await session.close();
@@ -142,6 +150,9 @@ class SftpUploadService {
       return const UploadCancelled();
     } on TimeoutException {
       return const UploadFailed(UploadFailure.stalled);
+    } catch (error) {
+      _log.w('Could not check the upload destination $destinationPath: $error');
+      return UploadFailed(_classify(error), detail: _describe(error));
     }
     if (resolved == null) return const UploadDestinationExists();
     destinationPath = resolved.path;
@@ -376,8 +387,7 @@ class SftpUploadService {
         throw const _NameSearchCancelled();
       }
       final candidate = i == 0 ? requestedPath : '$stem($i)$extension';
-      // Bound OUTSIDE _exists: its legacy catch-all must not turn a
-      // watchdog timeout into permission to publish at an unchecked name.
+      // Bound each stat independently, including cancellation races.
       final stat = _exists(session, candidate).timeout(idleTimeout);
       final exists = cancellation == null
           ? await stat
@@ -395,15 +405,18 @@ class SftpUploadService {
     return null;
   }
 
-  /// Whether [path] already answers to something on the server. Same
-  /// reasoning as [SftpFileService._exists]: `SSH_FX_NO_SUCH_FILE` means
-  /// "free", anything else means "cannot tell" and answers `false`.
+  /// Only `SSH_FX_NO_SUCH_FILE` proves a name is free. Unknown results
+  /// propagate: fail the upload rather than skip candidates on a possibly
+  /// broken channel or publish at an unchecked, potentially occupied name.
   Future<bool> _exists(SftpSession session, String path) async {
     try {
       await session.stat(path);
       return true;
-    } catch (_) {
-      return false;
+    } catch (error) {
+      if (error is SftpStatusError && error.code == SftpStatusCode.noSuchFile) {
+        return false;
+      }
+      rethrow;
     }
   }
 
