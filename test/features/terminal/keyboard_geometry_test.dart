@@ -59,8 +59,9 @@ void main() {
         overrides: [keyboardGeometryStoreProvider.overrideWithValue(store)],
       );
       final notifier = container.read(keyboardProvider.notifier);
-      if (action == 'drag')
+      if (action == 'drag') {
         notifier.setGeometry(const KeyboardGeometry(.3, .5, 430, 330));
+      }
       if (action == 'reset') await notifier.resetGeometry();
       if (action == 'dispose') container.dispose();
       store.pending.complete(const KeyboardGeometry(.1, .1, 400, 300));

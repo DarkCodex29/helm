@@ -70,10 +70,12 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
         // Permit expansion toward the edge by moving the panel inward.
         w = proposedW.clamp(minWidth, maxWidth);
         h = proposedH.clamp(minHeight, maxHeight);
-        if (proposedW < minWidth || proposedH < minHeight)
+        if (proposedW < minWidth || proposedH < minHeight) {
           limit = 'Minimum size';
-        if (proposedW > maxWidth || proposedH > maxHeight)
+        }
+        if (proposedW > maxWidth || proposedH > maxHeight) {
           limit = 'Maximum size';
+        }
       } else {
         x += delta.dx;
         y += delta.dy;
