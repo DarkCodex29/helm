@@ -117,10 +117,16 @@ class _UploadStatusBar extends StatelessWidget {
         _ => 'Uploaded ${item.name}.',
       },
     ),
-    FileUploadStatus.cancelled => const _EndingLine(
+    // NAMES THE FILE, like every other receipt here. Cancellation and
+    // failure were the two that did not, so once the active line moved to
+    // the next item the user could no longer tell WHICH file it was, and
+    // several failures rendered as indistinguishable receipts with nothing
+    // to identify a retry target. Found by an adversarial review — see
+    // odd/reviews/queue-and-strip.md.
+    FileUploadStatus.cancelled => _EndingLine(
       icon: Icons.block,
       color: _mutedText,
-      message: 'Upload cancelled.',
+      message: 'Cancelled ${item.name}.',
     ),
     FileUploadStatus.destinationExists => _EndingLine(
       icon: Icons.warning_amber_outlined,
@@ -132,7 +138,11 @@ class _UploadStatusBar extends StatelessWidget {
     FileUploadStatus.failed => _EndingLine(
       icon: Icons.error_outline,
       color: _danger,
-      message: describeUploadFailure(item.failure),
+      // The name is PREFIXED rather than folded into the reason: every
+      // string `describeUploadFailure` returns is written to stand alone
+      // as a complete sentence, and rewrapping them to carry a filename
+      // would mean maintaining two phrasings of each failure.
+      message: '${item.name}: ${describeUploadFailure(item.failure)}',
     ),
     FileUploadStatus.pending => _EndingLine(
       icon: Icons.schedule,

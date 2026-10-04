@@ -82,3 +82,59 @@ Read completely:
 Read partially: `lib/features/files/data/sftp_file_service.dart`, lines 1–160 (session acquisition fields and listing implementation).
 
 Not read: the remainder of `sftp_file_service.dart`; other sheet parts, picker/platform implementations, download/destination providers, home/router/session teardown code, other tests, and Flutter/Riverpod framework internals. No exhaustion of context prevented reading any of the six requested files. Navigator-removal scenarios are identified as conditional rather than claimed to have been observed in the current app's teardown flow.
+
+---
+
+## Defect 2 (wall-clock waits) — ATTEMPTED AND REVERTED
+
+Four of the five findings above are fixed. This one is not, and the attempt
+is recorded here so the next one does not start from zero.
+
+**What was tried.** Replace the fixed `Future.delayed` waits inside
+`runAsync` with a `_until(condition, describe:)` helper that polls state
+every 5ms and FAILS with a named message on a 10s deadline. The argument
+still holds: a fixed wait *asserts* a milestone was reached by then, so a
+loaded runner makes correct code fail, and raising the number only improves
+the odds of the bet.
+
+**Why it was reverted.** The harness change broke 9 of 15 tests,
+deterministically and identically across repeated runs. Final symptom:
+
+```
+Timed out after 10s waiting for the upload to start moving bytes
+Timed out after 10s waiting for the in-flight upload to report cancelled
+```
+
+The same upload reaches `isRunning` within a fixed 30ms wait, but never
+within 10 seconds of the polling loop. The milestone itself is correct; the
+loop prevents the thing it is waiting for.
+
+**Hypotheses tried and DISPROVED, so nobody repeats them:**
+
+1. *A single default milestone fits every caller.* It does not. A declined
+   pick never enqueues anything, so "the queue finished" is unreachable;
+   one media test wants the upload caught mid-flight while another wants
+   both items complete. Making `until` required per call site is correct
+   and necessary — but it was not sufficient.
+2. *The conditions read the wrong provider container.* `_uploads` was
+   reading via `ProviderScope.containerOf` off the widget tree; it was
+   changed to take the container `_pumpSheet` returns, explicitly. **This
+   changed nothing** — not one test moved. Threading the container
+   explicitly is still the better shape, but it was not the cause.
+
+**The untested hypothesis, stated as a hypothesis.** Something in the
+interaction between `tester.runAsync`, Flutter's fake clock, and the
+`Timer` behind `SftpUploadService`'s `idleTimeout`. A flat
+`Future.delayed(50ms)` appears to let that settle while a loop of 5ms
+delays does not. NOT MEASURED. Do not treat it as the answer.
+
+**Where to start.** Instrument one failing test to print the queue's state
+on each poll, and compare against the same test with the fixed wait. The
+difference between those two traces is the whole question, and it is one
+test, not nine.
+
+**Why it stopped here.** This is the lowest-severity finding on the list —
+latent flakiness, nothing broken today — and it had consumed four design
+iterations, all of them errors in the fix rather than in the code under
+test, while four real fixes sat uncommitted. The fixed waits and their
+latent flakiness are back in place, unchanged.

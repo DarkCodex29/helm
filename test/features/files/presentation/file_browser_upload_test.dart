@@ -528,7 +528,10 @@ void main() {
       await _tapUpload(tester);
 
       expect(
-        find.text('You do not have permission to write to this directory.'),
+        find.text(
+          'report.docx: You do not have permission to write to this '
+          'directory.',
+        ),
         findsOneWidget,
       );
     });
