@@ -46,6 +46,11 @@ class HomeSemantics {
   /// The AppBar `+` action, only present while there are no tabs.
   static const appBarNewSessionButton = 'helm.home.app_bar_new_session_button';
 
+  /// The single app-bar button holding the actions scoped to the active
+  /// tab. They were three loose icons, each paying permanent width out of
+  /// the tab strip's pocket.
+  static const appBarOverflowButton = 'helm.home.app_bar_overflow_button';
+
   /// The large call to action in the empty state.
   static const newSessionButton = 'helm.home.new_session_button';
 }

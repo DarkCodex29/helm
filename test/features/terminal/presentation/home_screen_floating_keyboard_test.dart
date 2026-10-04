@@ -164,10 +164,7 @@ void main() {
         );
         expect(_panel, findsNothing);
         expect(container.read(keyboardProvider).visible, isTrue);
-        final reset = find.byTooltip('Reset keyboard layout');
-        expect(reset.hitTestable(), findsOneWidget);
-        await tester.tap(reset);
-        await tester.pumpAndSettle();
+        await _tapReset(tester);
         expect(container.read(keyboardProvider).geometry, isNull);
         expect(await KeyboardGeometryStore().read(), isNull);
         expect(container.read(keyboardProvider).visible, isTrue);
@@ -345,8 +342,7 @@ void main() {
     await tester.drag(_resize, const Offset(80, 30));
     await tester.pumpAndSettle();
     expect(tester.getRect(_panel), isNot(original));
-    await tester.tap(find.byTooltip('Reset keyboard layout'));
-    await tester.pumpAndSettle();
+    await _tapReset(tester);
     expect(tester.getRect(_panel), original);
   });
 
@@ -378,6 +374,28 @@ void main() {
       'PANEL RESIZE: ${columns}x$rows -> ${session.viewportColumns}x${session.viewportRows}; PTY resize calls=${service.resizeCalls.length - count}',
     );
   });
+  testWidgets('the app bar collapses its actions into one overflow menu', (
+    tester,
+  ) async {
+    await _pumpHome(tester, const Size(400, 800));
+    final bar = find.byType(AppBar);
+    // One button, not three. The tab strip is the element on this bar
+    // that is actually starved, and every loose icon was paid for out of
+    // its width.
+    expect(
+      find.descendant(of: bar, matching: find.byIcon(Icons.more_vert)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: bar, matching: find.byIcon(Icons.restart_alt)),
+      findsNothing,
+    );
+    // Opening it names what the icons only implied.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset keyboard layout'), findsOneWidget);
+  });
+
   testWidgets('FAB shows and hides the panel without covering output', (
     tester,
   ) async {
@@ -715,4 +733,22 @@ void main() {
       reason: 'every row stays inside the panel',
     );
   });
+}
+
+/// Opens the app bar's overflow menu and taps Reset.
+///
+/// Reset is the way back from a layout whose own controls a short body or
+/// a system inset has hidden, so what matters is not that the item exists
+/// but that it stays REACHABLE — the overflow button must be hit-testable
+/// in the same cramped viewports this escape hatch is for, and the menu
+/// must be able to open there.
+Future<void> _tapReset(WidgetTester tester) async {
+  final overflow = find.byIcon(Icons.more_vert);
+  expect(overflow.hitTestable(), findsOneWidget);
+  await tester.tap(overflow);
+  await tester.pumpAndSettle();
+  final item = find.text('Reset keyboard layout');
+  expect(item.hitTestable(), findsOneWidget);
+  await tester.tap(item);
+  await tester.pumpAndSettle();
 }
