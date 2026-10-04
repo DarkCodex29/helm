@@ -72,30 +72,30 @@ void main() {
         FakeHostCommandRunner(),
       );
 
-      expect(adapter.attachCommand('helm-0'), startsWith('/opt/homebrew/bin/tmux'));
+      expect(
+        adapter.attachCommand('helm-0'),
+        startsWith('/opt/homebrew/bin/tmux'),
+      );
     });
 
-    test(
-      'attaches an off-inherited-PATH binary by absolute path, so a shell '
-      'that cannot resolve the bare name still works',
-      () {
-        // The verified real-host case: `which herdr` over a non-interactive
-        // SSH shell finds nothing, but the binary is at ~/.local/bin/herdr.
-        final adapter = buildMultiplexerAdapter(
-          const MultiplexerVerified(
-            id: MultiplexerId.herdr,
-            absPath: '/home/deployer/.local/bin/herdr',
-            onInheritedPath: false,
-          ),
-          FakeHostCommandRunner(),
-        );
+    test('attaches an off-inherited-PATH binary by absolute path, so a shell '
+        'that cannot resolve the bare name still works', () {
+      // The verified real-host case: `which herdr` over a non-interactive
+      // SSH shell finds nothing, but the binary is at ~/.local/bin/herdr.
+      final adapter = buildMultiplexerAdapter(
+        const MultiplexerVerified(
+          id: MultiplexerId.herdr,
+          absPath: '/home/deployer/.local/bin/herdr',
+          onInheritedPath: false,
+        ),
+        FakeHostCommandRunner(),
+      );
 
-        expect(
-          adapter.attachCommand('helm-0'),
-          startsWith('/home/deployer/.local/bin/herdr'),
-        );
-      },
-    );
+      expect(
+        adapter.attachCommand('helm-0'),
+        startsWith('/home/deployer/.local/bin/herdr'),
+      );
+    });
 
     test('falls back to the bare binary name when nothing was resolved', () {
       // MultiplexerUnverified carries no path — the probe could not report.
@@ -136,27 +136,30 @@ void main() {
       onInheritedPath: false,
     );
 
-    test('a herdr adapter built with a session ref scopes agent list', () async {
-      final runner = FakeHostCommandRunner();
-      runner.whenRun(
-        "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
-        const HostCommandResult(
-          stdout: '{"id":"x","result":{"type":"agent_list","agents":[]}}',
-          exitCode: 0,
-        ),
-      );
+    test(
+      'a herdr adapter built with a session ref scopes agent list',
+      () async {
+        final runner = FakeHostCommandRunner();
+        runner.whenRun(
+          "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
+          const HostCommandResult(
+            stdout: '{"id":"x","result":{"type":"agent_list","agents":[]}}',
+            exitCode: 0,
+          ),
+        );
 
-      final adapter = buildMultiplexerAdapter(
-        herdrSelection,
-        runner,
-        sessionRef: 'helm-0',
-      );
-      await (adapter.agents!).listAgents();
+        final adapter = buildMultiplexerAdapter(
+          herdrSelection,
+          runner,
+          sessionRef: 'helm-0',
+        );
+        await (adapter.agents!).listAgents();
 
-      expect(runner.runCalls, [
-        "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
-      ]);
-    });
+        expect(runner.runCalls, [
+          "/home/deployer/.local/bin/herdr --session 'helm-0' agent list",
+        ]);
+      },
+    );
 
     test('a herdr adapter built without one emits no --session flag', () async {
       final runner = FakeHostCommandRunner();
@@ -174,22 +177,19 @@ void main() {
       expect(runner.runCalls.single, isNot(contains('--session')));
     });
 
-    test(
-      'a session ref is harmless for multiplexers that cannot use it — '
-      'tmux and zellij take no such flag and must not grow one',
-      () {
-        for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
-          final adapter = buildMultiplexerAdapter(
-            MultiplexerUnverified(id: id),
-            FakeHostCommandRunner(),
-            sessionRef: 'helm-0',
-          );
+    test('a session ref is harmless for multiplexers that cannot use it — '
+        'tmux and zellij take no such flag and must not grow one', () {
+      for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
+        final adapter = buildMultiplexerAdapter(
+          MultiplexerUnverified(id: id),
+          FakeHostCommandRunner(),
+          sessionRef: 'helm-0',
+        );
 
-          expect(adapter.attachCommand('helm-0'), isNot(contains('--session')));
-          expect(adapter.agents, isNull);
-        }
-      },
-    );
+        expect(adapter.attachCommand('helm-0'), isNot(contains('--session')));
+        expect(adapter.agents, isNull);
+      }
+    });
   });
 
   group('buildMultiplexerAdapter — the herdr mobile config path', () {
@@ -198,21 +198,6 @@ void main() {
       absPath: '/home/deployer/.local/bin/herdr',
       onInheritedPath: false,
     );
-    const configPath = '/home/deployer/.config/herdr/config.mobile.toml';
-
-    test('reaches the herdr adapter and prefixes its attach command', () {
-      final adapter = buildMultiplexerAdapter(
-        herdrSelection,
-        FakeHostCommandRunner(),
-        herdrMobileConfigPath: configPath,
-      );
-
-      expect(
-        adapter.attachCommand('helm-0'),
-        "env HERDR_CONFIG_PATH='$configPath' "
-        "/home/deployer/.local/bin/herdr session attach 'helm-0'",
-      );
-    });
 
     test('omitting it leaves the herdr attach command untouched', () {
       // The inert fallback at the factory seam: a host that reported no
@@ -227,28 +212,5 @@ void main() {
         "/home/deployer/.local/bin/herdr session attach 'helm-0'",
       );
     });
-
-    test(
-      'a config path is inert for multiplexers that cannot use it — tmux '
-      'and zellij never grow an env prefix',
-      () {
-        // herdr owns HERDR_CONFIG_PATH. Leaking it onto another
-        // multiplexer would set a variable its binary never reads while
-        // changing a command line that was previously correct.
-        for (final id in const [MultiplexerId.tmux, MultiplexerId.zellij]) {
-          final adapter = buildMultiplexerAdapter(
-            MultiplexerUnverified(id: id),
-            FakeHostCommandRunner(),
-            herdrMobileConfigPath: configPath,
-          );
-
-          expect(adapter.attachCommand('helm-0'), startsWith(id.name));
-          expect(
-            adapter.attachCommand('helm-0'),
-            isNot(contains('HERDR_CONFIG_PATH')),
-          );
-        }
-      },
-    );
   });
 }

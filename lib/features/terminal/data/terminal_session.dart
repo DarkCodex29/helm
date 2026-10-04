@@ -12,7 +12,6 @@ import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/host/multiplexer_factory.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
-import 'package:helm/core/host/probe/herdr_mobile_config.dart';
 import 'package:helm/core/host/probe/host_prober.dart';
 import 'package:helm/core/host/probe/host_report.dart';
 import 'package:helm/core/host/session_reference.dart';
@@ -1194,7 +1193,6 @@ class TerminalSession {
       selection,
       runner,
       sessionRef: tmuxSessionName,
-      herdrMobileConfigPath: herdrMobileConfigPath(report),
     );
 
     _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');
