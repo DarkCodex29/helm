@@ -46,6 +46,24 @@ abstract interface class SftpReadHandle {
   Future<void> close();
 }
 
+/// One remote file opened for writing. Narrower than `SftpFile.write`.
+///
+/// [SftpUploadService] calls [writeChunk] directly rather than driving
+/// `SftpFile.write`'s `SftpFileWriter`, because that writer subscribes to
+/// its source stream with NO `onError` handler at all
+/// (`sftp_stream_io.dart:35-37`, dartssh2 3.3.1, read directly) — a local
+/// read failure would become an uncaught zone error rather than a
+/// reported outcome. `SftpFile.writeBytes` has no such gap: an ordinary
+/// `async` function whose failure surfaces through its own `Future`.
+abstract interface class SftpWriteHandle {
+  /// Writes [chunk] at [offset], supplied by the caller rather than
+  /// tracked here — the caller is the one party that knows how many
+  /// bytes of THIS transfer have landed so far.
+  Future<void> writeChunk(Uint8List chunk, {required int offset});
+
+  Future<void> close();
+}
+
 /// The subset of an open SFTP session that [SftpFileService] needs to
 /// browse a remote filesystem.
 ///
@@ -87,6 +105,22 @@ abstract interface class SftpSession {
   /// failure — a leaked handle stays open on the server until the whole
   /// session ends.
   Future<SftpReadHandle> openRead(String path);
+
+  /// Opens [path] for writing, creating it and discarding any bytes
+  /// already there. Always `create | truncate | write`:
+  ///
+  ///  * `write` — bytes are being sent; no alternative.
+  ///  * `create` — the first attempt at a partial path finds nothing to
+  ///    open.
+  ///  * `truncate` — a LATER attempt might find a stale partial from a
+  ///    run that crashed or lost its connection; without this, re-opening
+  ///    it would append at its old length instead of zero.
+  ///
+  /// Deliberately NOT `exclusive`: that flag is for the DESTINATION —
+  /// see [UploadDestinationExists] for why that check is a `stat` done
+  /// before this is called. The PARTIAL path is a name this app chose
+  /// for itself, so a stale leftover under it is this app's own litter.
+  Future<SftpWriteHandle> openWrite(String path);
 
   /// Creates a directory at [path].
   ///
@@ -152,6 +186,17 @@ class SftpClientSession implements SftpSession {
       SftpFileReadHandle(await _client.open(path));
 
   @override
+  Future<SftpWriteHandle> openWrite(String path) async => SftpFileWriteHandle(
+    await _client.open(
+      path,
+      mode:
+          SftpFileOpenMode.create |
+          SftpFileOpenMode.truncate |
+          SftpFileOpenMode.write,
+    ),
+  );
+
+  @override
   Future<void> mkdir(String path) => _client.mkdir(path);
 
   @override
@@ -206,6 +251,21 @@ class SftpFileReadHandle implements SftpReadHandle {
     required int maxPendingRequests,
   }) =>
       _file.read(chunkSize: chunkSize, maxPendingRequests: maxPendingRequests);
+
+  @override
+  Future<void> close() => _file.close();
+}
+
+/// Adapts [SftpFile] to [SftpWriteHandle] via `writeBytes`, not `write`
+/// — reason on [SftpWriteHandle].
+class SftpFileWriteHandle implements SftpWriteHandle {
+  SftpFileWriteHandle(this._file);
+
+  final SftpFile _file;
+
+  @override
+  Future<void> writeChunk(Uint8List chunk, {required int offset}) =>
+      _file.writeBytes(chunk, offset: offset);
 
   @override
   Future<void> close() => _file.close();

@@ -196,6 +196,10 @@ class _RecordingSftpSession implements SftpSession {
   /// reconnect/close plumbing, never a write, so every write throws
   /// loudly rather than silently pretending to succeed.
   @override
+  Future<SftpWriteHandle> openWrite(String path) async =>
+      throw UnsupportedError('This fake does not serve transfers');
+
+  @override
   Future<void> mkdir(String path) async =>
       throw UnsupportedError('This fake does not serve writes');
 

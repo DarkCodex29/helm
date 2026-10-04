@@ -23,6 +23,7 @@ class FakeSftpSession implements SftpSession {
     this.deniedPaths = const {},
     this.files = const {},
     this.openError,
+    this.openWriteError,
     this.mkdirError,
     this.removeError,
     this.rmdirError,
@@ -69,6 +70,14 @@ class FakeSftpSession implements SftpSession {
   /// an SFTP status.
   final Object? openError;
 
+  /// Thrown by every [openWrite] call, for transport failures that are
+  /// not an SFTP status — a server refusal to open the PARTIAL path for
+  /// writing. A per-path "destination already exists" refusal is
+  /// deliberately NOT modelled here, mirroring [mkdirError]'s note: that
+  /// outcome is decided by [SftpUploadService] stat-ing the destination
+  /// before this is ever called — see [UploadDestinationExists].
+  final Object? openWriteError;
+
   /// Thrown by every [mkdir] call, for transport failures. A per-path
   /// "already exists" refusal is deliberately NOT modelled here: that
   /// outcome is decided by [SftpFileService] stat-ing the destination
@@ -98,6 +107,26 @@ class FakeSftpSession implements SftpSession {
   /// Every handle [openRead] ever returned, so a test can assert each one
   /// was closed rather than only the last.
   final openedHandles = <FakeSftpReadHandle>[];
+
+  final openedWritePaths = <String>[];
+
+  /// Every handle [openWrite] ever returned, so a test can assert it was
+  /// closed and inspect what was written to it.
+  final openedWriteHandles = <FakeSftpWriteHandle>[];
+
+  /// Run against the handle [openWrite] is about to return, BEFORE it is
+  /// handed to the caller. The only way an upload test can script a
+  /// mid-stream remote failure or stall: the handle does not exist until
+  /// [SftpUploadService] asks for it, so nothing earlier could configure
+  /// one directly.
+  void Function(FakeSftpWriteHandle handle)? pendingWriteHandleConfig;
+
+  /// Bytes accumulated at each path ever opened for writing, keyed by
+  /// path. Moved to the new key by [rename] and dropped by [remove], the
+  /// same way [_directories] and [_stats] are — so a test can assert on
+  /// the exact bytes that landed under the FINAL name, not just that
+  /// SOME bytes arrived somewhere.
+  final writtenBytes = <String, List<int>>{};
 
   var closed = false;
 
@@ -161,6 +190,24 @@ class FakeSftpSession implements SftpSession {
   }
 
   @override
+  Future<SftpWriteHandle> openWrite(String path) async {
+    openedWritePaths.add(path);
+    final error = openWriteError;
+    if (error != null) throw error;
+    if (deniedPaths.contains(path)) {
+      throw SftpStatusError(
+        SftpStatusCode.permissionDenied,
+        'Permission denied',
+      );
+    }
+    writtenBytes[path] = <int>[];
+    final handle = FakeSftpWriteHandle(this, path);
+    openedWriteHandles.add(handle);
+    pendingWriteHandleConfig?.call(handle);
+    return handle;
+  }
+
+  @override
   Future<void> mkdir(String path) async {
     mkdirPaths.add(path);
     final error = mkdirError;
@@ -190,6 +237,10 @@ class FakeSftpSession implements SftpSession {
       );
     }
     _removeFromParentListing(path);
+    // A partial upload file removed by its own path, not by [rmdir] or a
+    // directory walk — the same request [SftpUploadService] issues to
+    // discard a cancelled or failed transfer's partial.
+    writtenBytes.remove(path);
   }
 
   @override
@@ -223,17 +274,34 @@ class FakeSftpSession implements SftpSession {
     final (newParent, newName) = _split(newPath);
     final siblings = List<SftpName>.of(_directories[oldParent] ?? const []);
     final index = siblings.indexWhere((n) => n.filename == oldName);
-    if (index == -1) {
+
+    // A file written through [openWrite] — the partial an upload stages
+    // — is tracked only in [writtenBytes], never added to [_directories]
+    // at all: nothing here models `SSH_FXP_OPEN` as also inserting a
+    // directory entry, because no caller before this slice ever created
+    // a file that way. A real server's rename needs no directory listing
+    // whatsoever — it operates on the inode the path resolves to — so an
+    // upload's finalizing rename must succeed here precisely because
+    // `writtenBytes` is this fake's stand-in for "a file exists at this
+    // path", same as [_directories] and [_stats] are for their own
+    // operations.
+    final isUntrackedUpload = index == -1 && writtenBytes.containsKey(oldPath);
+    if (index == -1 && !isUntrackedUpload) {
       throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
     }
-    final moved = siblings.removeAt(index);
-    _directories[oldParent] = siblings;
 
-    final destination = List<SftpName>.of(_directories[newParent] ?? const []);
-    destination.add(
-      SftpName(filename: newName, longname: moved.longname, attr: moved.attr),
-    );
-    _directories[newParent] = destination;
+    if (!isUntrackedUpload) {
+      final moved = siblings.removeAt(index);
+      _directories[oldParent] = siblings;
+
+      final destination = List<SftpName>.of(
+        _directories[newParent] ?? const [],
+      );
+      destination.add(
+        SftpName(filename: newName, longname: moved.longname, attr: moved.attr),
+      );
+      _directories[newParent] = destination;
+    }
 
     // If the moved entry was itself a directory with a listing of its own,
     // that listing moves to the new path too — otherwise a rename of a
@@ -242,6 +310,13 @@ class FakeSftpSession implements SftpSession {
     if (childListing != null) _directories[newPath] = childListing;
     final childStats = _stats.remove(oldPath);
     if (childStats != null) _stats[newPath] = childStats;
+
+    // The finalizing rename of an upload: the bytes staged under the
+    // partial path move to the destination path, so a test asserting on
+    // [writtenBytes] after a completed upload reads them under the name
+    // the upload actually reports.
+    final movedBytes = writtenBytes.remove(oldPath);
+    if (movedBytes != null) writtenBytes[newPath] = movedBytes;
   }
 
   @override
@@ -264,6 +339,77 @@ class FakeSftpSession implements SftpSession {
     final parent = lastSeparator <= 0 ? '/' : path.substring(0, lastSeparator);
     final name = path.substring(lastSeparator + 1);
     return (parent, name);
+  }
+}
+
+/// Scripted stand-in for one remote file opened for writing.
+///
+/// Every byte handed to [writeChunk] is appended to the owning
+/// [FakeSftpSession.writtenBytes] entry for [path], so a test can assert
+/// on exactly what reached the server rather than only on the outcome
+/// [SftpUploadService] reports. [offsetsSeen] records the offset of every
+/// call, so a test can assert the upload service writes in strictly
+/// increasing order rather than, say, retrying a chunk at an offset it
+/// already covered.
+class FakeSftpWriteHandle implements SftpWriteHandle {
+  FakeSftpWriteHandle(this._session, this.path);
+
+  final FakeSftpSession _session;
+  final String path;
+
+  var closed = false;
+  final offsetsSeen = <int>[];
+  var _chunksWritten = 0;
+
+  /// Thrown by every [writeChunk] call, for a server that refuses the
+  /// write outright — permission revoked mid-transfer, quota exceeded,
+  /// the channel itself failing.
+  Object? writeError;
+
+  /// Throws [writeError] (or a generic failure when null) starting from
+  /// the chunk at this 1-based count, simulating a server that accepts
+  /// the first few chunks and then refuses — the write-side mirror of
+  /// [FakeRemoteFile.readError], which fails a download mid-stream
+  /// instead.
+  int? failFromChunk;
+
+  /// Never completes [writeChunk] from this 1-based call onward, without
+  /// throwing — the write-side mirror of [FakeRemoteFile.stallAfterChunk].
+  /// A real dead socket acknowledges nothing and reports nothing; this is
+  /// the only shape that can make an idle watchdog the sole thing that
+  /// notices.
+  int? stallFromChunk;
+
+  @override
+  Future<void> writeChunk(Uint8List chunk, {required int offset}) {
+    _chunksWritten++;
+    offsetsSeen.add(offset);
+
+    final stallFrom = stallFromChunk;
+    if (stallFrom != null && _chunksWritten >= stallFrom) {
+      // Deliberately an unresolved Future, not a delayed one: a stall has
+      // no eventual completion for a test to wait out, exactly as a dead
+      // TCP connection with no FIN never sends a last acknowledgement.
+      return Completer<void>().future;
+    }
+
+    final failFrom = failFromChunk;
+    if (failFrom != null && _chunksWritten >= failFrom) {
+      return Future<void>.error(
+        writeError ?? SftpStatusError(SftpStatusCode.failure, 'Write refused'),
+      );
+    }
+
+    final error = writeError;
+    if (error != null) return Future<void>.error(error);
+
+    (_session.writtenBytes[path] ??= <int>[]).addAll(chunk);
+    return Future<void>.value();
+  }
+
+  @override
+  Future<void> close() async {
+    closed = true;
   }
 }
 
