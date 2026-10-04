@@ -18,10 +18,7 @@ void main() {
 
     test('keeps characters that only look like separators', () {
       // Backslashes are legal in a POSIX basename; only `/` separates.
-      expect(
-        UploadCompleted(r'/home/gian/a\b.txt', bytes: 3).name,
-        r'a\b.txt',
-      );
+      expect(UploadCompleted(r'/home/gian/a\b.txt', bytes: 3).name, r'a\b.txt');
     });
 
     test('is EMPTY for a path that names a directory, and that is known', () {
