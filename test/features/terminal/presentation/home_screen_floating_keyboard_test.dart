@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
+import 'package:helm/features/terminal/data/keyboard_geometry_store.dart';
 import 'package:helm/features/terminal/domain/terminal_tab.dart';
 import 'package:helm/features/terminal/domain/auto_connect_decision.dart';
 import 'package:helm/features/terminal/presentation/home_screen.dart';
@@ -79,6 +80,131 @@ Finder get _move => find.byTooltip('Move keyboard');
 Finder get _resize => find.byTooltip('Resize keyboard');
 
 void main() {
+  for (final resize in [false, true]) {
+    testWidgets('R1 batched ${resize ? 'resize' : 'move'} accumulates deltas', (
+      tester,
+    ) async {
+      await _pumpHome(tester, const Size(800, 800));
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(HomeScreen)),
+      );
+      container
+          .read(keyboardProvider.notifier)
+          .setGeometry(const KeyboardGeometry(.5, .5, 384, 200));
+      await tester.pumpAndSettle();
+      final before = tester.getRect(_panel);
+      final grip = tester.widget<GestureDetector>(
+        find
+            .descendant(
+              of: resize ? _resize : _move,
+              matching: find.byType(GestureDetector),
+            )
+            .first,
+      );
+      // Exactly the event-batching boundary: no build between callbacks.
+      grip.onPanUpdate!(
+        DragUpdateDetails(
+          delta: const Offset(10, 10),
+          globalPosition: Offset.zero,
+        ),
+      );
+      grip.onPanUpdate!(
+        DragUpdateDetails(
+          delta: const Offset(10, 10),
+          globalPosition: Offset.zero,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final after = tester.getRect(_panel);
+      // `closeTo`, not exact equality: geometry is PERSISTED AS A FRACTION
+      // of available travel by design, so every update round-trips pixels
+      // through a division and back and lands within floating-point error
+      // (20.00000000000003 was observed). The contract under test is that
+      // two batched deltas ACCUMULATE to 20 rather than overwriting each
+      // other at 10 — a tolerance far below one logical pixel cannot hide
+      // that failure, while exact equality fails on arithmetic the design
+      // chose deliberately.
+      expect(
+        resize ? after.width - before.width : after.left - before.left,
+        closeTo(20, 0.01),
+      );
+      expect(
+        resize ? after.height - before.height : after.top - before.top,
+        closeTo(20, 0.01),
+      );
+    });
+  }
+  for (final inset in [false, true]) {
+    testWidgets(
+      'D3 reset stays reachable with ${inset ? 'appearing inset' : 'short safe viewport'}',
+      (tester) async {
+        await _pumpHome(tester, const Size(600, 800));
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(HomeScreen)),
+        );
+        final notifier = container.read(keyboardProvider.notifier);
+        notifier.setGeometry(const KeyboardGeometry(.2, .3, 500, 200));
+        await notifier.saveGeometry();
+        if (inset) {
+          tester.view.viewInsets = const FakeViewPadding(bottom: 660);
+          addTearDown(tester.view.resetViewInsets);
+        } else {
+          tester.view.physicalSize = const Size(600, 240);
+          tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+          addTearDown(tester.view.resetPadding);
+        }
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSize(find.byType(HelmTerminalView)).height,
+          lessThan(96),
+        );
+        expect(_panel, findsNothing);
+        expect(container.read(keyboardProvider).visible, isTrue);
+        final reset = find.byTooltip('Reset keyboard layout');
+        expect(reset.hitTestable(), findsOneWidget);
+        await tester.tap(reset);
+        await tester.pumpAndSettle();
+        expect(container.read(keyboardProvider).geometry, isNull);
+        expect(await KeyboardGeometryStore().read(), isNull);
+        expect(container.read(keyboardProvider).visible, isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  for (final label in ['ESC', 'TAB', '←', 'q', '⌫']) {
+    testWidgets('D1 scroll starting on $label emits no bytes', (tester) async {
+      final session = await _pumpHome(tester, const Size(400, 800));
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(HomeScreen)),
+      );
+      container
+          .read(keyboardProvider.notifier)
+          .setGeometry(const KeyboardGeometry(.5, .5, 384, 144));
+      await tester.pumpAndSettle();
+      final scroll = find
+          .ancestor(
+            of: find.byType(TerminalKeyboard),
+            matching: find.byType(SingleChildScrollView),
+          )
+          .first;
+      if (label == 'q' || label == '⌫') {
+        await tester.drag(scroll, const Offset(0, -60));
+        await tester.pumpAndSettle();
+      }
+      final output = <String>[];
+      session.terminal.onOutput = output.add;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text(label)),
+      );
+      await tester.pump(const Duration(milliseconds: 450));
+      await gesture.moveBy(const Offset(0, -35));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(output, isEmpty);
+    });
+  }
+
   testWidgets('safe lateral insets clamp movement after rotation', (
     tester,
   ) async {
@@ -162,7 +288,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('minimum resize is refused with visible feedback and 44dp keys', (
+  testWidgets('D2 minimum resize protects 48 by 48 top-bar recognizers', (
     tester,
   ) async {
     await _pumpHome(tester, const Size(800, 800));
@@ -183,6 +309,13 @@ void main() {
           )
           .first;
       expect(tester.getSize(target).width, greaterThanOrEqualTo(48));
+      final gestureBox = find
+          .ancestor(
+            of: find.text(label),
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(tester.getSize(gestureBox).height, greaterThanOrEqualTo(48));
     }
   });
 
@@ -387,42 +520,49 @@ void main() {
     },
   );
 
-  testWidgets('floating keys emit, haptic and paint pressed on touch-down', (
-    tester,
-  ) async {
-    final session = await _pumpHome(tester, const Size(400, 800));
-    final output = <String>[];
-    session.terminal.onOutput = output.add;
-    final haptics = <MethodCall>[];
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        haptics.add(call);
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+  testWidgets(
+    'floating keys haptic and paint on down but emit only on release',
+    (tester) async {
+      final session = await _pumpHome(tester, const Size(400, 800));
+      final output = <String>[];
+      session.terminal.onOutput = output.add;
+      final haptics = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
-        null,
-      ),
-    );
-    final key = find
-        .ancestor(of: find.text('q'), matching: find.byType(AnimatedContainer))
-        .first;
-    final resting = tester.widget<AnimatedContainer>(key).decoration;
-    final gesture = await tester.startGesture(tester.getCenter(find.text('q')));
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(output, ['q']);
-    expect(
-      haptics.any((call) => call.method == 'HapticFeedback.vibrate'),
-      isTrue,
-    );
-    expect(tester.widget<AnimatedContainer>(key).decoration, isNot(resting));
-    await gesture.up();
-    await tester.pumpAndSettle();
-    expect(tester.widget<AnimatedContainer>(key).decoration, resting);
-  });
+        (call) async {
+          haptics.add(call);
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final key = find
+          .ancestor(
+            of: find.text('q'),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first;
+      final resting = tester.widget<AnimatedContainer>(key).decoration;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('q')),
+      );
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(output, isEmpty);
+      expect(
+        haptics.any((call) => call.method == 'HapticFeedback.vibrate'),
+        isTrue,
+      );
+      expect(tester.widget<AnimatedContainer>(key).decoration, isNot(resting));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.widget<AnimatedContainer>(key).decoration, resting);
+      expect(output, ['q']);
+    },
+  );
 
   testWidgets(
     'short landscape panel scrolls rather than shrinking paid-for keys',

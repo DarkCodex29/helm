@@ -207,6 +207,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
           actions: [
+            // Recovery belongs outside the panel: short bodies and system
+            // keyboard insets can hide every panel control.
+            if (tabsState.hasTabs)
+              Semantics(
+                identifier: KeyboardLayoutSemantics.reset,
+                child: IconButton(
+                  tooltip: 'Reset keyboard layout',
+                  icon: const Icon(Icons.restart_alt),
+                  onPressed: () => unawaited(
+                    ref.read(keyboardProvider.notifier).resetGeometry(),
+                  ),
+                ),
+              ),
             if (!tabsState.hasTabs)
               Semantics(
                 identifier: HomeSemantics.appBarNewSessionButton,

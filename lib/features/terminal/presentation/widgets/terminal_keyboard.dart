@@ -10,7 +10,9 @@ import 'package:helm/features/terminal/data/keyboard_geometry_store.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:xterm/xterm.dart';
 
-/// 7 top-bar targets * 48dp + 16dp padding + 6 gaps * 3dp = 370dp.
+/// 7 top-bar widths * 48dp + 16dp padding + 6 gaps * 3dp = 370dp.
+/// Each top-bar recognizer is also 48dp tall: genuine 48x48 targets.
+/// The strip grows 4dp; the scrollable panel minimum remains 144dp.
 /// Letters retain their 44dp HEIGHT clamp. Eleven 44dp-wide letters would
 /// need 522dp (11*44 + 8 + 10*3); an unclamped proportional height of 44
 /// would need 458.87dp (11*44/1.15 + 8 + 10*3). Both forbid the primary
@@ -40,6 +42,9 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
   Widget build(BuildContext context) {
     final geometry = ref.watch(keyboardProvider.select((s) => s.geometry));
     final notifier = ref.read(keyboardProvider.notifier);
+    if (geometry == null) {
+      _limit = null;
+    }
     // Home's AppBar and fixed safe-area FAB shelf already consume vertical
     // insets. Only the lateral safe insets remain inside this body's viewport.
     final padding = MediaQuery.paddingOf(context);
@@ -59,14 +64,28 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
         : geometry.y * travelY;
 
     void update(Offset delta, bool resize) {
-      var w = width;
-      var h = height;
-      var x = left - padding.left;
-      var y = top;
+      // Derived from the LIVE geometry, not from the values this build
+      // captured. Two `onPanUpdate` callbacks can arrive between frames
+      // under event batching, and both would otherwise start from the same
+      // build-time snapshot: the second would overwrite the first instead
+      // of accumulating it, so a +10 then +10 drag moved the panel 10
+      // rather than 20 and the panel lagged the finger. Reading the
+      // notifier here costs one synchronous state read per callback and
+      // mirrors the derivation above exactly.
+      final live = ref.read(keyboardProvider).geometry;
+      final liveW = (live?.width ?? 384.0).clamp(minWidth, maxWidth);
+      final liveH = (live?.height ?? 368.0).clamp(minHeight, maxHeight);
+      final liveTravelY = widget.viewport.height - liveH;
+      var w = liveW;
+      var h = liveH;
+      var x = (live?.x ?? .5) * (available - liveW);
+      var y = live == null
+          ? math.max(0.0, liveTravelY - 12)
+          : live.y * liveTravelY;
       String? limit;
       if (resize) {
-        final proposedW = width + delta.dx;
-        final proposedH = height + delta.dy;
+        final proposedW = liveW + delta.dx;
+        final proposedH = liveH + delta.dy;
         // Permit expansion toward the edge by moving the panel inward.
         w = proposedW.clamp(minWidth, maxWidth);
         h = proposedH.clamp(minHeight, maxHeight);
@@ -143,28 +162,11 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
                 // Separate chrome: a key's touch-down can never begin a panel drag.
                 SizedBox(
                   height: 48,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: grip(
-                          'Move keyboard',
-                          KeyboardLayoutSemantics.move,
-                          Icons.drag_handle,
-                          false,
-                        ),
-                      ),
-                      Semantics(
-                        identifier: KeyboardLayoutSemantics.reset,
-                        child: IconButton(
-                          tooltip: 'Reset keyboard layout',
-                          icon: const Icon(Icons.restart_alt),
-                          onPressed: () {
-                            setState(() => _limit = null);
-                            unawaited(notifier.resetGeometry());
-                          },
-                        ),
-                      ),
-                    ],
+                  child: grip(
+                    'Move keyboard',
+                    KeyboardLayoutSemantics.move,
+                    Icons.drag_handle,
+                    false,
                   ),
                 ),
                 Expanded(child: SingleChildScrollView(child: keys)),
@@ -238,7 +240,6 @@ const _actionKeyTextColor = AppTheme.onSurfaceMuted;
 /// Matched to the platform's own text-editing feel rather than invented:
 /// slow enough that an ordinary tap never repeats, fast enough that
 /// holding backspace clears a long path without becoming a race.
-const _kRepeatDelay = Duration(milliseconds: 400);
 const _kRepeatInterval = Duration(milliseconds: 55);
 
 /// Vertical slop added to a key's TOUCH area without changing its painted
@@ -377,7 +378,7 @@ class _TopBar extends ConsumerWidget {
                   active: state.ctrlHeld,
                   onTap: notifier.toggleCtrl,
                   width: double.infinity,
-                  height: 44,
+                  height: 48,
                 ),
               ),
               const SizedBox(width: 3),
@@ -850,37 +851,36 @@ class _KeyButton extends StatefulWidget {
 
 class _KeyButtonState extends State<_KeyButton> {
   bool _pressed = false;
-  Timer? _repeatDelay;
   Timer? _repeatTicker;
 
   @override
   void dispose() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
     super.dispose();
   }
 
   void _onDown() {
     setState(() => _pressed = true);
-    // Fires on TOUCH DOWN, not on tap-up. A glass key has no travel to
-    // feel, so the confirmation has to arrive at the moment the finger
-    // lands — waiting for the release puts it after the user has already
-    // started doubting.
+    // Feedback stays early; bytes wait for arena ownership. Taps cost
+    // release latency, but a scroll must never send destructive input.
     HapticFeedback.selectionClick();
-    widget.onTap();
+  }
 
-    if (!widget.repeats) return;
-    _repeatDelay = Timer(_kRepeatDelay, () {
-      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) {
-        widget.onTap();
-      });
-    });
+  void _repeat() {
+    // Long press has WON the arena (500ms). Subsequent motion cannot
+    // become a scroll, unlike a timer started from onTapDown.
+    setState(() => _pressed = true);
+    widget.onTap();
+    _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
+  }
+
+  void _tap() {
+    _release();
+    widget.onTap();
   }
 
   void _release() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
-    _repeatDelay = null;
     _repeatTicker = null;
     if (mounted && _pressed) setState(() => _pressed = false);
   }
@@ -898,6 +898,10 @@ class _KeyButtonState extends State<_KeyButton> {
       onTapDown: (_) => _onDown(),
       onTapUp: (_) => _release(),
       onTapCancel: _release,
+      onTap: _tap,
+      onLongPressStart: widget.repeats ? (_) => _repeat() : null,
+      onLongPressEnd: widget.repeats ? (_) => _release() : null,
+      onLongPressCancel: widget.repeats ? _release : null,
       child: Padding(
         // Claims the gap on both sides without moving anything: the
         // Row already reserves it, and negative margin keeps the painted
@@ -968,9 +972,7 @@ class _StickyKey extends StatelessWidget {
         height: height ?? 44,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          // Matches the 44 the other top-bar keys now use; CTRL sitting a
-          // whole 8dp shorter than its neighbours was the one place the
-          // strip visibly failed to line up.
+          // Explicit height keeps CTRL aligned with the command strip.
           constraints: width == null
               ? const BoxConstraints(minWidth: 44, maxWidth: 60)
               : null,
@@ -1037,12 +1039,10 @@ class _TopBarKey extends StatefulWidget {
 
 class _TopBarKeyState extends State<_TopBarKey> {
   bool _pressed = false;
-  Timer? _repeatDelay;
   Timer? _repeatTicker;
 
   @override
   void dispose() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
     super.dispose();
   }
@@ -1050,17 +1050,22 @@ class _TopBarKeyState extends State<_TopBarKey> {
   void _onDown() {
     setState(() => _pressed = true);
     HapticFeedback.selectionClick();
+  }
+
+  void _repeat() {
+    // Only emit after the long-press recognizer owns the arena.
+    setState(() => _pressed = true);
     widget.onTap();
-    if (!widget.repeats) return;
-    _repeatDelay = Timer(_kRepeatDelay, () {
-      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
-    });
+    _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
+  }
+
+  void _tap() {
+    _release();
+    widget.onTap();
   }
 
   void _release() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
-    _repeatDelay = null;
     _repeatTicker = null;
     if (mounted && _pressed) setState(() => _pressed = false);
   }
@@ -1072,13 +1077,15 @@ class _TopBarKeyState extends State<_TopBarKey> {
       onTapDown: (_) => _onDown(),
       onTapUp: (_) => _release(),
       onTapCancel: _release,
+      onTap: _tap,
+      onLongPressStart: widget.repeats ? (_) => _repeat() : null,
+      onLongPressEnd: widget.repeats ? (_) => _release() : null,
+      onLongPressCancel: widget.repeats ? _release : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 60),
         curve: Curves.easeOut,
-        // 36dp was under every touch-target floor there is. These keys
-        // sit in a scrolling strip, so height is the one dimension
-        // nothing else competes for.
-        height: 44,
+        // Both axes meet the strip's 48dp target floor at 370dp width.
+        height: 48,
         constraints: const BoxConstraints(minWidth: 44),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
