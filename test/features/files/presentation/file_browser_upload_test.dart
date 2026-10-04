@@ -179,13 +179,16 @@ void main() {
     });
   });
 
-  group('a destination that already exists', () {
+  group('exhausted destination candidates', () {
     testWidgets('reads as something to act on, not a generic failure', (
       tester,
     ) async {
       final session = FakeSftpSession(
         directories: {'/home/gian': []},
-        stats: {'/home/gian/report.docx': SftpFileAttrs()},
+        stats: {
+          for (var i = 0; i < 100; i++)
+            '/home/gian/report${i == 0 ? '' : '($i)'}.docx': SftpFileAttrs(),
+        },
       );
       final gateway = FakeDocumentTreeGateway(
         filePick: const PickedDocument(
