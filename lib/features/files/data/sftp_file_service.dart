@@ -163,6 +163,17 @@ class SftpFileService {
   /// `SftpClient.rename` would have done on its own — see
   /// [RenameDestinationExists] for why the server's own behaviour cannot
   /// be trusted to answer this consistently across servers.
+  ///
+  /// MEASURED, not inferred. OpenSSH 10.3p1's own `sftp-server` binary was
+  /// driven directly (`sftp -D /usr/libexec/sftp-server`, which needs no
+  /// network and no authentication) against a scratch tree on 2026-10-03:
+  /// renaming a file onto an EXISTING one reported no error at all and the
+  /// source simply ceased to exist. The destination had been silently
+  /// replaced, exactly as dartssh2 3.3.1 documents for the
+  /// `posix-rename@openssh.com` path it prefers (`sftp_client.dart:189-209`).
+  ///
+  /// So the pre-check below is not defensive habit against a hypothetical
+  /// server. Without it, this app destroys a file the user never named.
   Future<RenameOutcome> rename(RemoteEntry entry, String newName) async {
     final rejection = validateRemoteName(newName);
     if (rejection != null) return RenameInvalidName(rejection);
@@ -216,6 +227,18 @@ class SftpFileService {
   /// [DeleteDirectoryNotEmpty] — which this method checks with its own
   /// `listdir` BEFORE calling `rmdir`, so the refusal can be reported
   /// precisely rather than as [RemoteWriteFailure.unknown].
+  ///
+  /// MEASURED against OpenSSH 10.3p1's `sftp-server` on 2026-10-03, by
+  /// driving the binary directly (`sftp -D /usr/libexec/sftp-server`):
+  /// `rmdir` on a non-empty directory answers a bare `Failure`, the same
+  /// generic status an unrelated refusal would carry. `mkdir` onto an
+  /// existing directory answers `Failure` too. The control case, `rmdir`
+  /// on an empty directory, succeeded.
+  ///
+  /// That is the whole argument for the local pre-checks: the server does
+  /// refuse, but it refuses in a way that cannot be told apart from a
+  /// permission problem or a vanished parent, so helm would have to show
+  /// the user "something went wrong" for a condition it can name exactly.
   Future<DeleteOutcome> delete(RemoteEntry entry) async {
     final SftpSession session;
     try {
