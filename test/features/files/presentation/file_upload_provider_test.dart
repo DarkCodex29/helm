@@ -177,7 +177,15 @@ void main() {
         sourceFor('a'),
       );
       notifier().enqueue(
-        serviceFor(FakeSftpSession(stats: {'/b': SftpFileAttrs()})),
+        serviceFor(
+          FakeSftpSession(
+            stats: {
+              // Destination-exists now means all bounded candidates are taken.
+              for (var i = 0; i < 100; i++)
+                '/b${i == 0 ? '' : '($i)'}': SftpFileAttrs(),
+            },
+          ),
+        ),
         '/b',
         sourceFor('b'),
       );

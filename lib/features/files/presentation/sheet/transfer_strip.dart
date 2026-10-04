@@ -2,7 +2,17 @@ part of '../file_browser_sheet.dart';
 
 // Upload strip
 
-/// Reports the one upload the sheet can have in flight.
+/// Reports a FIFO without spending a phone screen on pending rows.
+/// Only the active (or next pending) item gets progress detail; precomputed
+/// counts summarize the rest. Terminal receipts stay in an 80-pixel scroll
+/// area so renamed successes and failures are never overwritten by the next
+/// item. "Done" means ended, not necessarily succeeded.
+///
+/// Actions belong to the QUEUE: Cancel all stops active and pending work;
+/// one dismiss acknowledges all terminal history. No per-item cancel here:
+/// adding identical row actions would contradict the singular-action rule
+/// below and make a compact strip ambiguous. Pending-only work can cancel
+/// too; cancellation cleanup keeps cancel available until actually terminal.
 ///
 /// A SEPARATE strip from [_DownloadStatusBar] rather than a shared one,
 /// see [FilesSemantics.uploadStatus] for why: the two transfers run
@@ -11,8 +21,8 @@ part of '../file_browser_sheet.dart';
 ///
 /// Every [UploadOutcome] variant gets its OWN message here, including
 /// [UploadDestinationExists], which reads as something the user can act
-/// on (pick a different file, or rename what is already there) rather than
-/// a generic failure, matching the enum's own doc comment.
+/// on (try a different name after bounded search exhaustion) rather than
+/// a generic failure. Successful receipts use the service's actual name.
 class _UploadStatusBar extends StatelessWidget {
   const _UploadStatusBar({
     required this.state,
@@ -26,7 +36,7 @@ class _UploadStatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (state.status == FileUploadStatus.idle) return const SizedBox.shrink();
+    if (state.items.isEmpty) return const SizedBox.shrink();
 
     return Semantics(
       identifier: FilesSemantics.uploadStatus,
@@ -40,14 +50,47 @@ class _UploadStatusBar extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(child: _line()),
-            if (state.isRunning)
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (state.remainingCount > 0)
+                    _line(
+                      state.items.firstWhere(
+                        (item) => item.status == FileUploadStatus.uploading,
+                        orElse: () => state.items.firstWhere(
+                          (item) => item.status == FileUploadStatus.pending,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    '${state.doneCount} done · ${state.remainingCount} remaining',
+                    style: const TextStyle(color: _mutedText, fontSize: 12),
+                  ),
+                  if (state.doneCount > 0)
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 80),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final item in state.items)
+                              if (item.isTerminal) _line(item),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (state.remainingCount > 0)
               Semantics(
                 identifier: FilesSemantics.uploadCancelButton,
                 child: TextButton(
                   onPressed: onCancel,
                   style: TextButton.styleFrom(foregroundColor: _mutedText),
-                  child: const Text('Cancel'),
+                  child: const Text('Cancel all'),
                 ),
               )
             else
@@ -63,12 +106,16 @@ class _UploadStatusBar extends StatelessWidget {
     );
   }
 
-  Widget _line() => switch (state.status) {
-    FileUploadStatus.uploading => _UploadRunningLine(state: state),
+  Widget _line(FileUploadItem item) => switch (item.status) {
+    FileUploadStatus.uploading => _UploadRunningLine(state: item),
     FileUploadStatus.completed => _EndingLine(
       icon: Icons.check_circle_outline,
       color: _accent,
-      message: 'Uploaded ${state.name ?? 'the file'}.',
+      message: switch (item.outcome) {
+        UploadCompleted(:final name) when name != item.name =>
+          'Uploaded ${item.name} as $name.',
+        _ => 'Uploaded ${item.name}.',
+      },
     ),
     FileUploadStatus.cancelled => const _EndingLine(
       icon: Icons.block,
@@ -79,24 +126,26 @@ class _UploadStatusBar extends StatelessWidget {
       icon: Icons.warning_amber_outlined,
       color: _danger,
       message:
-          '${state.name ?? 'A file'} with that name already exists here. '
-          'Rename it on the host, or choose a different file.',
+          'Could not find a free name for ${item.name} after checking '
+          '100 names. Try a different name.',
     ),
     FileUploadStatus.failed => _EndingLine(
       icon: Icons.error_outline,
       color: _danger,
-      message: describeUploadFailure(state.failure),
+      message: describeUploadFailure(item.failure),
     ),
-    // Filtered out above; listed so a new status is a compile error here
-    // rather than a blank strip.
-    FileUploadStatus.idle => const SizedBox.shrink(),
+    FileUploadStatus.pending => _EndingLine(
+      icon: Icons.schedule,
+      color: _mutedText,
+      message: 'Waiting to upload ${item.name}.',
+    ),
   };
 }
 
 class _UploadRunningLine extends StatelessWidget {
   const _UploadRunningLine({required this.state});
 
-  final FileUploadState state;
+  final FileUploadItem state;
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +154,7 @@ class _UploadRunningLine extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          'Uploading ${state.name ?? ''} · ${state.percent}%',
+          'Uploading ${state.name} · ${state.percent}%',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: _primaryText, fontSize: 12),

@@ -252,6 +252,10 @@ class FilesSemantics {
   /// [TrustedHostsSemantics.confirmForgetButton]: only one delete dialog is
   /// ever open at a time.
   static const deleteConfirmButton = 'helm.files.delete_confirm_button';
+
+  static const uploadSourceDialog = 'helm.files.upload_source_dialog';
+  static const uploadDocumentsOption = 'helm.files.upload_documents_option';
+  static const uploadMediaOption = 'helm.files.upload_media_option';
 }
 
 /// Identifiers on `SessionHoldAction`.
