@@ -70,6 +70,85 @@ void main() {
     );
   });
 
+  group('UploadSourcePicker media', () {
+    const documents = [
+      PickedDocument(
+        uri: 'content://x/camera.jpg',
+        name: 'camera.jpg',
+        length: 2,
+      ),
+      PickedDocument(uri: 'content://x/clip.mp4', name: 'clip.mp4', length: 3),
+    ];
+
+    test(
+      'unsupported platform returns null without asking either picker',
+      () async {
+        final gateway = FakeDocumentTreeGateway(mediaPick: documents);
+        final picker = UploadSourcePicker(
+          gateway: gateway,
+          supportsPicking: false,
+        );
+
+        expect(await picker.pickMedia(), isNull);
+        expect(gateway.pickMediaCalls, 0);
+        expect(gateway.pickFileCalls, 0);
+      },
+    );
+
+    test('declining media returns the same null as unsupported', () async {
+      final gateway = FakeDocumentTreeGateway();
+      final picker = UploadSourcePicker(
+        gateway: gateway,
+        supportsPicking: true,
+      );
+
+      expect(await picker.pickMedia(), isNull);
+      expect(gateway.pickMediaCalls, 1);
+      expect(gateway.pickFileCalls, 0);
+    });
+
+    test(
+      'adapts every selected photo and video with its own byte stream',
+      () async {
+        final gateway = FakeDocumentTreeGateway(
+          mediaPick: documents,
+          fileContents: {
+            'content://x/camera.jpg': [1, 2],
+            'content://x/clip.mp4': [3, 4, 5],
+          },
+        );
+        final picker = UploadSourcePicker(
+          gateway: gateway,
+          supportsPicking: true,
+        );
+
+        final sources = (await picker.pickMedia())!;
+
+        expect(sources.map((source) => source.name), [
+          'camera.jpg',
+          'clip.mp4',
+        ]);
+        expect(await Future.wait(sources.map((source) => source.length())), [
+          2,
+          3,
+        ]);
+        expect(gateway.readUris, isEmpty);
+        expect(await sources[0].openRead().expand((chunk) => chunk).toList(), [
+          1,
+          2,
+        ]);
+        expect(await sources[1].openRead().expand((chunk) => chunk).toList(), [
+          3,
+          4,
+          5,
+        ]);
+        expect(gateway.readUris, documents.map((document) => document.uri));
+        expect(gateway.pickMediaCalls, 1);
+        expect(gateway.pickFileCalls, 0);
+      },
+    );
+  });
+
   group('UploadSourcePicker', () {
     test(
       'a platform that cannot pick returns null without asking the gateway',
