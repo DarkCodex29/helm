@@ -131,9 +131,19 @@ void main() {
     );
 
     testWidgets(
-      'closes the drawer once the pane is actually up — closing is the '
-      'success report, so it is the last thing that happens',
+      'reports WHERE the focus landed instead of closing as if this screen '
+      'had followed it',
       (tester) async {
+        // MEASURED on a real S22 against a live herdr 0.9.0: `agent focus`
+        // returns success and moves the pane on the DESKTOP, while the
+        // phone's view stays exactly where it was. One herdr session, two
+        // clients, independent views, and no way to aim the CLI at one.
+        //
+        // So a success here is a fact about the Mac, not about this
+        // screen. Closing the drawer used to BE the success report — the
+        // old name for this test said so — which made the app assert the
+        // one thing it had not done. Being told nothing happened is
+        // better than being shown a screen that implies it did.
         final session = await _pumpOpenDrawer(
           tester,
           agents: [_agent(AgentState.blocked, 'w1:p1')],
@@ -143,8 +153,13 @@ void main() {
         await tester.tap(find.byType(AgentRow));
         await tester.pumpAndSettle();
 
-        expect(find.byType(AgentRow), findsNothing);
-        expect(find.byType(ShortcutsDrawer), findsNothing);
+        expect(find.byType(ShortcutsDrawer), findsOneWidget);
+        expect(find.textContaining('on the Mac'), findsOneWidget);
+        expect(
+          find.textContaining('this screen'),
+          findsOneWidget,
+          reason: 'it must name what did NOT move, not only what did',
+        );
 
         await session.dispose();
       },
