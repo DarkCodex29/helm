@@ -10,10 +10,13 @@ import 'package:dartssh2/dartssh2.dart';
 /// it can build an [SftpClient]. [SftpFileReadHandle] adapts a real one in
 /// production.
 ///
-/// Deliberately NARROWER than [SftpFile]: this slice downloads, so the
-/// write half of that class — `write`, `writeBytes`, `setStat` — is not
-/// reachable from here. A future upload slice widens the seam rather than
-/// this one quietly carrying the capability in the meantime.
+/// Deliberately NARROWER than [SftpFile]: this interface still has no
+/// `write`, `writeBytes`, or `setStat` on an OPEN HANDLE. The management
+/// slice that added [SftpSession.mkdir], [SftpSession.rename] and
+/// [SftpSession.remove] widened the SESSION seam, not this one — those
+/// three operate on whole paths and never need an open file handle at all.
+/// Streaming bytes INTO an open handle is still a future upload slice's
+/// job, not something this one quietly started carrying.
 abstract interface class SftpReadHandle {
   /// The attributes of the OPEN HANDLE, which is what makes this method
   /// worth having beside [SftpSession.stat].
@@ -85,6 +88,42 @@ abstract interface class SftpSession {
   /// session ends.
   Future<SftpReadHandle> openRead(String path);
 
+  /// Creates a directory at [path].
+  ///
+  /// Throws `SSH_FX_FAILURE` — through an [SftpStatusError] — when
+  /// something already answers to [path]. Callers that need to tell
+  /// "already exists" apart from an unrelated refusal must `stat` first;
+  /// see [MkdirAlreadyExists] for why that check cannot be done from this
+  /// method's own throw.
+  Future<void> mkdir(String path);
+
+  /// Removes the FILE at [path].
+  ///
+  /// Fails against a directory — use [rmdir] for that. This split exists
+  /// in the wire protocol itself (`SSH_FXP_REMOVE` versus
+  /// `SSH_FXP_RMDIR`), not something this seam invented, which is exactly
+  /// why [SftpFileService.delete] has to know which kind of entry it was
+  /// asked to delete before it can choose a call.
+  Future<void> remove(String path);
+
+  /// Removes the EMPTY directory at [path].
+  ///
+  /// Fails when the directory holds anything besides itself and its
+  /// parent. Helm never recurses past this failure — see
+  /// [DeleteDirectoryNotEmpty] for why that refusal is a deliberate
+  /// product decision, not a gap.
+  Future<void> rmdir(String path);
+
+  /// Renames or moves the entry at [oldPath] to [newPath].
+  ///
+  /// Whether this overwrites an existing [newPath] is NOT settled by this
+  /// interface — it depends on whether the server advertises OpenSSH's
+  /// `posix-rename@openssh.com` extension, which [SftpClientSession]
+  /// cannot see from here and a fake cannot meaningfully fake. Callers
+  /// that must never overwrite — this app's only caller — `stat` the
+  /// destination themselves first; see [RenameDestinationExists].
+  Future<void> rename(String oldPath, String newPath);
+
   /// Ends the session and the SSH channel underneath it.
   Future<void> close();
 }
@@ -111,6 +150,19 @@ class SftpClientSession implements SftpSession {
   @override
   Future<SftpReadHandle> openRead(String path) async =>
       SftpFileReadHandle(await _client.open(path));
+
+  @override
+  Future<void> mkdir(String path) => _client.mkdir(path);
+
+  @override
+  Future<void> remove(String path) => _client.remove(path);
+
+  @override
+  Future<void> rmdir(String path) => _client.rmdir(path);
+
+  @override
+  Future<void> rename(String oldPath, String newPath) =>
+      _client.rename(oldPath, newPath);
 
   /// Closes the SFTP session AND its channel.
   ///
@@ -152,7 +204,8 @@ class SftpFileReadHandle implements SftpReadHandle {
   Stream<Uint8List> read({
     required int chunkSize,
     required int maxPendingRequests,
-  }) => _file.read(chunkSize: chunkSize, maxPendingRequests: maxPendingRequests);
+  }) =>
+      _file.read(chunkSize: chunkSize, maxPendingRequests: maxPendingRequests);
 
   @override
   Future<void> close() => _file.close();

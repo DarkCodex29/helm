@@ -15,22 +15,34 @@ import 'package:helm/features/files/data/sftp_session.dart';
 /// that "up" at the root re-lists nothing — as well as on what came back.
 class FakeSftpSession implements SftpSession {
   FakeSftpSession({
-    this.directories = const {},
-    this.stats = const {},
+    Map<String, List<SftpName>> directories = const {},
+    Map<String, SftpFileAttrs> stats = const {},
     this.listError,
     this.absoluteError,
     this.home = '/home/gian',
     this.deniedPaths = const {},
     this.files = const {},
     this.openError,
-  });
+    this.mkdirError,
+    this.removeError,
+    this.rmdirError,
+    this.renameError,
+  }) : _directories = Map.of(directories),
+       _stats = Map.of(stats);
 
-  /// Contents by absolute path. A path absent from this map answers
-  /// `SSH_FX_NO_SUCH_FILE`, exactly as a server would.
-  final Map<String, List<SftpName>> directories;
+  /// Contents by absolute path, MUTABLE. A path absent from this map
+  /// answers `SSH_FX_NO_SUCH_FILE`, exactly as a server would.
+  ///
+  /// Mutated by [mkdir], [remove], [rmdir] and [rename] so that a test can
+  /// assert the thing this whole slice exists to guarantee: that a
+  /// REFRESHED listing no longer shows what was just deleted, or shows it
+  /// under its new name. A fixed map, copied once at construction, could
+  /// never answer that question.
+  final Map<String, List<SftpName>> _directories;
 
-  /// Attributes by absolute path, for [stat].
-  final Map<String, SftpFileAttrs> stats;
+  /// Attributes by absolute path, for [stat]. Also mutable, for the same
+  /// reason as [_directories].
+  final Map<String, SftpFileAttrs> _stats;
 
   /// Thrown by every [listdir] call. For failing ONE path, use
   /// [deniedPaths] or simply leave it out of [directories].
@@ -41,7 +53,11 @@ class FakeSftpSession implements SftpSession {
   /// What [absolute] resolves to.
   final String home;
 
-  /// Paths that answer `SSH_FX_PERMISSION_DENIED`.
+  /// Paths that answer `SSH_FX_PERMISSION_DENIED`, shared across every
+  /// operation this fake supports — reading or writing. A real server
+  /// enforces permissions per-path regardless of which SFTP request asks,
+  /// so one set naming the forbidden paths is truer to the wire than a
+  /// separate list per method would be.
   final Set<String> deniedPaths;
 
   /// Readable file content by absolute path, for [openRead]. A path absent
@@ -53,9 +69,31 @@ class FakeSftpSession implements SftpSession {
   /// an SFTP status.
   final Object? openError;
 
+  /// Thrown by every [mkdir] call, for transport failures. A per-path
+  /// "already exists" refusal is deliberately NOT modelled here: that
+  /// outcome is decided by [SftpFileService] stat-ing the destination
+  /// before it ever calls this method — see [MkdirAlreadyExists].
+  final Object? mkdirError;
+
+  /// Thrown by every [remove] call, for transport failures.
+  final Object? removeError;
+
+  /// Thrown by every [rmdir] call, for transport failures. A "directory
+  /// not empty" refusal is likewise not modelled here: [SftpFileService]
+  /// decides that from a [listdir] of the target before ever calling
+  /// this method — see [DeleteDirectoryNotEmpty].
+  final Object? rmdirError;
+
+  /// Thrown by every [rename] call, for transport failures.
+  final Object? renameError;
+
   final listedPaths = <String>[];
   final statedPaths = <String>[];
   final openedPaths = <String>[];
+  final mkdirPaths = <String>[];
+  final removedPaths = <String>[];
+  final rmdirPaths = <String>[];
+  final renamedPaths = <(String, String)>[];
 
   /// Every handle [openRead] ever returned, so a test can assert each one
   /// was closed rather than only the last.
@@ -74,7 +112,7 @@ class FakeSftpSession implements SftpSession {
         'Permission denied',
       );
     }
-    final names = directories[path];
+    final names = _directories[path];
     if (names == null) {
       throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
     }
@@ -84,11 +122,15 @@ class FakeSftpSession implements SftpSession {
   @override
   Future<SftpFileAttrs> stat(String path, {bool followLink = true}) async {
     statedPaths.add(path);
-    final attrs = stats[path];
-    if (attrs == null) {
-      throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
+    final attrs = _stats[path];
+    if (attrs != null) return attrs;
+    // A path with no explicit attrs but a listable directory still exists
+    // — the common case for a destination check against a plain directory
+    // nobody bothered to also register in `stats`.
+    if (_directories.containsKey(path)) {
+      return SftpFileAttrs(mode: SftpFileMode.value(FakeSftpModes.directory));
     }
-    return attrs;
+    throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
   }
 
   @override
@@ -119,8 +161,109 @@ class FakeSftpSession implements SftpSession {
   }
 
   @override
+  Future<void> mkdir(String path) async {
+    mkdirPaths.add(path);
+    final error = mkdirError;
+    if (error != null) throw error;
+    if (deniedPaths.contains(path)) {
+      throw SftpStatusError(
+        SftpStatusCode.permissionDenied,
+        'Permission denied',
+      );
+    }
+    final (parent, name) = _split(path);
+    final siblings = List<SftpName>.of(_directories[parent] ?? const []);
+    siblings.add(fakeSftpName(name, mode: FakeSftpModes.directory));
+    _directories[parent] = siblings;
+    _directories.putIfAbsent(path, () => const []);
+  }
+
+  @override
+  Future<void> remove(String path) async {
+    removedPaths.add(path);
+    final error = removeError;
+    if (error != null) throw error;
+    if (deniedPaths.contains(path)) {
+      throw SftpStatusError(
+        SftpStatusCode.permissionDenied,
+        'Permission denied',
+      );
+    }
+    _removeFromParentListing(path);
+  }
+
+  @override
+  Future<void> rmdir(String path) async {
+    rmdirPaths.add(path);
+    final error = rmdirError;
+    if (error != null) throw error;
+    if (deniedPaths.contains(path)) {
+      throw SftpStatusError(
+        SftpStatusCode.permissionDenied,
+        'Permission denied',
+      );
+    }
+    _removeFromParentListing(path);
+    _directories.remove(path);
+    _stats.remove(path);
+  }
+
+  @override
+  Future<void> rename(String oldPath, String newPath) async {
+    renamedPaths.add((oldPath, newPath));
+    final error = renameError;
+    if (error != null) throw error;
+    if (deniedPaths.contains(oldPath)) {
+      throw SftpStatusError(
+        SftpStatusCode.permissionDenied,
+        'Permission denied',
+      );
+    }
+    final (oldParent, oldName) = _split(oldPath);
+    final (newParent, newName) = _split(newPath);
+    final siblings = List<SftpName>.of(_directories[oldParent] ?? const []);
+    final index = siblings.indexWhere((n) => n.filename == oldName);
+    if (index == -1) {
+      throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
+    }
+    final moved = siblings.removeAt(index);
+    _directories[oldParent] = siblings;
+
+    final destination = List<SftpName>.of(_directories[newParent] ?? const []);
+    destination.add(
+      SftpName(filename: newName, longname: moved.longname, attr: moved.attr),
+    );
+    _directories[newParent] = destination;
+
+    // If the moved entry was itself a directory with a listing of its own,
+    // that listing moves to the new path too — otherwise a rename of a
+    // directory would make its contents unreachable under both names.
+    final childListing = _directories.remove(oldPath);
+    if (childListing != null) _directories[newPath] = childListing;
+    final childStats = _stats.remove(oldPath);
+    if (childStats != null) _stats[newPath] = childStats;
+  }
+
+  @override
   Future<void> close() async {
     closed = true;
+  }
+
+  /// Removes the entry named by the last segment of [path] from its
+  /// parent's recorded listing, for [remove] and [rmdir] alike.
+  void _removeFromParentListing(String path) {
+    final (parent, name) = _split(path);
+    final siblings = List<SftpName>.of(_directories[parent] ?? const []);
+    siblings.removeWhere((n) => n.filename == name);
+    _directories[parent] = siblings;
+  }
+
+  /// Splits an absolute path into its parent and its final segment.
+  (String, String) _split(String path) {
+    final lastSeparator = path.lastIndexOf('/');
+    final parent = lastSeparator <= 0 ? '/' : path.substring(0, lastSeparator);
+    final name = path.substring(lastSeparator + 1);
+    return (parent, name);
   }
 }
 
@@ -198,13 +341,18 @@ class FakeSftpReadHandle implements SftpReadHandle {
     return controller.stream;
   }
 
-  Future<void> _pump(StreamController<Uint8List> controller, int chunkSize) async {
+  Future<void> _pump(
+    StreamController<Uint8List> controller,
+    int chunkSize,
+  ) async {
     var sent = 0;
     var chunks = 0;
 
     while (sent < file.bytes.length) {
       if (controller.isClosed) return;
-      if (file.chunkGap > Duration.zero) await Future<void>.delayed(file.chunkGap);
+      if (file.chunkGap > Duration.zero) {
+        await Future<void>.delayed(file.chunkGap);
+      }
       if (controller.isClosed) return;
 
       final stallAfter = file.stallAfterChunk;
