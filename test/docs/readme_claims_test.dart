@@ -1,8 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helm/features/files/data/sftp_session.dart';
+import 'package:helm/features/files/data/sftp_upload_service.dart';
+import 'package:helm/features/files/domain/upload_outcome.dart';
 import 'package:helm/features/terminal/presentation/widgets/terminal_keyboard.dart';
 import 'package:xterm/xterm.dart';
 
@@ -107,6 +113,87 @@ void main() {
     );
     expect(alternatives, budget - 1);
   });
+
+  test('README naming examples match real uploads on collisions', () async {
+    final examples = RegExp(r'`([^`]+)` → `([^`]+)`')
+        .allMatches(readme)
+        .where(
+          (match) =>
+              match.group(1)!.startsWith('foto') || match.group(1) == '.env',
+        );
+    expect(examples.length, 4);
+    for (final example in examples) {
+      final requested = '/uploads/${example.group(1)}';
+      final session = _NamingSession(occupied: {requested});
+      final outcome = await SftpUploadService.withOpener(
+        () async => session,
+      ).upload(_EmptySource(), requested);
+      expect(outcome, isA<UploadCompleted>());
+      expect((outcome as UploadCompleted).path, '/uploads/${example.group(2)}');
+    }
+  });
+
+  test('README shifted range exhausts exactly the documented budget', () async {
+    final first = capture(readme, r'alternativas van de `([^`]+)`');
+    final last = capture(readme, r'alternativas van de `[^`]+` a `([^`]+)`');
+    final session = _NamingSession(allOccupied: true);
+    final outcome = await SftpUploadService.withOpener(
+      () async => session,
+    ).upload(_EmptySource(), '/uploads/foto(3).jpg');
+    expect(outcome, isA<UploadDestinationExists>());
+    expect(
+      session.checked.length,
+      int.parse(capture(readme, r'límite de (\d+) candidatos')),
+    );
+    expect(session.checked.first, '/uploads/foto(3).jpg');
+    expect(session.checked[1], '/uploads/$first');
+    expect(session.checked.last, '/uploads/$last');
+    expect(session.openedWrite, isFalse);
+  });
+
+  test(
+    'README Firebase client configuration paths contain API identifiers',
+    () {
+      expect(readme, contains('`android/app/google-services.json`'));
+      expect(readme, contains('`lib/firebase_options.dart`'));
+      final config =
+          jsonDecode(read('android/app/google-services.json'))
+              as Map<String, dynamic>;
+      final clients = config['client'] as List<dynamic>;
+      // Assert only presence, never expose a key in a failure diagnostic.
+      final hasKey = clients.any(
+        (client) => (client['api_key'] as List<dynamic>).any(
+          (entry) =>
+              entry['current_key'] is String &&
+              (entry['current_key'] as String).isNotEmpty,
+        ),
+      );
+      expect(hasKey, isTrue);
+      final printsKey = clients.any(
+        (client) => (client['api_key'] as List<dynamic>).any(
+          (entry) =>
+              entry['current_key'] is String &&
+              (entry['current_key'] as String).isNotEmpty &&
+              readme.contains(entry['current_key'] as String),
+        ),
+      );
+      expect(printsKey, isFalse, reason: 'README must not print an API key');
+      expect(
+        RegExp(
+          r"apiKey:\s*'[^']+'",
+        ).hasMatch(codeOnly(read('lib/firebase_options.dart'))),
+        isTrue,
+      );
+      expect(readme, contains('no secretos'));
+      expect(readme, contains('restricciones de la clave API en Google Cloud'));
+      expect(readme, contains('reglas de seguridad de Firebase'));
+      expect(readme, contains('restringí tu propia clave'));
+      expect(
+        readme,
+        contains('no prueban que la clave de este proyecto esté restringida'),
+      );
+    },
+  );
 
   testWidgets('README advertised keyboard controls are rendered keys', (
     tester,
@@ -213,4 +300,54 @@ void main() {
       );
     },
   );
+}
+
+// The actual upload service chooses names; this fake only models occupancy.
+class _NamingSession implements SftpSession {
+  _NamingSession({this.occupied = const {}, this.allOccupied = false});
+
+  final Set<String> occupied;
+  final bool allOccupied;
+  final checked = <String>[];
+  bool openedWrite = false;
+
+  @override
+  Future<SftpFileAttrs> stat(String path, {bool followLink = true}) async {
+    checked.add(path);
+    if (allOccupied || occupied.contains(path)) return SftpFileAttrs();
+    throw SftpStatusError(SftpStatusCode.noSuchFile, 'Missing');
+  }
+
+  @override
+  Future<SftpWriteHandle> openWrite(String path) async {
+    openedWrite = true;
+    return _EmptyWriteHandle();
+  }
+
+  @override
+  Future<void> rename(String oldPath, String newPath) async {}
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError(
+    'Unexpected SFTP operation: ${invocation.memberName}',
+  );
+}
+
+class _EmptyWriteHandle implements SftpWriteHandle {
+  @override
+  Future<void> writeChunk(Uint8List chunk, {required int offset}) async {}
+
+  @override
+  Future<void> close() async {}
+}
+
+class _EmptySource implements UploadSource {
+  @override
+  Future<int> length() async => 0;
+
+  @override
+  Stream<List<int>> openRead() => const Stream<List<int>>.empty();
 }

@@ -41,8 +41,13 @@ para atenderlos desde cualquier lado.
   por archivo; los terminados incluyen fallidos y cancelados, no solo los exitosos
 - Cancelación de toda la cola desde una sola acción
 - Si el nombre ya existe, se busca uno libre (`foto.jpg` → `foto(1).jpg`) y se informa
-  el nombre con el que quedó guardado. La búsqueda tiene un límite de 100 candidatos
-  (el original y 99 alternativas); si se agotan, se rechaza la subida: elegí otro nombre
+  el nombre con el que quedó guardado. Si ya termina en un contador, lo continúa
+  (`foto(3).jpg` → `foto(4).jpg`), sin agregar otro ni volver al inicio.
+  Sin extensión, el contador va al final (`foto` → `foto(1)`); un punto inicial
+  forma parte del nombre, no de la extensión (`.env` → `.env(1)`).
+  La búsqueda tiene un límite de 100 candidatos (el original y 99 alternativas):
+  para `foto(3).jpg`, las alternativas van de `foto(4).jpg` a `foto(102).jpg`.
+  Cambia el rango, no la cantidad; si se agotan, se rechaza la subida: elegí otro nombre
 
 **La subida y el selector de galería son solo para Android.** Storage Access Framework
 no tiene contraparte en iOS; donde no se puede subir, la app no muestra el control.
@@ -186,6 +191,15 @@ android/app/src/main/kotlin/com/darkcodex/helm/
 Requiere provisionar FCM una vez y dejar el notifier corriendo en la Mac. El proyecto
 Firebase solo transporta el push: el contenido lo compone la Mac y la credencial de envío
 nunca sale de ella.
+
+Este repo es público: `android/app/google-services.json` y `lib/firebase_options.dart`
+contienen una clave de API de Google para el cliente Firebase. No es una filtración:
+estas claves son identificadores que viajan dentro de la app, no secretos; cualquiera
+con el APK puede obtenerlas. La protección depende de las **restricciones de la clave
+API en Google Cloud** y de las **reglas de seguridad de Firebase**, no de ocultarla.
+Si configurás tu propio proyecto Firebase, restringí tu propia clave y configurá esas
+reglas. Estos archivos no prueban que la clave de este proyecto esté restringida:
+no la tomes como modelo de configuración segura; comprobá las restricciones en Google Cloud.
 
 ### Firma de release (Android)
 
