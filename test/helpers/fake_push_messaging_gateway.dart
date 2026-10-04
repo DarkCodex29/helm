@@ -30,6 +30,22 @@ class FakePushMessagingGateway implements PushMessagingGateway {
   /// device where Firebase itself cannot start.
   Object? initializeError;
 
+  /// Set to make [tokenRefreshes], [foregroundMessages] and
+  /// [notificationTaps] throw WHEN TOUCHED, rather than return an empty
+  /// stream.
+  ///
+  /// This is the part a fake can get wrong in a way that hides the real
+  /// defect: `FirebasePushMessagingGateway`'s stream getters all read
+  /// `_messaging`, which re-resolves `FirebaseMessaging.instance` and
+  /// throws `[core/no-app]` on every call made after [initialize] failed —
+  /// not only the first. A fake whose getters quietly handed back the
+  /// broadcast controllers' streams regardless of [initializeError] would
+  /// pass against the broken `start()` that subscribes unconditionally,
+  /// because nothing in the fake would ever reach for `_messaging` and
+  /// throw. Setting this field is what lets a test tell a gateway that
+  /// failed to initialize apart from one that quietly keeps working.
+  Object? streamAccessError;
+
   var initializeCalls = 0;
   var requestPermissionCalls = 0;
   var launchMessageCalls = 0;
@@ -78,7 +94,10 @@ class FakePushMessagingGateway implements PushMessagingGateway {
   }
 
   @override
-  Stream<String> get tokenRefreshes => _refreshes.stream;
+  Stream<String> get tokenRefreshes {
+    if (streamAccessError != null) throw streamAccessError!;
+    return _refreshes.stream;
+  }
 
   @override
   Future<PushMessage?> launchMessage() async {
@@ -87,8 +106,14 @@ class FakePushMessagingGateway implements PushMessagingGateway {
   }
 
   @override
-  Stream<PushMessage> get foregroundMessages => _foreground.stream;
+  Stream<PushMessage> get foregroundMessages {
+    if (streamAccessError != null) throw streamAccessError!;
+    return _foreground.stream;
+  }
 
   @override
-  Stream<PushMessage> get notificationTaps => _taps.stream;
+  Stream<PushMessage> get notificationTaps {
+    if (streamAccessError != null) throw streamAccessError!;
+    return _taps.stream;
+  }
 }
