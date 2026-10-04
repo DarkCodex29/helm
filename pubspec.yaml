@@ -115,13 +115,19 @@ dev_dependencies:
 # three 1024px PNGs the app never opens.
 flutter_launcher_icons:
   android: true
-  # ios/Runner.xcodeproj has existed since March 2026 and the iOS target
-  # builds and installs on a physical device (089f30c). Still false
-  # because nobody has run the generator for iOS yet: flipping this to
-  # true without first adding the iOS icon assets would leave the app
-  # installing with Flutter's default white icon, which is worse than
-  # the generator simply not touching the iOS asset catalog at all.
-  ios: false
+  ios: true
+  # iOS icons MUST NOT carry an alpha channel: App Store Connect rejects
+  # them outright, and a transparent icon renders against whatever the
+  # springboard puts behind it rather than against the art's own ground.
+  # `assets/icon/helm_icon.png` DOES have one (verified: `sips -g hasAlpha`
+  # reports yes), so it has to be flattened on the way out.
+  remove_alpha_ios: true
+  # What it is flattened ONTO, and not left to the tool's white default.
+  # This is the same value as `adaptive_icon_background` below and the
+  # same as `AppTheme.background`, so the icon reads as one piece of art
+  # across both platforms instead of a dark glyph that sits on navy on
+  # Android and on white on iOS.
+  background_color_ios: "#0D1117"
   image_path: "assets/icon/helm_icon.png"
   # A flat colour rather than a background image: the layer is parallaxed
   # and zoomed by the launcher, and a colour cannot show a seam when it is.
