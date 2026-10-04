@@ -23,11 +23,13 @@ abstract interface class UploadSource {
 /// (`SftpFileWriter.abort()`) that this service deliberately does not
 /// drive; see [SftpWriteHandle] for why.
 class UploadCancellation {
-  var _cancelled = false;
+  final _requested = Completer<void>();
 
-  bool get isCancelled => _cancelled;
+  bool get isCancelled => _requested.isCompleted;
 
-  void cancel() => _cancelled = true;
+  void cancel() {
+    if (!isCancelled) _requested.complete();
+  }
 }
 
 /// Uploads one local file to the remote host over SFTP, and reports how
@@ -56,10 +58,9 @@ class SftpUploadService {
 
   final SftpSessionOpener _openSession;
 
-  /// How long ONE chunk may go unacknowledged before giving up. PER-CHUNK
-  /// rather than [SftpDownloadService]'s independent Timer: this service
-  /// always has exactly one `writeChunk` outstanding, so `.timeout()` on
-  /// that single await IS the watchdog.
+  /// How long ONE write chunk or naming stat may go unacknowledged before
+  /// giving up. Like the chunk watchdog, `.timeout()` bounds each naming
+  /// round trip independently, not the total duration of an active search.
   final Duration idleTimeout;
 
   static const _defaultIdleTimeout = Duration(seconds: 30);
@@ -75,10 +76,14 @@ class SftpUploadService {
   /// Uploads [source] to [destinationPath] and reports how it ended.
   ///
   /// NEVER THROWS, matching every other method in this feature.
-  /// [destinationPath] must not already exist — checked with a `stat`
-  /// BEFORE a single byte of [source] is read; see
-  /// [UploadDestinationExists] for why this cannot rely on the finalizing
-  /// rename failing instead.
+  /// A taken [destinationPath] gets a counter before its extension. Checks
+  /// at most 100 candidates before reading [source]; exhaustion returns
+  /// [UploadDestinationExists]. [UploadCompleted] reports the actual path.
+  ///
+  /// This preserves the existing pre-flight no-overwrite check, but is NOT
+  /// an atomic no-replace guarantee: OpenSSH rename can overwrite a racing
+  /// writer between the last stat and rename. The current session API has
+  /// no atomic no-replace primitive.
   ///
   /// [onProgress] receives WHOLE PERCENTAGES, only on CHANGE, matching
   /// [SftpDownloadService.download] so one progress UI drives both
@@ -105,6 +110,14 @@ class SftpUploadService {
         onProgress: onProgress,
         cancellation: cancellation,
       );
+    } catch (error, stackTrace) {
+      // Reaching this boundary is a bug being contained, not a normal ending.
+      _log.e(
+        'Unexpected upload failure for $destinationPath',
+        error,
+        stackTrace,
+      );
+      return UploadFailed(_classify(error), detail: _describe(error));
     } finally {
       try {
         await session.close();
@@ -125,9 +138,24 @@ class SftpUploadService {
   }) async {
     if (cancellation?.isCancelled ?? false) return const UploadCancelled();
 
-    if (await _exists(session, destinationPath)) {
-      return const UploadDestinationExists();
+    final requestedPath = destinationPath;
+    final ({String path, int index})? resolved;
+    try {
+      resolved = await _freePath(
+        session,
+        destinationPath,
+        cancellation: cancellation,
+      );
+    } on _NameSearchCancelled {
+      return const UploadCancelled();
+    } on TimeoutException {
+      return const UploadFailed(UploadFailure.stalled);
+    } catch (error) {
+      _log.w('Could not check the upload destination $destinationPath: $error');
+      return UploadFailed(_classify(error), detail: _describe(error));
     }
+    if (resolved == null) return const UploadDestinationExists();
+    destinationPath = resolved.path;
 
     final int length;
     try {
@@ -167,6 +195,9 @@ class SftpUploadService {
         result,
         partialPath: partialPath,
         destinationPath: destinationPath,
+        requestedPath: requestedPath,
+        candidateIndex: resolved.index,
+        cancellation: cancellation,
         length: length,
       );
     } finally {
@@ -185,6 +216,9 @@ class SftpUploadService {
     _PumpResult result, {
     required String partialPath,
     required String destinationPath,
+    required String requestedPath,
+    required int candidateIndex,
+    required UploadCancellation? cancellation,
     required int length,
   }) async {
     switch (result.status) {
@@ -222,9 +256,38 @@ class SftpUploadService {
     }
 
     try {
-      // Silent on every server, by design — see [UploadDestinationExists].
+      // Recheck the selected candidate: a writer may have taken it during
+      // streaming. Earlier occupied names need not be retried even if now
+      // free; we promise a free name, not the lowest available counter.
+      // Derive counters from the ORIGINAL request, never compound them.
+      final finalPath = await _freePath(
+        session,
+        requestedPath,
+        startIndex: candidateIndex,
+        cancellation: cancellation,
+      );
+      if (finalPath == null) {
+        await _discard(session, partialPath);
+        return const UploadDestinationExists();
+      }
+      destinationPath = finalPath.path;
+      // Cancellation is a request: up to rename dispatch, discard even a
+      // fully streamed partial rather than publish something cancelled.
+      // Once rename is dispatched, completion may win; do not remove the
+      // published destination. No await separates this check and dispatch.
+      if (cancellation?.isCancelled ?? false) {
+        await _discard(session, partialPath);
+        return const UploadCancelled();
+      }
+      // The stat/rename race remains; see upload's no-replace caveat.
       await session.rename(partialPath, destinationPath);
       return UploadCompleted(destinationPath, bytes: result.written);
+    } on _NameSearchCancelled {
+      await _discard(session, partialPath);
+      return const UploadCancelled();
+    } on TimeoutException {
+      await _discard(session, partialPath);
+      return const UploadFailed(UploadFailure.stalled);
     } catch (error) {
       _log.w('Could not place the upload at $destinationPath: $error');
       await _discard(session, partialPath);
@@ -301,15 +364,75 @@ class SftpUploadService {
     }
   }
 
-  /// Whether [path] already answers to something on the server. Same
-  /// reasoning as [SftpFileService._exists]: `SSH_FX_NO_SUCH_FILE` means
-  /// "free", anything else means "cannot tell" and answers `false`.
+  /// Original plus 99 alternatives: caps network round trips in crowded
+  /// directories while accommodating ordinary gallery-name collisions.
+  static const _nameCandidates = 100;
+
+  Future<({String path, int index})?> _freePath(
+    SftpSession session,
+    String requestedPath, {
+    int startIndex = 0,
+    UploadCancellation? cancellation,
+  }) async {
+    final slash = requestedPath.lastIndexOf('/');
+    final name = requestedPath.substring(slash + 1);
+    final dot = name.lastIndexOf('.');
+    // A leading dot is part of a dotfile's stem, not an extension.
+    final split = dot > 0 ? dot : name.length;
+    final stem =
+        requestedPath.substring(0, slash + 1) + name.substring(0, split);
+    final extension = name.substring(split);
+    // A stem that ALREADY ends in a counter continues it instead of
+    // growing a second one: `foto(3).jpg` becomes `foto(4).jpg`, not
+    // `foto(3)(1).jpg`. Without this, a name this service produced
+    // earlier gained another counter on every later collision.
+    //
+    // It continues UPWARD rather than restarting at (1), because
+    // restarting would walk backwards into `foto(1).jpg` and `foto(2).jpg`
+    // — names that may well belong to unrelated files.
+    //
+    // The bound still admits [_nameCandidates] attempts; it is the range
+    // that shifts, not its size.
+    final counted = RegExp(r'^(.*)\((\d+)\)$').firstMatch(stem);
+    final base = counted?.group(1) ?? stem;
+    final offset = int.tryParse(counted?.group(2) ?? '') ?? 0;
+    for (var i = startIndex; i < _nameCandidates; i++) {
+      if (cancellation?.isCancelled ?? false) {
+        throw const _NameSearchCancelled();
+      }
+      final candidate = i == 0
+          ? requestedPath
+          : '$base(${offset + i})$extension';
+      // Bound each stat independently, including cancellation races.
+      final stat = _exists(session, candidate).timeout(idleTimeout);
+      final exists = cancellation == null
+          ? await stat
+          : await Future.any([
+              stat,
+              cancellation._requested.future.then<bool>((_) {
+                throw const _NameSearchCancelled();
+              }),
+            ]);
+      if (cancellation?.isCancelled ?? false) {
+        throw const _NameSearchCancelled();
+      }
+      if (!exists) return (path: candidate, index: i);
+    }
+    return null;
+  }
+
+  /// Only `SSH_FX_NO_SUCH_FILE` proves a name is free. Unknown results
+  /// propagate: fail the upload rather than skip candidates on a possibly
+  /// broken channel or publish at an unchecked, potentially occupied name.
   Future<bool> _exists(SftpSession session, String path) async {
     try {
       await session.stat(path);
       return true;
-    } catch (_) {
-      return false;
+    } catch (error) {
+      if (error is SftpStatusError && error.code == SftpStatusCode.noSuchFile) {
+        return false;
+      }
+      rethrow;
     }
   }
 
@@ -332,6 +455,10 @@ class SftpUploadService {
     if (error is SftpError) return error.message;
     return error.toString();
   }
+}
+
+class _NameSearchCancelled implements Exception {
+  const _NameSearchCancelled();
 }
 
 enum _PumpStatus { completed, cancelled, stalled, sourceFailed, remoteFailed }

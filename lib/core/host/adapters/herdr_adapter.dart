@@ -38,14 +38,8 @@ class HerdrAdapter
     this._runner, {
     String absPath = 'herdr',
     String? sessionRef,
-    String? mobileConfigPath,
   }) : _absPath = absPath,
-       _sessionRef = sessionRef,
-       // Normalized once, here, so [attachCommand] can never emit an
-       // empty assignment however it is constructed.
-       _mobileConfigPath = (mobileConfigPath?.isEmpty ?? true)
-           ? null
-           : mobileConfigPath;
+       _sessionRef = sessionRef;
 
   final HostCommandRunner _runner;
 
@@ -74,24 +68,6 @@ class HerdrAdapter
   /// Null keeps the pre-existing command byte-for-byte, so a caller that
   /// never had a session to scope to is no worse off than before.
   final String? _sessionRef;
-
-  /// Host-side path to a herdr config that suppresses herdr's in-terminal
-  /// chrome, or null when the host reported none.
-  ///
-  /// herdr draws a collapsed sidebar and a tab row inside the terminal. On
-  /// a desktop that is orientation; on a phone it is roughly a sixth of
-  /// the viewport restating what helm's own drawer already shows. herdr
-  /// reads `HERDR_CONFIG_PATH` to override its config file, so a per-host
-  /// mobile config is how that chrome is dropped for one client without
-  /// touching the desktop's own `config.toml`.
-  ///
-  /// Populated only from a probe that positively found the file — see
-  /// [herdrMobileConfigPath], which owns the discipline that keeps a
-  /// truncated or empty report from ever reaching here.
-  ///
-  /// Null keeps the pre-existing command byte-for-byte, exactly as
-  /// [_sessionRef] does.
-  final String? _mobileConfigPath;
 
   @override
   MultiplexerId get id => MultiplexerId.herdr;
@@ -224,12 +200,7 @@ class HerdrAdapter
   /// before the feature existed — the prefix is purely additive.
   @override
   String attachCommand(String sessionName) {
-    final attach = '$_absPath session attach ${shellQuote(sessionName)}';
-    final configPath = _mobileConfigPath;
-    if (configPath == null) return attach;
-    // shellQuote, not interpolation: the path comes from the host's own
-    // $HOME and is not helm's to trust. See AD-3.
-    return 'env HERDR_CONFIG_PATH=${shellQuote(configPath)} $attach';
+    return '$_absPath session attach ${shellQuote(sessionName)}';
   }
 
   @override

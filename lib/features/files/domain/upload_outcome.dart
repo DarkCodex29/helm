@@ -14,7 +14,24 @@ sealed class UploadOutcome {
 final class UploadCompleted extends UploadOutcome {
   const UploadCompleted(this.path, {required this.bytes});
 
+  /// The actual destination, which may differ from the requested path.
+  ///
+  /// MUST NAME A FILE, never end in a separator. Unguarded, deliberately:
+  /// an adversarial review noted that a trailing slash makes [name] the
+  /// empty string, which a receipt renders as "Uploaded ." The only guard
+  /// that catches it is an assert, and `path.endsWith('/')` is not a
+  /// constant expression — adding it would mean dropping `const` from
+  /// this constructor and churning every call site in production and
+  /// tests, to defend against a path this feature cannot produce. The
+  /// service only ever builds this from a rename it just performed.
+  ///
+  /// So the contract lives here instead. A caller that violates it gets an
+  /// empty name rather than an exception.
   final String path;
+
+  /// The basename actually created on the host, not the requested name.
+  String get name => path.substring(path.lastIndexOf('/') + 1);
+
   final int bytes;
 }
 
@@ -24,13 +41,13 @@ final class UploadCancelled extends UploadOutcome {
   const UploadCancelled();
 }
 
-/// Something already answers to the destination path. Reached by a `stat`
-/// BEFORE a single local byte is read — same ordering
-/// [RenameDestinationExists] documents, for the identical reason: the
-/// finalizing rename on success overwrites SILENTLY on OpenSSH (measured
-/// 2026-10-03 against `sftp -D /usr/libexec/sftp-server`), which is what
-/// makes that rename atomic. Relying on the rename to fail instead would
-/// destroy a file the user never named.
+/// All 100 candidate destination names were taken. Checked before reading
+/// local bytes and again before finalizing; exhaustion at the latter check
+/// discards the partial upload.
+///
+/// OpenSSH rename overwrites silently, so the service must check names
+/// rather than rely on rename failing. These checks are not atomic with
+/// rename: see [SftpUploadService.upload] for the remaining race.
 final class UploadDestinationExists extends UploadOutcome {
   const UploadDestinationExists();
 }
@@ -59,7 +76,7 @@ enum UploadFailure {
   /// The transport died: channel closed, client aborted, socket gone.
   disconnected,
 
-  /// The server stopped acknowledging writes for
+  /// The server stopped acknowledging writes or naming stats for
   /// [SftpUploadService.idleTimeout]. NOT "took too long" — a transfer
   /// still being acknowledged never reaches this.
   stalled,

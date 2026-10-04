@@ -38,10 +38,23 @@ import 'package:helm/features/session_hold/presentation/session_hold_provider.da
 /// possible outcome is an error is worse than not offering it. There is
 /// nothing to hold open until there is something open.
 class SessionHoldAction extends ConsumerWidget {
-  const SessionHoldAction({super.key, required this.session});
+  const SessionHoldAction({
+    super.key,
+    required this.session,
+    this.asMenuItem = false,
+  });
 
   /// The session this action would hold, or null when no tab is active.
   final HoldableSession? session;
+
+  /// Render as a named row for an overflow menu instead of a bare icon.
+  ///
+  /// Only the PRESENTATION differs. The state, the "is THIS session the
+  /// held one" question, and the tooltip text are shared, because a menu
+  /// copy that recomputed them would be a second place to get them wrong.
+  /// In a menu the tooltip becomes the visible label — it already names
+  /// the session in every state, which is exactly what a menu row needs.
+  final bool asMenuItem;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -72,22 +85,42 @@ class SessionHoldAction extends ConsumerWidget {
             final isThisHeld =
                 hold.isHolding && hold.sessionName == held.sessionName;
 
+            final label = _tooltip(hold, isThisHeld, held.sessionName);
+            final color = isThisHeld
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.7);
+            final icon = Icon(
+              isThisHeld ? Icons.push_pin : Icons.push_pin_outlined,
+              color: color,
+            );
+            void toggle() =>
+                isThisHeld ? controller.release() : controller.hold(held);
+
             return Semantics(
               identifier: SessionHoldSemantics.toggle,
-              child: IconButton(
-                icon: Icon(
-                  isThisHeld ? Icons.push_pin : Icons.push_pin_outlined,
-                  color: isThisHeld
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(
-                          context,
-                        ).colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
-                tooltip: _tooltip(hold, isThisHeld, held.sessionName),
-                onPressed: () => isThisHeld
-                    ? controller.release()
-                    : controller.hold(held),
-              ),
+              child: asMenuItem
+                  ? ListTile(
+                      dense: true,
+                      // Zero, matching the menu's other rows. A ListTile's
+                      // default inset plus the PopupMenuItem's own left
+                      // the icon 12px left of its neighbours — measured,
+                      // 112 against 124. Rows in a column that do not
+                      // share a left edge read as broken before they read
+                      // as anything else, so the padding belongs in ONE
+                      // place: the menu item, for every row alike.
+                      contentPadding: EdgeInsets.zero,
+                      leading: icon,
+                      title: Text(label),
+                      // Pops the menu first so the row does not act while
+                      // its own overlay is still up.
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        toggle();
+                      },
+                    )
+                  : IconButton(icon: icon, tooltip: label, onPressed: toggle),
             );
           },
         );

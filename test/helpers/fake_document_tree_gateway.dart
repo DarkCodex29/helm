@@ -19,6 +19,7 @@ class FakeDocumentTreeGateway implements DocumentTreeGateway {
     this.folderPresent = true,
     this.copyError,
     this.filePick,
+    this.mediaPick,
     this.fileContents = const {},
     this.readChunkSize,
     this.readChunkGap = Duration.zero,
@@ -30,6 +31,16 @@ class FakeDocumentTreeGateway implements DocumentTreeGateway {
   /// What [pickFile] returns. Null models the user declining an upload
   /// pick, exactly as [picks] models declining a folder pick.
   PickedDocument? filePick;
+
+  /// Scripted media selection; null models cancellation.
+  List<PickedDocument>? mediaPick;
+  var pickMediaCalls = 0;
+
+  @override
+  Future<List<PickedDocument>?> pickMedia() async {
+    pickMediaCalls++;
+    return mediaPick;
+  }
 
   /// Bytes [readFile] streams back, keyed by [PickedDocument.uri]. A URI
   /// absent here answers with an error, mirroring [FakeSftpSession.files]

@@ -60,6 +60,9 @@ class AppConstants {
   /// the OS holds for this package, so it is a preference rather than a
   /// credential.
   static const String downloadDestinationKey = 'helm_download_destination';
+
+  /// Device-local keyboard ergonomics; never exported with connection profiles.
+  static const String keyboardGeometryKey = 'helm_keyboard_geometry';
   static const String sessionDirtyKey = 'helm_session_dirty';
   static const String sessionSnapshotKey = 'helm_session_snapshot';
 

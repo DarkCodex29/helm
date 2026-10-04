@@ -1,11 +1,269 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/theme/app_theme.dart';
+import 'package:helm/core/testing/semantic_ids.dart';
+import 'package:helm/features/terminal/data/keyboard_geometry_store.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:xterm/xterm.dart';
+
+/// 7 top-bar widths * 48dp + 16dp padding + 6 gaps * 3dp = 370dp.
+/// Each top-bar recognizer is also 48dp tall: genuine 48x48 targets.
+/// The strip grows 4dp; the scrollable panel minimum remains 144dp.
+/// Letters retain their 44dp HEIGHT clamp. Eleven 44dp-wide letters would
+/// need 522dp (11*44 + 8 + 10*3); an unclamped proportional height of 44
+/// would need 458.87dp (11*44/1.15 + 8 + 10*3). Both forbid the primary
+/// 384..412dp phone use case. Narrow letters and gap-sharing were knowingly
+/// accepted below; resizing must protect the targets we can actually afford.
+const keyboardMinimumWidth = 7 * 48.0 + 16 + 6 * 3;
+// Bound expansion to a useful keyboard, not a screen-sized input surface.
+const keyboardMaximumWidth = 600.0;
+
+/// The shortest panel that can still show EVERY row at the 44dp floor.
+///
+/// 48 for the move handle, 48 for the footer, 100 of grid chrome, and
+/// four rows at the floor. Derived the same way [keyboardMinimumWidth] is
+/// derived from the seven top-bar keys, and for the same reason: the
+/// minimum was a flat 144, far below what the grid needs, so a user could
+/// shrink the panel into a state that CROPS rows permanently and no
+/// amount of scaling could recover. Measured on a real S22 as "no es
+/// responsive, recorta".
+///
+/// Below this the grid scrolls, which is now the exceptional path — a
+/// viewport too short to hold the floor at all — rather than the ordinary
+/// one.
+const keyboardMinimumHeight = 48.0 + 48.0 + 100.0 + 4 * 44.0;
+
+class FloatingKeyboardPanel extends ConsumerStatefulWidget {
+  const FloatingKeyboardPanel({
+    super.key,
+    required this.viewport,
+    required this.terminal,
+  });
+  final Size viewport;
+  final Terminal terminal;
+  @override
+  ConsumerState<FloatingKeyboardPanel> createState() =>
+      _FloatingKeyboardPanelState();
+}
+
+class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
+  String? _limit;
+
+  /// The viewport the current [_limit] was measured against.
+  ///
+  /// "Minimum size" and "Maximum size" describe a clamp, and rotating or
+  /// resizing the window MOVES that clamp — so the message outlived the
+  /// fact it reported, telling the user they were at a limit they no
+  /// longer were. Reported as cosmetic by an adversarial review; see
+  /// odd/reviews/floating-keyboard.md.
+  Size? _limitViewport;
+
+  @override
+  Widget build(BuildContext context) {
+    final geometry = ref.watch(keyboardProvider.select((s) => s.geometry));
+    final notifier = ref.read(keyboardProvider.notifier);
+    if (geometry == null || widget.viewport != _limitViewport) {
+      _limit = null;
+    }
+    // Home's AppBar and fixed safe-area FAB shelf already consume vertical
+    // insets. Only the lateral safe insets remain inside this body's viewport.
+    final padding = MediaQuery.paddingOf(context);
+    final available = math.max(0.0, widget.viewport.width - padding.horizontal);
+    final maxWidth = math.min(keyboardMaximumWidth, available);
+    final minWidth = math.min(keyboardMinimumWidth, maxWidth);
+    final maxHeight = math.min(480.0, widget.viewport.height);
+    final minHeight = math.min(keyboardMinimumHeight, maxHeight);
+    if (maxWidth <= 0 || maxHeight < 96) return const SizedBox.shrink();
+    final width = (geometry?.width ?? 384.0).clamp(minWidth, maxWidth);
+    final height = (geometry?.height ?? 368.0).clamp(minHeight, maxHeight);
+    final travelX = available - width;
+    final travelY = widget.viewport.height - height;
+    final left = padding.left + (geometry?.x ?? .5) * travelX;
+    final top = geometry == null
+        ? math.max(0.0, travelY - 12)
+        : geometry.y * travelY;
+
+    void update(Offset delta, bool resize) {
+      // Derived from the LIVE geometry, not from the values this build
+      // captured. Two `onPanUpdate` callbacks can arrive between frames
+      // under event batching, and both would otherwise start from the same
+      // build-time snapshot: the second would overwrite the first instead
+      // of accumulating it, so a +10 then +10 drag moved the panel 10
+      // rather than 20 and the panel lagged the finger. Reading the
+      // notifier here costs one synchronous state read per callback and
+      // mirrors the derivation above exactly.
+      final live = ref.read(keyboardProvider).geometry;
+      final liveW = (live?.width ?? 384.0).clamp(minWidth, maxWidth);
+      final liveH = (live?.height ?? 368.0).clamp(minHeight, maxHeight);
+      final liveTravelY = widget.viewport.height - liveH;
+      var w = liveW;
+      var h = liveH;
+      var x = (live?.x ?? .5) * (available - liveW);
+      var y = live == null
+          ? math.max(0.0, liveTravelY - 12)
+          : live.y * liveTravelY;
+      String? limit;
+      if (resize) {
+        final proposedW = liveW + delta.dx;
+        final proposedH = liveH + delta.dy;
+        // Permit expansion toward the edge by moving the panel inward.
+        w = proposedW.clamp(minWidth, maxWidth);
+        h = proposedH.clamp(minHeight, maxHeight);
+        if (proposedW < minWidth || proposedH < minHeight) {
+          limit = 'Minimum size';
+        }
+        if (proposedW > maxWidth || proposedH > maxHeight) {
+          limit = 'Maximum size';
+        }
+      } else {
+        x += delta.dx;
+        y += delta.dy;
+      }
+      x = x.clamp(0.0, available - w);
+      y = y.clamp(0.0, widget.viewport.height - h);
+      notifier.setGeometry(
+        KeyboardGeometry(
+          available == w ? .5 : x / (available - w),
+          widget.viewport.height == h ? 1 : y / (widget.viewport.height - h),
+          w,
+          h,
+        ),
+      );
+      setState(() {
+        _limit = limit;
+        _limitViewport = widget.viewport;
+      });
+    }
+
+    Widget grip(String label, String id, IconData icon, bool resize) =>
+        Semantics(
+          identifier: id,
+          label: label,
+          child: Tooltip(
+            message: label,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanUpdate: (details) => update(details.delta, resize),
+              onPanEnd: (_) => unawaited(notifier.saveGeometry()),
+              onPanCancel: () => unawaited(notifier.saveGeometry()),
+              child: SizedBox(
+                height: 48,
+                width: resize ? 48 : double.infinity,
+                child: Icon(icon, color: AppTheme.onSurfaceMuted),
+              ),
+            ),
+          ),
+        );
+
+    Widget keys = RepaintBoundary(
+      child: TerminalKeyboard(terminal: widget.terminal),
+    );
+    if (available < keyboardMinimumWidth) {
+      // Exceptional split-window path, NOT ordinary phone widths. Keep the
+      // paid-for grid intact rather than scaling keys; horizontal scroll is
+      // never introduced at >=370dp, including the 384dp regression viewport.
+      keys = SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(width: keyboardMinimumWidth, child: keys),
+      );
+    }
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          top: top,
+          width: width,
+          height: height,
+          child: Material(
+            key: const ValueKey('keyboard-panel'),
+            elevation: 8,
+            color: _bgColor,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                // Separate chrome: a key's touch-down can never begin a panel drag.
+                SizedBox(
+                  height: 48,
+                  child: grip(
+                    'Move keyboard',
+                    KeyboardLayoutSemantics.move,
+                    Icons.drag_handle,
+                    false,
+                  ),
+                ),
+                // BOUNDED height, deliberately. This used to be
+                // `SingleChildScrollView(child: keys)`, which hands its
+                // child INFINITE height — so the grid could never learn
+                // how tall the panel was, kept its keys at full size when
+                // the panel shrank, and scrolled the overflow out of
+                // sight. Measured on a real S22: shrinking the panel
+                // cropped rows instead of scaling them.
+                //
+                // The grid decides for itself whether it must scroll, and
+                // only once the 44dp floor no longer fits.
+                Expanded(child: keys),
+                SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      // HIDE lives here, not on the floating button.
+                      //
+                      // The FAB floats over the terminal now, so while the
+                      // panel is up the two collide — and what the FAB
+                      // lands on is the resize grip, the one affordance a
+                      // user needs to recover a badly sized panel. Putting
+                      // the control that dismisses the panel ON the panel
+                      // removes the collision instead of arranging around
+                      // it, and the FAB goes back to meaning one thing:
+                      // bring the keyboard back.
+                      Semantics(
+                        identifier: KeyboardLayoutSemantics.hide,
+                        child: IconButton(
+                          tooltip: 'Hide keyboard',
+                          icon: const Icon(Icons.keyboard_hide, size: 20),
+                          color: AppTheme.onSurfaceMuted,
+                          onPressed: notifier.toggleVisibility,
+                        ),
+                      ),
+                      Expanded(
+                        child: Semantics(
+                          identifier: KeyboardLayoutSemantics.limit,
+                          liveRegion: true,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            color: _limit == null
+                                ? _bgColor
+                                : AppTheme.surfaceVariant,
+                            child: Text(
+                              _limit ?? 'Drag corner to resize',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      grip(
+                        'Resize keyboard',
+                        KeyboardLayoutSemantics.resize,
+                        Icons.open_in_full,
+                        true,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 const _bgColor = AppTheme.surface;
 const _keyColor = AppTheme.surfaceVariant;
@@ -38,7 +296,6 @@ const _actionKeyTextColor = AppTheme.onSurfaceMuted;
 /// Matched to the platform's own text-editing feel rather than invented:
 /// slow enough that an ordinary tap never repeats, fast enough that
 /// holding backspace clears a long path without becoming a race.
-const _kRepeatDelay = Duration(milliseconds: 400);
 const _kRepeatInterval = Duration(milliseconds: 55);
 
 /// Vertical slop added to a key's TOUCH area without changing its painted
@@ -67,17 +324,44 @@ class TerminalKeyboard extends ConsumerWidget {
         const horizontalPadding = 4.0;
         const keyGap = 3.0;
         const maxKeys = 11;
+        // Both layers lay out four rows of keys under the top bar.
+        const letterRows = 4;
         final keyWidth =
             (w - horizontalPadding * 2 - keyGap * (maxKeys - 1)) / maxKeys;
-        // Was `keyWidth * 1.15`, which tied the one axis with room to
-        // spare to the one that has none: an 11-column row fixes the
-        // width at ~31.5dp, and deriving the height from it inherited
-        // that ceiling for no reason. Height is now driven toward the
-        // 48dp touch minimum and only falls back to the ratio on a
-        // display wide enough to beat it.
-        final keyHeight = (keyWidth * 1.15).clamp(44.0, 56.0);
 
-        return Container(
+        // Height comes from the HEIGHT, which sounds obvious and was not
+        // the case: it was `keyWidth * 1.15`, so the one axis with room
+        // to spare inherited the ceiling of the one that has none, and
+        // the panel's own height was never consulted at all.
+        //
+        // Everything above and below the four letter rows, MEASURED
+        // rather than added up from the source. Reading the widgets gives
+        // 74 (top bar 5+48+5, letter padding 3+4, three 3dp gaps) and the
+        // truth is 100: at a 272dp grid with 49.5dp keys the column
+        // overflowed by exactly 26, so 26dp lives somewhere the arithmetic
+        // does not show. A number derived from reading would have been
+        // wrong in the direction that clips keys.
+        //
+        // If that chrome ever changes this is wrong again, which is why a
+        // test pins the minimum panel height against an overflow rather
+        // than trusting the constant.
+        const chrome = 100.0;
+        final room = constraints.maxHeight;
+        final keyHeight = room.isFinite
+            ? ((room - chrome) / letterRows).clamp(44.0, 56.0)
+            // Unbounded only outside the panel — a test pumping this
+            // widget on its own. Keep the old rule there rather than
+            // dividing by infinity.
+            : (keyWidth * 1.15).clamp(44.0, 56.0);
+
+        // Scroll ONLY when even the floor does not fit. That is the last
+        // resort, not the default: a scrollable key grid is what let a
+        // drag over a key emit that key, so it must cover as few states
+        // as possible.
+        final needed = chrome + keyHeight * letterRows;
+        final mustScroll = room.isFinite && needed > room;
+
+        final grid = Container(
           color: _bgColor,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -111,6 +395,7 @@ class TerminalKeyboard extends ConsumerWidget {
             ],
           ),
         );
+        return mustScroll ? SingleChildScrollView(child: grid) : grid;
       },
     );
   }
@@ -177,7 +462,7 @@ class _TopBar extends ConsumerWidget {
                   active: state.ctrlHeld,
                   onTap: notifier.toggleCtrl,
                   width: double.infinity,
-                  height: 44,
+                  height: 48,
                 ),
               ),
               const SizedBox(width: 3),
@@ -650,37 +935,36 @@ class _KeyButton extends StatefulWidget {
 
 class _KeyButtonState extends State<_KeyButton> {
   bool _pressed = false;
-  Timer? _repeatDelay;
   Timer? _repeatTicker;
 
   @override
   void dispose() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
     super.dispose();
   }
 
   void _onDown() {
     setState(() => _pressed = true);
-    // Fires on TOUCH DOWN, not on tap-up. A glass key has no travel to
-    // feel, so the confirmation has to arrive at the moment the finger
-    // lands — waiting for the release puts it after the user has already
-    // started doubting.
+    // Feedback stays early; bytes wait for arena ownership. Taps cost
+    // release latency, but a scroll must never send destructive input.
     HapticFeedback.selectionClick();
-    widget.onTap();
+  }
 
-    if (!widget.repeats) return;
-    _repeatDelay = Timer(_kRepeatDelay, () {
-      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) {
-        widget.onTap();
-      });
-    });
+  void _repeat() {
+    // Long press has WON the arena (500ms). Subsequent motion cannot
+    // become a scroll, unlike a timer started from onTapDown.
+    setState(() => _pressed = true);
+    widget.onTap();
+    _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
+  }
+
+  void _tap() {
+    _release();
+    widget.onTap();
   }
 
   void _release() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
-    _repeatDelay = null;
     _repeatTicker = null;
     if (mounted && _pressed) setState(() => _pressed = false);
   }
@@ -698,30 +982,37 @@ class _KeyButtonState extends State<_KeyButton> {
       onTapDown: (_) => _onDown(),
       onTapUp: (_) => _release(),
       onTapCancel: _release,
+      onTap: _tap,
+      onLongPressStart: widget.repeats ? (_) => _repeat() : null,
+      onLongPressEnd: widget.repeats ? (_) => _release() : null,
+      onLongPressCancel: widget.repeats ? _release : null,
       child: Padding(
         // Claims the gap on both sides without moving anything: the
         // Row already reserves it, and negative margin keeps the painted
         // key exactly where it was.
         padding: const EdgeInsets.symmetric(vertical: _kTouchSlop),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 60),
-          curve: Curves.easeOut,
+        child: SizedBox(
           width: widget.width == double.infinity ? null : widget.width,
           height: widget.height,
-          decoration: BoxDecoration(
-            color: _pressed ? _keyActiveColor : resting,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(
-              color: _pressed ? _keyActiveColor : _borderColor,
+          // Tight geometry changes immediately; only the key fill animates.
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 60),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: _pressed ? _keyActiveColor : resting,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: _pressed ? _keyActiveColor : _borderColor,
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            widget.label,
-            style: TextStyle(
-              color: _pressed ? _keyActiveTextColor : restingText,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
+            alignment: Alignment.center,
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: _pressed ? _keyActiveTextColor : restingText,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ),
@@ -760,50 +1051,50 @@ class _StickyKey extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+      child: SizedBox(
         width: width,
-        // Matches the 44 the other top-bar keys now use; CTRL sitting a
-        // whole 8dp shorter than its neighbours was the one place the
-        // strip visibly failed to line up.
         height: height ?? 44,
-        constraints: width == null
-            ? const BoxConstraints(minWidth: 44, maxWidth: 60)
-            : null,
-        padding: width == null
-            ? const EdgeInsets.symmetric(horizontal: 10)
-            : null,
-        decoration: BoxDecoration(
-          color: active
-              ? _keyActiveColor
-              : (tone == _KeyTone.letter ? _keyColor : _actionKeyColor),
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(
-            color: active ? _keyActiveColor : _borderColor,
-            width: active ? 1.5 : 1,
-          ),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: _keyActiveColor.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    spreadRadius: 0,
-                  ),
-                ]
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          // Explicit height keeps CTRL aligned with the command strip.
+          constraints: width == null
+              ? const BoxConstraints(minWidth: 44, maxWidth: 60)
               : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
+          padding: width == null
+              ? const EdgeInsets.symmetric(horizontal: 10)
+              : null,
+          decoration: BoxDecoration(
             color: active
-                ? _keyActiveTextColor
-                : (tone == _KeyTone.letter
-                      ? _keyTextColor
-                      : _actionKeyTextColor),
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
+                ? _keyActiveColor
+                : (tone == _KeyTone.letter ? _keyColor : _actionKeyColor),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+              color: active ? _keyActiveColor : _borderColor,
+              width: active ? 1.5 : 1,
+            ),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: _keyActiveColor.withValues(alpha: 0.4),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active
+                  ? _keyActiveTextColor
+                  : (tone == _KeyTone.letter
+                        ? _keyTextColor
+                        : _actionKeyTextColor),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
           ),
         ),
       ),
@@ -832,12 +1123,10 @@ class _TopBarKey extends StatefulWidget {
 
 class _TopBarKeyState extends State<_TopBarKey> {
   bool _pressed = false;
-  Timer? _repeatDelay;
   Timer? _repeatTicker;
 
   @override
   void dispose() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
     super.dispose();
   }
@@ -845,17 +1134,22 @@ class _TopBarKeyState extends State<_TopBarKey> {
   void _onDown() {
     setState(() => _pressed = true);
     HapticFeedback.selectionClick();
+  }
+
+  void _repeat() {
+    // Only emit after the long-press recognizer owns the arena.
+    setState(() => _pressed = true);
     widget.onTap();
-    if (!widget.repeats) return;
-    _repeatDelay = Timer(_kRepeatDelay, () {
-      _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
-    });
+    _repeatTicker = Timer.periodic(_kRepeatInterval, (_) => widget.onTap());
+  }
+
+  void _tap() {
+    _release();
+    widget.onTap();
   }
 
   void _release() {
-    _repeatDelay?.cancel();
     _repeatTicker?.cancel();
-    _repeatDelay = null;
     _repeatTicker = null;
     if (mounted && _pressed) setState(() => _pressed = false);
   }
@@ -867,13 +1161,15 @@ class _TopBarKeyState extends State<_TopBarKey> {
       onTapDown: (_) => _onDown(),
       onTapUp: (_) => _release(),
       onTapCancel: _release,
+      onTap: _tap,
+      onLongPressStart: widget.repeats ? (_) => _repeat() : null,
+      onLongPressEnd: widget.repeats ? (_) => _release() : null,
+      onLongPressCancel: widget.repeats ? _release : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 60),
         curve: Curves.easeOut,
-        // 36dp was under every touch-target floor there is. These keys
-        // sit in a scrolling strip, so height is the one dimension
-        // nothing else competes for.
-        height: 44,
+        // Both axes meet the strip's 48dp target floor at 370dp width.
+        height: 48,
         constraints: const BoxConstraints(minWidth: 44),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(

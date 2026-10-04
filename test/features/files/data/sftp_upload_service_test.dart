@@ -3,11 +3,9 @@
 // The assertion this file exists for is the mirror image of the download
 // test's: a CANCELLED upload and a COMPLETED one must never be reported as
 // the same thing, and — the half of this that is specific to uploading —
-// an existing destination must be refused before a single local byte is
-// read, because the finalizing rename this service performs on success
-// overwrites SILENTLY on OpenSSH (measured 2026-10-03 against
-// `sftp -D /usr/libexec/sftp-server`). Relying on that rename to fail
-// instead of checking first would destroy a file the user never named.
+// occupied names must be skipped before a single local byte is read.
+// The finalizing rename overwrites SILENTLY on OpenSSH, so a collision
+// must be resolved by checking names, not by relying on rename to fail.
 import 'dart:async';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -70,6 +68,17 @@ List<List<int>> _chunked(List<int> bytes, int count) {
     for (var start = 0; start < bytes.length; start += size)
       bytes.sublist(start, (start + size).clamp(0, bytes.length)),
   ];
+}
+
+class _ScriptedStatSession extends FakeSftpSession {
+  Future<SftpFileAttrs> Function(String path, int call)? onStat;
+  var statCalls = 0;
+
+  @override
+  Future<SftpFileAttrs> stat(String path, {bool followLink = true}) {
+    final call = ++statCalls;
+    return onStat?.call(path, call) ?? super.stat(path, followLink: followLink);
+  }
 }
 
 void main() {
@@ -169,30 +178,411 @@ void main() {
     });
   });
 
+  group('stat certainty', () {
+    test('explicit no-such-file permits the original fresh name', () async {
+      final session = _ScriptedStatSession();
+      session.onStat = (_, _) async {
+        throw SftpStatusError(SftpStatusCode.noSuchFile, 'No such file');
+      };
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/fresh.txt',
+      );
+      expect((outcome as UploadCompleted).path, '/fresh.txt');
+      expect(session.statCalls, 2);
+      expect(session.writtenBytes['/fresh.txt'], [1, 2]);
+      expect(session.openedWritePaths, ['/fresh.txt.helmpart']);
+      expect(session.renamedPaths, [('/fresh.txt.helmpart', '/fresh.txt')]);
+    });
+
+    for (final entry in <String, (Object, UploadFailure)>{
+      'permission denied': (
+        SftpStatusError(SftpStatusCode.permissionDenied, 'Permission denied'),
+        UploadFailure.permissionDenied,
+      ),
+      'transient non-status error': (
+        StateError('channel interrupted'),
+        UploadFailure.disconnected,
+      ),
+      'server failure': (
+        SftpStatusError(SftpStatusCode.failure, 'Server failure'),
+        UploadFailure.unknown,
+      ),
+    }.entries) {
+      for (final finalPhase in [false, true]) {
+        test(
+          '${entry.key} at ${finalPhase ? 'final' : 'preflight'} stat fails closed',
+          () async {
+            final session = _ScriptedStatSession();
+            final originalBytes = [9, 8];
+            session.writtenBytes['/occupied.txt'] = originalBytes;
+            session.onStat = (_, call) async {
+              if (!finalPhase || call == 2) throw entry.value.$1;
+              throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+            };
+            var sourceWasRead = false;
+            final outcome = await serviceFor(session).upload(
+              _FakeUploadSourceSpy([
+                [1, 2],
+              ], onRead: () => sourceWasRead = true),
+              '/occupied.txt',
+            );
+            expect(outcome, isA<UploadFailed>());
+            expect((outcome as UploadFailed).reason, entry.value.$2);
+            final error = entry.value.$1;
+            expect(
+              outcome.detail,
+              error is SftpError ? error.message : error.toString(),
+            );
+            expect(session.statCalls, finalPhase ? 2 : 1);
+            expect(sourceWasRead, finalPhase);
+            expect(session.renamedPaths, isEmpty);
+            expect(session.writtenBytes, {'/occupied.txt': originalBytes});
+            expect(
+              session.openedWritePaths,
+              finalPhase ? ['/occupied.txt.helmpart'] : isEmpty,
+            );
+            expect(
+              session.removedPaths,
+              finalPhase ? ['/occupied.txt.helmpart'] : isEmpty,
+            );
+            expect(session.closed, isTrue);
+            if (finalPhase) {
+              expect(session.openedWriteHandles.single.closed, isTrue);
+            }
+          },
+        );
+      }
+    }
+  });
+
+  group('interruptible name resolution', () {
+    test(
+      'cancellation during final stat discards the complete partial',
+      () async {
+        final cancellation = UploadCancellation();
+        final session = _ScriptedStatSession();
+        session.onStat = (path, call) async {
+          if (call == 2) cancellation.cancel();
+          throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+        };
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.renamedPaths, isEmpty);
+        expect(session.removedPaths, ['/foto.jpg.helmpart']);
+        expect(session.writtenBytes, isEmpty);
+        expect(session.closed, isTrue);
+        expect(session.openedWriteHandles.single.closed, isTrue);
+      },
+    );
+
+    test('cancellation interrupts an outstanding preflight stat', () async {
+      final cancellation = UploadCancellation();
+      final entered = Completer<void>();
+      final pending = Completer<SftpFileAttrs>();
+      final session = _ScriptedStatSession();
+      session.onStat = (_, _) {
+        entered.complete();
+        return pending.future;
+      };
+      final upload = serviceFor(session).upload(
+        _FakeUploadSource([
+          [1],
+        ]),
+        '/foto.jpg',
+        cancellation: cancellation,
+      );
+      await entered.future;
+      cancellation.cancel();
+      // Test guard is longer than the service's short cancellation response,
+      // but much shorter than its default 30-second idle watchdog.
+      final outcome = await upload.timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () => const UploadFailed(UploadFailure.unknown),
+      );
+      pending.complete(SftpFileAttrs());
+      expect(outcome, isA<UploadCancelled>());
+      expect(session.statCalls, 1);
+      expect(session.openedWritePaths, isEmpty);
+      expect(session.closed, isTrue);
+    });
+
+    test(
+      'cancellation interrupts a hung final stat and removes the partial',
+      () async {
+        final cancellation = UploadCancellation();
+        final entered = Completer<void>();
+        final pending = Completer<SftpFileAttrs>();
+        final session = _ScriptedStatSession();
+        session.onStat = (_, call) async {
+          if (call == 2) {
+            entered.complete();
+            return pending.future;
+          }
+          throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+        };
+        final upload = serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        await entered.future;
+        cancellation.cancel();
+        final outcome = await upload.timeout(
+          const Duration(milliseconds: 200),
+          onTimeout: () => const UploadFailed(UploadFailure.unknown),
+        );
+        pending.complete(SftpFileAttrs());
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.renamedPaths, isEmpty);
+        expect(session.removedPaths, ['/foto.jpg.helmpart']);
+        expect(session.writtenBytes, isEmpty);
+        expect(session.closed, isTrue);
+      },
+    );
+
+    test(
+      'cancellation on an occupied candidate stops before the next stat',
+      () async {
+        final cancellation = UploadCancellation();
+        final session = _ScriptedStatSession();
+        session.onStat = (_, _) async {
+          cancellation.cancel();
+          return SftpFileAttrs();
+        };
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          cancellation: cancellation,
+        );
+        expect(outcome, isA<UploadCancelled>());
+        expect(session.statCalls, 1);
+        expect(session.openedWritePaths, isEmpty);
+      },
+    );
+
+    for (final finalPhase in [false, true]) {
+      test(
+        'hung ${finalPhase ? 'final' : 'preflight'} stat is bounded',
+        () async {
+          final session = _ScriptedStatSession();
+          final pending = Completer<SftpFileAttrs>();
+          session.onStat = (_, call) async {
+            if (!finalPhase || call == 2) return pending.future;
+            throw SftpStatusError(SftpStatusCode.noSuchFile, 'free');
+          };
+          final outcome =
+              await serviceFor(
+                    session,
+                    idleTimeout: const Duration(milliseconds: 10),
+                  )
+                  .upload(
+                    _FakeUploadSource([
+                      [1],
+                    ]),
+                    '/foto.jpg',
+                  )
+                  .timeout(
+                    const Duration(milliseconds: 200),
+                    onTimeout: () => const UploadFailed(UploadFailure.unknown),
+                  );
+          pending.complete(SftpFileAttrs());
+          expect(outcome, isA<UploadFailed>());
+          expect((outcome as UploadFailed).reason, UploadFailure.stalled);
+          expect(session.renamedPaths, isEmpty);
+          expect(
+            session.removedPaths,
+            finalPhase ? ['/foto.jpg.helmpart'] : isEmpty,
+          );
+          expect(session.closed, isTrue);
+        },
+      );
+    }
+
+    test(
+      'final search rechecks selected candidate without replaying collisions',
+      () async {
+        final session = FakeSftpSession(
+          stats: {
+            '/foto.jpg': SftpFileAttrs(),
+            '/foto(1).jpg': SftpFileAttrs(),
+          },
+        );
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1],
+          ]),
+          '/foto.jpg',
+          onProgress: (_) => session.mkdir('/foto(2).jpg'),
+        );
+        expect((outcome as UploadCompleted).path, '/foto(3).jpg');
+        expect(session.statedPaths, [
+          '/foto.jpg',
+          '/foto(1).jpg',
+          '/foto(2).jpg',
+          '/foto(2).jpg',
+          '/foto(3).jpg',
+        ]);
+      },
+    );
+  });
+
   group('the destination guard', () {
-    test('refuses when the destination already exists', () async {
+    test(
+      'reports the actual basename without changing constructor callers',
+      () {
+        const completed = UploadCompleted('/home/foto(1).jpg', bytes: 2);
+        expect(completed.name, 'foto(1).jpg');
+      },
+    );
+
+    test('rechecks after streaming and skips a racing destination', () async {
+      final session = FakeSftpSession();
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/home/foto.jpg',
+        onProgress: (_) => session.mkdir('/home/foto.jpg'),
+      );
+      expect(outcome, isA<UploadCompleted>());
+      expect((outcome as UploadCompleted).path, '/home/foto(1).jpg');
+      expect(session.renamedPaths.single.$2, outcome.path);
+    });
+
+    test('accepts the last candidate within the bound', () async {
       final session = FakeSftpSession(
         stats: {
-          '/home/gian/report.docx': SftpFileAttrs(
-            mode: SftpFileMode.value(FakeSftpModes.file),
-          ),
+          for (var i = 0; i < 99; i++)
+            '/report${i == 0 ? '' : '($i)'}.jpg': SftpFileAttrs(),
         },
+      );
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1],
+        ]),
+        '/report.jpg',
+      );
+      expect((outcome as UploadCompleted).path, '/report(99).jpg');
+    });
+    test(
+      'resolves collisions before the extension without overwriting',
+      () async {
+        final session = FakeSftpSession(
+          stats: {
+            '/home/gian/report.docx': SftpFileAttrs(
+              mode: SftpFileMode.value(FakeSftpModes.file),
+            ),
+          },
+        );
+
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource(_chunked(_bytes(100), 2)),
+          '/home/gian/report.docx',
+        );
+
+        expect(outcome, isA<UploadCompleted>());
+        final completed = outcome as UploadCompleted;
+        expect(completed.path, '/home/gian/report(1).docx');
+        expect(completed.name, 'report(1).docx');
+        expect(session.renamedPaths.single.$2, completed.path);
+        expect(session.statedPaths, contains('/home/gian/report(1).docx'));
+      },
+    );
+
+    for (final entry in {
+      'foto.jpg': 'foto(2).jpg',
+      'README': 'README(2)',
+      '.bashrc': '.bashrc(2)',
+      'archive.tar.gz': 'archive.tar(2).gz',
+    }.entries) {
+      test('skips multiple collisions for ${entry.key}', () async {
+        final first = entry.value.replaceFirst('(2)', '(1)');
+        final session = FakeSftpSession(
+          stats: {
+            '/dir.with.dot/${entry.key}': SftpFileAttrs(),
+            '/dir.with.dot/$first': SftpFileAttrs(),
+          },
+        );
+        final outcome = await serviceFor(session).upload(
+          _FakeUploadSource([
+            [1, 2],
+          ]),
+          '/dir.with.dot/${entry.key}',
+        );
+        expect(outcome, isA<UploadCompleted>());
+        expect(
+          (outcome as UploadCompleted).path,
+          '/dir.with.dot/${entry.value}',
+        );
+        expect(session.writtenBytes[outcome.path], [1, 2]);
+        expect(
+          session.openedWritePaths.single,
+          '${outcome.path}${SftpUploadService.partialSuffix}',
+        );
+      });
+    }
+
+    test('continues an existing counter instead of compounding one', () async {
+      // `foto(3).jpg` used to become `foto(3)(1).jpg`: the whole requested
+      // name was treated as the stem, so a name the service itself had
+      // produced earlier grew a second counter every round. Reported as
+      // cosmetic by an adversarial review — no data loss, just names that
+      // get uglier the more often a file is re-uploaded.
+      //
+      // Counting CONTINUES from the number already there rather than
+      // restarting at (1), because restarting would walk backwards into
+      // names that may belong to unrelated files.
+      final session = FakeSftpSession(
+        stats: {'/home/gian/foto(3).jpg': SftpFileAttrs()},
       );
 
       final outcome = await serviceFor(session).upload(
-        _FakeUploadSource(_chunked(_bytes(100), 2)),
-        '/home/gian/report.docx',
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/home/gian/foto(3).jpg',
       );
 
-      expect(outcome, isA<UploadDestinationExists>());
+      expect(outcome, isA<UploadCompleted>());
+      expect((outcome as UploadCompleted).path, '/home/gian/foto(4).jpg');
+      expect(outcome.name, 'foto(4).jpg');
+    });
+
+    test('a plain name still starts its counter at one', () async {
+      // Guards the fix above against shifting the ordinary case: a name
+      // with no counter must still yield (1), not (0) or (2).
+      final session = FakeSftpSession(
+        stats: {'/home/gian/foto.jpg': SftpFileAttrs()},
+      );
+
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/home/gian/foto.jpg',
+      );
+
+      expect((outcome as UploadCompleted).path, '/home/gian/foto(1).jpg');
     });
 
     test('never reads the source or opens anything, when refused', () async {
       final session = FakeSftpSession(
         stats: {
-          '/home/gian/report.docx': SftpFileAttrs(
-            mode: SftpFileMode.value(FakeSftpModes.file),
-          ),
+          for (var i = 0; i < 100; i++)
+            '/home/gian/report${i == 0 ? '' : '($i)'}.docx': SftpFileAttrs(),
         },
       );
       var sourceWasRead = false;
@@ -201,8 +591,12 @@ void main() {
         onRead: () => sourceWasRead = true,
       );
 
-      await serviceFor(session).upload(source, '/home/gian/report.docx');
+      final outcome = await serviceFor(
+        session,
+      ).upload(source, '/home/gian/report.docx');
 
+      expect(outcome, isA<UploadDestinationExists>());
+      expect(session.statedPaths.length, 100);
       expect(sourceWasRead, isFalse);
       expect(session.openedWritePaths, isEmpty);
       expect(session.closed, isTrue);
@@ -428,6 +822,36 @@ void main() {
   });
 
   group('failures', () {
+    test('contains an unexpected session throw from progress', () async {
+      final session = _ScriptedStatSession();
+      session.onStat = (path, _) {
+        if (path == '/progress-probe') {
+          throw SftpStatusError(
+            SftpStatusCode.permissionDenied,
+            'Unexpected progress refusal',
+          );
+        }
+        return Future.error(SftpStatusError(SftpStatusCode.noSuchFile, 'free'));
+      };
+
+      final outcome = await serviceFor(session).upload(
+        _FakeUploadSource([
+          [1, 2],
+        ]),
+        '/fresh.txt',
+        // This callback's synchronous throw is outside the pump's normal
+        // write/source failure handlers, and must be contained by upload.
+        onProgress: (_) => session.stat('/progress-probe'),
+      );
+
+      expect(outcome, isA<UploadFailed>());
+      expect((outcome as UploadFailed).reason, UploadFailure.permissionDenied);
+      expect(outcome.detail, 'Unexpected progress refusal');
+      expect(session.renamedPaths, isEmpty);
+      expect(session.closed, isTrue);
+      expect(session.openedWriteHandles.single.closed, isTrue);
+    });
+
     test('a session that cannot be opened reports disconnected', () async {
       final service = SftpUploadService.withOpener(
         () async => throw SftpAbortError('SFTP channel closed'),

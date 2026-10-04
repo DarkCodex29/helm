@@ -76,6 +76,15 @@ class FileBrowserNotifier extends Notifier<FileBrowserState> {
 
   SftpFileService? _service;
 
+  /// Which load is the current one.
+  ///
+  /// Incremented by every [_load] and by [reset], so a reply can be told
+  /// apart from a NEWER REQUEST FOR THE SAME PATH. Comparing paths alone
+  /// cannot do that, and two refreshes of one directory is the ordinary
+  /// case rather than a corner: each completing upload starts one without
+  /// waiting for the last.
+  var _generation = 0;
+
   /// Points the browser at [service] and loads its first directory.
   ///
   /// [startingDirectory] wins when given. Otherwise the server is asked
@@ -191,6 +200,9 @@ class FileBrowserNotifier extends Notifier<FileBrowserState> {
   /// outlives this sheet.
   void reset() {
     _service = null;
+    // Supersede anything in flight: a load from the session being torn
+    // down must not paint into the next one.
+    _generation++;
     state = const FileBrowserState();
   }
 
@@ -199,6 +211,8 @@ class FileBrowserNotifier extends Notifier<FileBrowserState> {
   Future<void> _load(String path) async {
     final service = _service;
     if (service == null) return;
+
+    final generation = ++_generation;
 
     // The attempted path is published BEFORE the request, so the header
     // names where the user is going while it loads, and so a failure still
@@ -212,9 +226,17 @@ class FileBrowserNotifier extends Notifier<FileBrowserState> {
 
     final listing = await service.list(path);
 
-    // A newer navigation may have landed while this one was in flight; its
+    // A newer load may have landed while this one was in flight; its
     // result is the current one, and this reply is stale.
-    if (state.path != path) return;
+    //
+    // Compared by GENERATION, not by path. Path alone let two refreshes of
+    // the SAME directory both pass, so whichever finished last won rather
+    // than whichever was newest: upload A and B into one directory, A's
+    // listing stalls resolving a symlink, B's returns with both files,
+    // then A's lands and drops B. Two success receipts and a file the user
+    // cannot see. `service.list` resolves symlinks asynchronously per
+    // entry with no serialization, so the overtaking is real.
+    if (generation != _generation) return;
 
     switch (listing) {
       case RemoteListingLoaded(:final entries):

@@ -869,4 +869,126 @@ void main() {
       expect(find.textContaining('not empty'), findsOneWidget);
     });
   });
+
+  group('a dialog that outlives its sheet', () {
+    // `_upload` already guards every await with `!mounted`; create, rename
+    // and delete did not, and the inconsistency inside one file was the
+    // bug. An adversarial review found it — see
+    // odd/reviews/queue-and-strip.md.
+    //
+    // The dialogs belong to the ROOT navigator, so removing the sheet
+    // underneath leaves the confirmation on screen with a dead State
+    // behind it. Delete then reached `setState` on a disposed State, and
+    // create/rename still performed the remote write through the captured
+    // notifier — `_report`'s mounted check only suppressed the later
+    // toast, never the operation itself.
+    //
+    // The harness keeps the MaterialApp — and therefore the dialog's
+    // route — stable while swapping the sheet out beneath it, because an
+    // ordinary back press dismisses the dialog first and so cannot reach
+    // this at all.
+    Future<void> pumpRemovableSheet(
+      WidgetTester tester,
+      SftpFileService service,
+      void Function(VoidCallback remove) expose,
+    ) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      var present = true;
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  expose(() => setState(() => present = false));
+                  return present
+                      ? FileBrowserSheet(
+                          service: service,
+                          downloadService: _downloadService(),
+                          uploadService: _uploadService(),
+                        )
+                      : const SizedBox.shrink();
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('confirming a delete writes nothing and does not throw', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      late VoidCallback removeSheet;
+      await pumpRemovableSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+        (remove) => removeSheet = remove,
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+
+      // The sheet goes; the confirmation stays.
+      removeSheet();
+      await tester.pumpAndSettle();
+
+      await tester.tap(_byId(FilesSemantics.deleteConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(session.removedPaths, isEmpty);
+    });
+
+    testWidgets('confirming a rename writes nothing and does not throw', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      late VoidCallback removeSheet;
+      await pumpRemovableSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+        (remove) => removeSheet = remove,
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.renameMenuItem));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'renamed.md');
+
+      removeSheet();
+      await tester.pumpAndSettle();
+
+      await tester.tap(_byId(FilesSemantics.renameConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(session.renamedPaths, isEmpty);
+    });
+  });
 }

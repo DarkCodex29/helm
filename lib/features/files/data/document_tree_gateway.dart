@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
+import 'package:saf_util/saf_util_platform_interface.dart' show SafDocumentFile;
 
 /// A file this app placed in the user's folder.
 class PublishedFile {
@@ -81,6 +83,9 @@ abstract interface class DocumentTreeGateway {
 
   /// Asks the user to choose a local file, returning null if they decline.
   Future<PickedDocument?> pickFile();
+
+  /// Asks for multiple photos and videos, returning null if declined.
+  Future<List<PickedDocument>?> pickMedia();
 
   /// Streams the bytes of [PickedDocument.uri].
   ///
@@ -199,6 +204,37 @@ class SafDocumentTreeGateway implements DocumentTreeGateway {
       name: picked.name,
       length: picked.length,
     );
+  }
+
+  /// Uses the native Photo Picker, with a document-picker fallback.
+  ///
+  /// Catch rather than probe the SDK version: saf_util owns the capability
+  /// decision and reports NOT_SUPPORTED below API 33. A separate SDK check
+  /// would duplicate that source of truth (and need another platform seam).
+  /// Only that code falls back; activity, concurrency, and other failures
+  /// remain errors. Both paths select multiple images AND videos, without
+  /// changing the unfiltered single-document [pickFile] operation.
+  @override
+  Future<List<PickedDocument>?> pickMedia() async {
+    List<SafDocumentFile>? picked;
+    try {
+      picked = await _util.pickMedia(multiple: true, mode: 'all');
+    } on PlatformException catch (error) {
+      if (error.code != 'NOT_SUPPORTED') rethrow;
+      picked = await _util.pickFiles(
+        multiple: true,
+        mimeTypes: ['image/*', 'video/*'],
+      );
+    }
+    return picked
+        ?.map(
+          (file) => PickedDocument(
+            uri: file.uri,
+            name: file.name,
+            length: file.length,
+          ),
+        )
+        .toList();
   }
 
   @override

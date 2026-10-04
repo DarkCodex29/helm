@@ -249,21 +249,27 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
     );
   }
 
-  /// Raises [agent]'s pane on the host and, only if that worked, closes
-  /// the drawer.
+  /// Raises [agent]'s pane ON THE HOST and reports where that landed.
   ///
-  /// The ORDER is the contract. Closing the drawer is the success report —
-  /// it tells the user they are now looking at that agent — so it happens
-  /// after the host has confirmed, never before and never regardless. A
-  /// focus that did not happen leaves the drawer open and says why, which
-  /// is the same refusal to assert an unmeasured fact that [AgentSnapshot]
-  /// enforces for what this section READS.
+  /// This used to close the drawer on success, and the closing WAS the
+  /// success report: it told the user they were now looking at that
+  /// agent. Measured on a real device against a live herdr 0.9.0, that
+  /// was the one thing it had not done — `agent focus` returns success
+  /// and moves the pane on the desktop while this client's view stays
+  /// exactly where it was. One herdr session serves two clients with
+  /// independent views, and the CLI has no way to aim at one of them.
+  ///
+  /// So success here is a fact about the Mac, not about this screen, and
+  /// it now says so in both halves: what moved, and what did not. The
+  /// drawer stays open because closing it is a claim, and this is not the
+  /// claim we can make. Being told the focus landed elsewhere is better
+  /// than being shown a screen that implies it landed here.
+  ///
+  /// A focus that did not happen at all still leaves the drawer open and
+  /// says why — the same refusal to assert an unmeasured fact that
+  /// [AgentSnapshot] enforces for what this section READS.
   Future<void> _focusAgent(TerminalSession session, AgentStatus agent) async {
     if (_focusing) return;
-    // Captured before the await: this State can be torn down while the
-    // host round-trip is in flight, and reading `context` afterwards is
-    // reading a BuildContext across an async gap.
-    final navigator = Navigator.of(context);
     setState(() {
       _focusing = true;
       _focusError = null;
@@ -275,7 +281,11 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
     setState(() {
       _focusing = false;
       _focusError = switch (result) {
-        MuxAgentFocused() => null,
+        // Not an error, and deliberately in the same slot as one: it is
+        // the same thing the user needs after tapping — one line saying
+        // what the tap actually did.
+        MuxAgentFocused() =>
+          'Focused ${agent.label} on the Mac — this screen does not follow',
         // A fact about helm's own screen: the row the user just tapped
         // describes something that is no longer there.
         MuxAgentFocusTargetNotFound() =>
@@ -285,17 +295,24 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
         MuxAgentFocusFailed() => 'Could not focus ${agent.label} on the host',
       };
     });
-
-    if (result is MuxAgentFocused) navigator.pop();
   }
 
   /// Switches the host to [tab] and, only if that worked, closes the
   /// drawer.
   ///
-  /// The ORDER is the same contract [_focusAgent] states: closing the
-  /// drawer is the success report — it tells the user they are now looking
-  /// at that project — so it happens after the host has confirmed, never
-  /// before and never regardless.
+  /// Closing the drawer IS the success report here, and unlike
+  /// [_focusAgent] that report is true. Do not "fix" this for consistency
+  /// with its neighbour: the asymmetry is measured, not an oversight.
+  ///
+  /// Tested on a real device against a live herdr 0.9.0, before and after,
+  /// with screenshots: focusing another tab from the host moved THIS
+  /// client's view too — the phone went from one tab to the other on its
+  /// own. Focusing an agent, on the same session and the same pair of
+  /// clients, did not. A session's current tab is shared; where focus sits
+  /// inside a client's view is not.
+  ///
+  /// So the order still matters: closing happens after the host confirms,
+  /// never before and never regardless.
   Future<void> _focusTab(MuxTab tab) async {
     if (_tabFocusing) return;
     final session = ref.read(tabsProvider).activeTab?.session;

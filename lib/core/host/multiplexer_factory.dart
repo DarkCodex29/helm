@@ -25,9 +25,6 @@ import 'package:helm/core/host/multiplexer_selection.dart';
 /// agent queries — see [HerdrAdapter]'s `_sessionRef`, which documents the
 /// measured reason a bare `agent list` answers for the WRONG session. tmux
 /// and zellij take their session per-command, so they ignore it.
-/// [herdrMobileConfigPath] is the host-side herdr config that suppresses
-/// herdr's in-terminal chrome, when the probe positively found one. Only
-/// herdr reads `HERDR_CONFIG_PATH`, so — like [sessionRef] — it is handed
 /// to that adapter alone rather than to every adapter that happens to be
 /// built here. Null, the default, leaves every attach command byte-for-
 /// byte what it was before this existed.
@@ -35,7 +32,6 @@ MultiplexerAdapter buildMultiplexerAdapter(
   MultiplexerSelection selection,
   HostCommandRunner runner, {
   String? sessionRef,
-  String? herdrMobileConfigPath,
 }) {
   // Every MultiplexerId's `.name` is exactly the bare binary name, and
   // exactly each adapter's own `absPath` default — so this fallback
@@ -49,7 +45,6 @@ MultiplexerAdapter buildMultiplexerAdapter(
       runner,
       absPath: absPath,
       sessionRef: sessionRef,
-      mobileConfigPath: herdrMobileConfigPath,
     ),
   };
 }

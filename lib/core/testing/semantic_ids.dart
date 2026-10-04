@@ -46,6 +46,11 @@ class HomeSemantics {
   /// The AppBar `+` action, only present while there are no tabs.
   static const appBarNewSessionButton = 'helm.home.app_bar_new_session_button';
 
+  /// The single app-bar button holding the actions scoped to the active
+  /// tab. They were three loose icons, each paying permanent width out of
+  /// the tab strip's pocket.
+  static const appBarOverflowButton = 'helm.home.app_bar_overflow_button';
+
   /// The large call to action in the empty state.
   static const newSessionButton = 'helm.home.new_session_button';
 }
@@ -89,6 +94,10 @@ class ShortcutsSemantics {
 /// Identifiers on `HelmTerminalView`.
 class TerminalSemantics {
   const TerminalSemantics._();
+
+  /// The floating keyboard toggle, outside the terminal's output area.
+  /// This checkout's former docked strip had no identifier to migrate.
+  static const keyboardToggle = 'helm.terminal.keyboard_toggle';
 
   /// The overlay shown whenever the session is not connected. Its
   /// presence is the assertion target for connection-failure flows.
@@ -252,6 +261,10 @@ class FilesSemantics {
   /// [TrustedHostsSemantics.confirmForgetButton]: only one delete dialog is
   /// ever open at a time.
   static const deleteConfirmButton = 'helm.files.delete_confirm_button';
+
+  static const uploadSourceDialog = 'helm.files.upload_source_dialog';
+  static const uploadDocumentsOption = 'helm.files.upload_documents_option';
+  static const uploadMediaOption = 'helm.files.upload_media_option';
 }
 
 /// Identifiers on `SessionHoldAction`.
@@ -335,4 +348,20 @@ class ProfileEditSemantics {
   /// "the 9pt option" without caring which index it currently renders at.
   static String fontSizeOption(int fontSize) =>
       'helm.profile_edit.font_size_option_$fontSize';
+}
+
+/// Device-local floating keyboard layout controls.
+class KeyboardLayoutSemantics {
+  const KeyboardLayoutSemantics._();
+  static const move = 'helm.terminal.keyboard_move';
+  static const resize = 'helm.terminal.keyboard_resize';
+  static const reset = 'helm.terminal.keyboard_reset';
+  static const limit = 'helm.terminal.keyboard_limit';
+
+  /// Dismisses the panel from the panel's own footer.
+  ///
+  /// Separate from [TerminalSemantics.keyboardToggle], which now only
+  /// SHOWS the keyboard: the floating button overlays the terminal, so
+  /// while the panel is up the two would collide over its resize grip.
+  static const hide = 'helm.terminal.keyboard_hide';
 }

@@ -301,6 +301,32 @@ class FakeSftpSession implements SftpSession {
         SftpName(filename: newName, longname: moved.longname, attr: moved.attr),
       );
       _directories[newParent] = destination;
+    } else {
+      // A finalized upload MUST become visible to the next `readdir`.
+      //
+      // The reasoning above is right that a real server's rename needs no
+      // directory listing to OPERATE — it moves the inode the path
+      // resolves to. The conclusion that the listing therefore need not
+      // change does not follow: a real server shows the renamed file the
+      // next time the directory is read, and the sheet refreshes on
+      // upload success precisely to display it.
+      //
+      // Omitting this modelled the operation correctly and its OBSERVABLE
+      // EFFECT not at all, which let the successful-upload test pass
+      // against a still-empty directory while its own comment called that
+      // outcome dishonest. An adversarial review caught it; see
+      // odd/reviews/queue-and-strip.md.
+      final destination = List<SftpName>.of(
+        _directories[newParent] ?? const [],
+      );
+      destination.add(
+        fakeSftpName(
+          newName,
+          mode: FakeSftpModes.file,
+          size: writtenBytes[oldPath]?.length,
+        ),
+      );
+      _directories[newParent] = destination;
     }
 
     // If the moved entry was itself a directory with a listing of its own,

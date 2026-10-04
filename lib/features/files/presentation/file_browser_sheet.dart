@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
+import 'package:helm/features/files/data/saf_upload_source.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
@@ -16,6 +17,32 @@ import 'package:helm/features/files/presentation/providers/download_destination_
 import 'package:helm/features/files/presentation/providers/file_browser_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_download_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_upload_provider.dart';
+
+// ── Split into parts ───────────────────────────────────────────────────────
+//
+// This library was one 1604-line file holding twenty widgets. It was split
+// because its size, not its logic, was the problem: three consecutive
+// slices overshot the project's 400-line review budget (847, 482, 602) and
+// the cause was recorded as structural rather than fixable by stricter
+// briefs.
+//
+// `part` rather than independent libraries, deliberately. Every widget
+// below is library-private and they share seven private palette constants.
+// Independent files would force all of them public and rewrite roughly a
+// hundred references — turning a verifiable byte-for-byte move into a
+// rename sweep, and publishing an internal API that has exactly one
+// consumer: this sheet. `part` splits the bytes, which was the goal, and
+// keeps the privacy that was already correct.
+
+part 'sheet/name_prompt_dialog.dart';
+part 'sheet/upload_source_dialog.dart';
+part 'sheet/transfer_strip.dart';
+part 'sheet/destination_bar.dart';
+part 'sheet/failure_copy.dart';
+part 'sheet/browser_chrome.dart';
+part 'sheet/browser_body.dart';
+part 'sheet/entry_row.dart';
+part 'sheet/formatting.dart';
 
 // The drawer's palette, repeated rather than imported because this app has
 // no token file yet and every surface spells these out — see
@@ -164,35 +191,61 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     await _downloads.start(widget.downloadService, entry);
   }
 
-  /// Picks a local file and uploads it into the directory currently shown.
-  ///
-  /// Refuses while [FileUploadState.isRunning], mirroring [_download]'s
-  /// own refusal and for the identical reason: the strip shows one
-  /// transfer, and starting a second would abandon the one on screen with
-  /// nothing left to show its progress.
-  ///
-  /// A DECLINED PICK ends here silently — [UploadSourcePicker.pick]
-  /// already folds "nothing to upload" and "this platform cannot pick" into
-  /// the same null, and neither is a failure worth a toast.
-  ///
-  /// Refreshes the listing on completion, matching every other write this
-  /// sheet performs: a browser that still omitted the uploaded file would
-  /// tell the user their upload did nothing when it worked.
+  final _uploadDirectories = <int, String>{};
+  bool _pickingUpload = false;
+
+  /// Snapshot the destination before opening either modal. New picks append
+  /// to the FIFO even while bytes move; overlapping picker routes do not.
+  /// Decline and unsupported picking both stay silent, as the picker intends.
   Future<void> _upload() async {
-    if (ref.read(fileUploadProvider).isRunning) return;
+    if (_pickingUpload) return;
     final current = ref.read(fileBrowserProvider).path;
     if (current == null) return;
-
-    final source = await ref.read(uploadSourcePickerProvider).pick();
-    if (source == null) return;
-
-    final destinationPath = remoteJoin(current, source.name);
-    final completed = await _uploads.start(
-      widget.uploadService,
-      destinationPath,
-      source,
-    );
-    if (completed) await _browser.refresh();
+    final picker = ref.read(uploadSourcePickerProvider);
+    _pickingUpload = true;
+    try {
+      // NOT torn down when the sheet is. This route belongs to the ROOT
+      // navigator, so removing the sheet underneath leaves the modal on
+      // screen until someone dismisses it. An adversarial review raised
+      // it; see odd/reviews/queue-and-strip.md.
+      //
+      // Left as it is, deliberately. Both fixes are worse than the
+      // symptom: popping from `dispose` means holding a `NavigatorState`
+      // and removing a route while this element is being unmounted, which
+      // is the shape that already produced two crashes in this widget
+      // (see where `dispose` would be), and it can pop a route that is no
+      // longer this dialog. `useRootNavigator: false` does not help
+      // either, because a later route on the same navigator does not
+      // leave when an earlier one is removed.
+      //
+      // What is left is a modal the user can tap away, whose answer is
+      // already discarded by the `!mounted` guards below. The trigger is
+      // external route removal, the same precondition the write dialogs
+      // needed, which is why nothing has ever hit it.
+      final choice = await showDialog<_UploadSource>(
+        context: context,
+        builder: (_) => const _UploadSourceDialog(),
+      );
+      if (choice == null || !mounted) return;
+      final List<SafUploadSource> sources;
+      if (choice == _UploadSource.documents) {
+        final source = await picker.pick();
+        sources = source == null ? [] : [source];
+      } else {
+        sources = await picker.pickMedia() ?? [];
+      }
+      if (!mounted) return;
+      for (final source in sources) {
+        final id = _uploads.enqueue(
+          widget.uploadService,
+          remoteJoin(current, source.name),
+          source,
+        );
+        _uploadDirectories[id] = current;
+      }
+    } finally {
+      _pickingUpload = false;
+    }
   }
 
   /// Opens the system folder picker.
@@ -232,7 +285,15 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       confirmLabel: 'Create',
       confirmSemanticsId: FilesSemantics.createFolderConfirmButton,
     );
-    if (name == null) return;
+    // `!mounted` as well as a null name, matching [_upload]'s discipline.
+    // These dialogs belong to the ROOT navigator, so the sheet underneath
+    // can be removed while the confirmation stays on screen. Without this
+    // guard the write still went through on the captured notifier — and
+    // [_report]'s own mounted check only suppressed the TOAST, never the
+    // operation. Worse, if another sheet had rebound that notifier
+    // meanwhile, this confirmation would write through the new sheet's
+    // service and current directory.
+    if (name == null || !mounted) return;
 
     final outcome = await _browser.createFolder(name);
     switch (outcome) {
@@ -256,7 +317,8 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       confirmLabel: 'Rename',
       confirmSemanticsId: FilesSemantics.renameConfirmButton,
     );
-    if (name == null) return;
+    // See [_createFolder] for why `!mounted` belongs here.
+    if (name == null || !mounted) return;
 
     final outcome = await _browser.renameEntry(entry, name);
     switch (outcome) {
@@ -340,7 +402,11 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    // `!mounted` first: this is the one of the three that called
+    // `setState` after its dialog, so a sheet removed under the open
+    // confirmation threw outright rather than merely writing when it
+    // should not. See [_createFolder].
+    if (confirmed != true || !mounted) return;
 
     setState(() => _selected = null);
     final outcome = await _browser.deleteEntry(entry);
@@ -362,6 +428,21 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     final state = ref.watch(fileBrowserProvider);
     final download = ref.watch(fileDownloadProvider);
     final upload = ref.watch(fileUploadProvider);
+    ref.listen(fileUploadProvider, (_, next) {
+      var refresh = false;
+      for (final item in next.items) {
+        if (!item.isTerminal) continue;
+        final directory = _uploadDirectories.remove(item.id);
+        if (directory != null &&
+            item.outcome is UploadCompleted &&
+            directory == ref.read(fileBrowserProvider).path) {
+          refresh = true;
+        }
+      }
+      // Observe each owned ID once, not a boolean or a name shared by items.
+      // Do not jump back if the user navigated away while uploading.
+      if (refresh) _browser.refresh();
+    });
     final notifier = _browser;
     final picker = ref.watch(uploadSourcePickerProvider);
 
@@ -427,7 +508,7 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
               const _DestinationBar(),
               _UploadStatusBar(
                 state: upload,
-                onCancel: _uploads.cancel,
+                onCancel: _uploads.cancelAll,
                 onDismiss: _uploads.dismiss,
               ),
               _DownloadStatusBar(
@@ -442,1163 +523,4 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       ),
     );
   }
-}
-
-/// A name-entry dialog, as its own [StatefulWidget] rather than a
-/// [TextEditingController] built inline by the sheet's method.
-///
-/// That inline shape was tried first and crashed under test: a controller
-/// created and `dispose()`d by a plain method raced the dialog route's own
-/// teardown animation, and `TextField` rebuilt against an already-disposed
-/// controller while the route was still closing — `ChangeNotifier` used
-/// after `dispose()`. Giving the dialog its own `State` makes the
-/// controller's lifecycle match the WIDGET that reads it, which is the
-/// ownership `TextEditingController`'s own contract assumes and the inline
-/// version violated.
-class _NamePromptDialog extends StatefulWidget {
-  const _NamePromptDialog({
-    required this.title,
-    required this.label,
-    required this.confirmLabel,
-    required this.confirmSemanticsId,
-    this.initialValue,
-  });
-
-  final String title;
-  final String label;
-  final String confirmLabel;
-  final String confirmSemanticsId;
-  final String? initialValue;
-
-  @override
-  State<_NamePromptDialog> createState() => _NamePromptDialogState();
-}
-
-class _NamePromptDialogState extends State<_NamePromptDialog> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.of(context).pop(_controller.text.trim());
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: InputDecoration(labelText: widget.label),
-        onSubmitted: (_) => _submit(),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        Semantics(
-          identifier: widget.confirmSemanticsId,
-          child: TextButton(
-            onPressed: _submit,
-            child: Text(widget.confirmLabel),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// Upload strip
-
-/// Reports the one upload the sheet can have in flight.
-///
-/// A SEPARATE strip from [_DownloadStatusBar] rather than a shared one,
-/// see [FilesSemantics.uploadStatus] for why: the two transfers run
-/// through independent notifiers and can both have something to say at
-/// once.
-///
-/// Every [UploadOutcome] variant gets its OWN message here, including
-/// [UploadDestinationExists], which reads as something the user can act
-/// on (pick a different file, or rename what is already there) rather than
-/// a generic failure, matching the enum's own doc comment.
-class _UploadStatusBar extends StatelessWidget {
-  const _UploadStatusBar({
-    required this.state,
-    required this.onCancel,
-    required this.onDismiss,
-  });
-
-  final FileUploadState state;
-  final VoidCallback onCancel;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    if (state.status == FileUploadStatus.idle) return const SizedBox.shrink();
-
-    return Semantics(
-      identifier: FilesSemantics.uploadStatus,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
-        decoration: const BoxDecoration(
-          color: _raised,
-          border: Border(top: BorderSide(color: _border)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(child: _line()),
-            if (state.isRunning)
-              Semantics(
-                identifier: FilesSemantics.uploadCancelButton,
-                child: TextButton(
-                  onPressed: onCancel,
-                  style: TextButton.styleFrom(foregroundColor: _mutedText),
-                  child: const Text('Cancel'),
-                ),
-              )
-            else
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                color: _mutedText,
-                tooltip: 'Dismiss',
-                onPressed: onDismiss,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _line() => switch (state.status) {
-    FileUploadStatus.uploading => _UploadRunningLine(state: state),
-    FileUploadStatus.completed => _EndingLine(
-      icon: Icons.check_circle_outline,
-      color: _accent,
-      message: 'Uploaded ${state.name ?? 'the file'}.',
-    ),
-    FileUploadStatus.cancelled => const _EndingLine(
-      icon: Icons.block,
-      color: _mutedText,
-      message: 'Upload cancelled.',
-    ),
-    FileUploadStatus.destinationExists => _EndingLine(
-      icon: Icons.warning_amber_outlined,
-      color: _danger,
-      message:
-          '${state.name ?? 'A file'} with that name already exists here. '
-          'Rename it on the host, or choose a different file.',
-    ),
-    FileUploadStatus.failed => _EndingLine(
-      icon: Icons.error_outline,
-      color: _danger,
-      message: describeUploadFailure(state.failure),
-    ),
-    // Filtered out above; listed so a new status is a compile error here
-    // rather than a blank strip.
-    FileUploadStatus.idle => const SizedBox.shrink(),
-  };
-}
-
-class _UploadRunningLine extends StatelessWidget {
-  const _UploadRunningLine({required this.state});
-
-  final FileUploadState state;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'Uploading ${state.name ?? ''} · ${state.percent}%',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: _primaryText, fontSize: 12),
-        ),
-        const SizedBox(height: 6),
-        LinearProgressIndicator(
-          value: state.percent / 100,
-          minHeight: 3,
-          backgroundColor: _border,
-          valueColor: const AlwaysStoppedAnimation(_accent),
-        ),
-      ],
-    );
-  }
-}
-
-// Transfer strip
-
-/// Reports the one transfer the sheet can have in flight.
-///
-/// Rendered as nothing at all when there is nothing to report, so the
-/// listing keeps the full height it had before this slice existed.
-///
-/// ### Two independent lines, one dismiss
-///
-/// The strip carries up to TWO reports about the same transfer, because
-/// there are two questions and their answers do not follow from each
-/// other: what happened to the bytes, and where they were filed. A
-/// download can open perfectly and fail to reach the user's folder, so the
-/// widget cannot be a `switch` over one enum — that shape would force one
-/// answer to hide the other.
-///
-/// The ACTIONS are shared, and deliberately singular. One dismiss for the
-/// whole strip rather than one per line: two close buttons stacked in a
-/// 60-pixel strip is an interface asking which of two identical things you
-/// meant.
-///
-/// Every state remains ACTIONABLE, which is the rule this widget inherited
-/// from slice 2a: a running transfer offers cancel, everything terminal
-/// offers dismiss, and a publish that failed for want of a folder also
-/// offers to choose one. There is no state here the user can only stare at.
-class _DownloadStatusBar extends StatelessWidget {
-  const _DownloadStatusBar({
-    required this.state,
-    required this.onCancel,
-    required this.onDismiss,
-    required this.onChooseFolder,
-  });
-
-  final FileDownloadState state;
-  final VoidCallback onCancel;
-  final VoidCallback onDismiss;
-  final Future<void> Function() onChooseFolder;
-
-  @override
-  Widget build(BuildContext context) {
-    // A finished-and-opened transfer says nothing about ITSELF: the viewer
-    // is already in front of the user, which is the receipt. It may still
-    // have something to say about where the file was filed.
-    final showsTransfer =
-        state.status != FileDownloadStatus.idle &&
-        state.status != FileDownloadStatus.opened;
-    final showsPublish = state.publishNeedsReporting;
-    if (!showsTransfer && !showsPublish) return const SizedBox.shrink();
-
-    return Semantics(
-      identifier: FilesSemantics.downloadStatus,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
-        decoration: const BoxDecoration(
-          color: _raised,
-          border: Border(top: BorderSide(color: _border)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showsTransfer) _transferLine(),
-                  if (showsTransfer && showsPublish) const SizedBox(height: 10),
-                  if (showsPublish)
-                    _PublishLine(
-                      outcome: state.publish!,
-                      onChooseFolder: onChooseFolder,
-                    ),
-                ],
-              ),
-            ),
-            if (state.isRunning)
-              Semantics(
-                identifier: FilesSemantics.downloadCancelButton,
-                child: TextButton(
-                  onPressed: onCancel,
-                  style: TextButton.styleFrom(foregroundColor: _mutedText),
-                  child: const Text('Cancel'),
-                ),
-              )
-            else
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                color: _mutedText,
-                tooltip: 'Dismiss',
-                onPressed: onDismiss,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _transferLine() => switch (state.status) {
-    FileDownloadStatus.downloading => _RunningLine(state: state),
-    FileDownloadStatus.noViewer => _NoViewerLine(state: state),
-    FileDownloadStatus.cancelled => const _EndingLine(
-      icon: Icons.block,
-      color: _mutedText,
-      message: 'Download cancelled.',
-    ),
-    FileDownloadStatus.failed => _EndingLine(
-      icon: Icons.error_outline,
-      color: _danger,
-      message: describeDownloadFailure(state.failure),
-    ),
-    // Both are filtered out above; listed so a new status is a compile
-    // error here rather than a blank strip.
-    FileDownloadStatus.idle ||
-    FileDownloadStatus.opened => const SizedBox.shrink(),
-  };
-}
-
-class _RunningLine extends StatelessWidget {
-  const _RunningLine({required this.state});
-
-  final FileDownloadState state;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'Downloading ${state.entry?.name ?? ''} · ${state.percent}%',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: _primaryText, fontSize: 12),
-        ),
-        const SizedBox(height: 6),
-        // Determinate from the first frame: the size is known before any
-        // byte is read, so an indeterminate bar would be hiding
-        // information the app already has.
-        LinearProgressIndicator(
-          value: state.percent / 100,
-          minHeight: 3,
-          backgroundColor: _border,
-          valueColor: const AlwaysStoppedAnimation(_accent),
-        ),
-      ],
-    );
-  }
-}
-
-/// The file arrived, and nothing on the device claimed it.
-///
-/// Says WHERE the file is rather than only that it could not be opened.
-/// That is the difference between a dead end and a next step: the user can
-/// reach it from their file manager, or from the Files app on iOS, and the
-/// message has to tell them it is worth looking.
-class _NoViewerLine extends StatelessWidget {
-  const _NoViewerLine({required this.state});
-
-  final FileDownloadState state;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      identifier: FilesSemantics.downloadNoViewer,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.help_outline, size: 18, color: _accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '${state.entry?.name ?? 'The file'} downloaded, but no app '
-                  'on this device can open it.',
-                  style: const TextStyle(color: _primaryText, fontSize: 12),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'It is saved on the device. Install an app that reads this '
-                  'kind of file, then tap it again.',
-                  style: TextStyle(
-                    color: _mutedText.withValues(alpha: 0.9),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EndingLine extends StatelessWidget {
-  const _EndingLine({
-    required this.icon,
-    required this.color,
-    required this.message,
-  });
-
-  final IconData icon;
-  final Color color;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(message, style: TextStyle(color: color, fontSize: 12)),
-        ),
-      ],
-    );
-  }
-}
-
-/// Says where a finished download was filed, or why it was not.
-///
-/// Present only when there is something to say —
-/// [FileDownloadState.publishNeedsReporting] is what decides that, and it
-/// excludes the platform that files downloads by itself.
-///
-/// The successful case is reported rather than left silent, which is worth
-/// stating because a receipt for something that worked is easy to trim.
-/// It is the answer to the question this whole slice exists to answer, the
-/// name it was saved under is not always the name that was asked for, and
-/// the viewer that opens next is showing the app's own staged copy — so
-/// nothing else on screen tells the user their folder now holds this file.
-class _PublishLine extends StatelessWidget {
-  const _PublishLine({required this.outcome, required this.onChooseFolder});
-
-  final PublishOutcome outcome;
-  final Future<void> Function() onChooseFolder;
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color, message, offersFolder) = switch (outcome) {
-      PublishedToFolder(:final folderName, :final fileName) => (
-        Icons.check_circle_outline,
-        _accent,
-        'Saved to $folderName as $fileName.',
-        false,
-      ),
-      PublishNotConfigured() => (
-        Icons.folder_off_outlined,
-        _mutedText,
-        'Not saved to a folder yet. Downloads stay in the app for a day '
-            'unless you choose somewhere to keep them.',
-        true,
-      ),
-      PublishFailed(:final reason) => (
-        Icons.folder_off_outlined,
-        _danger,
-        describePublishFailure(reason),
-        // Every failure except a full disk means the destination has to be
-        // named again; offering the picker for a storage failure would
-        // suggest the folder was the problem when it was not.
-        reason != PublishFailure.storage,
-      ),
-      // Filtered out before this widget is built. Listed so a new outcome
-      // is a compile error rather than a blank line.
-      PublishNotNeeded() => (Icons.check, _mutedText, '', false),
-    };
-
-    return Semantics(
-      identifier: FilesSemantics.downloadPublish,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(message, style: TextStyle(color: color, fontSize: 11)),
-                if (offersFolder)
-                  TextButton(
-                    onPressed: onChooseFolder,
-                    style: TextButton.styleFrom(
-                      foregroundColor: _accent,
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(0, 28),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text(
-                      'Choose a folder',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Names the folder downloads are being kept in, and lets it be changed.
-///
-/// Sits below the listing and above the transfer strip, PERSISTENTLY, so
-/// the answer to "where do my files go" is available with nothing in
-/// flight. An icon in the toolbar would have been cheaper in pixels and
-/// would not have answered the question — and a setting reachable only
-/// from a failure message is a setting the user meets exactly once, at the
-/// worst moment.
-///
-/// Absent entirely where there is no folder to choose. On iOS this bar
-/// would be an offer to fix something that is not broken: downloads
-/// already land in a Files-visible folder, so the row would cost height on
-/// every use of the sheet to say nothing.
-class _DestinationBar extends ConsumerWidget {
-  const _DestinationBar();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final notifier = ref.watch(downloadDestinationProvider.notifier);
-    if (!notifier.supportsFolderChoice) return const SizedBox.shrink();
-
-    final destination = ref.watch(downloadDestinationProvider);
-    // A folder is read off disk once at startup. Rendering a spinner for
-    // that would flicker on a sheet that is already showing content, so
-    // the row simply stays out of the way until the answer is known.
-    if (destination.isLoading) return const SizedBox.shrink();
-
-    final folder = destination.valueOrNull;
-
-    return Semantics(
-      identifier: FilesSemantics.downloadFolderButton,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: _border)),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              folder == null
-                  ? Icons.folder_off_outlined
-                  : Icons.folder_outlined,
-              size: 14,
-              color: _mutedText,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                folder == null
-                    ? 'Downloads are not being saved to a folder'
-                    : 'Saving downloads to ${folder.name}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _mutedText, fontSize: 11),
-              ),
-            ),
-            if (folder == null)
-              TextButton(
-                onPressed: () =>
-                    ref.read(downloadDestinationProvider.notifier).choose(),
-                style: TextButton.styleFrom(
-                  foregroundColor: _accent,
-                  visualDensity: VisualDensity.compact,
-                ),
-                child: const Text('Choose', style: TextStyle(fontSize: 11)),
-              )
-            else
-              PopupMenuButton<_DestinationAction>(
-                icon: const Icon(Icons.more_horiz, size: 16),
-                color: _raised,
-                tooltip: 'Download folder',
-                onSelected: (action) => switch (action) {
-                  _DestinationAction.change =>
-                    ref.read(downloadDestinationProvider.notifier).choose(),
-                  _DestinationAction.forget =>
-                    ref.read(downloadDestinationProvider.notifier).forget(),
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: _DestinationAction.change,
-                    child: Text(
-                      'Choose a different folder',
-                      style: TextStyle(color: _primaryText, fontSize: 13),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _DestinationAction.forget,
-                    child: Text(
-                      'Stop saving to a folder',
-                      style: TextStyle(color: _primaryText, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-enum _DestinationAction { change, forget }
-
-/// One sentence per reason a download could not be filed where the user
-/// asked.
-///
-/// Public for the same reason [describeDownloadFailure] is: a widget test
-/// asserts on the exact string without reaching into a private widget.
-///
-/// Every one of these says the file IS still on the device, because that
-/// is the fact most at risk of being lost here. The bytes arrived; only
-/// the copy into the user's folder did not, and a message that mentioned
-/// only the failure would read as a failed download.
-String describePublishFailure(PublishFailure failure) => switch (failure) {
-  PublishFailure.permissionLost =>
-    'The file is on this device, but Helm lost access to your download '
-        'folder. Choose it again to keep saving there.',
-  PublishFailure.destinationMissing =>
-    'The file is on this device. Your download folder no longer exists, so '
-        'nothing was saved to it.',
-  PublishFailure.storage =>
-    'The file is on this device, but there was no room to save a copy in '
-        'your download folder.',
-  PublishFailure.unknown =>
-    'The file is on this device. It could not be saved to your download '
-        'folder, and the system did not say why.',
-};
-
-/// One sentence per reason a download stopped.
-///
-/// Public so a widget test can assert on the exact string without reaching
-/// into a private widget, matching [describeRemoteEntry].
-///
-/// Written from the [DownloadFailure] alone and never from the underlying
-/// message: [DownloadFailed.detail] carries whatever the server said, and
-/// a server-supplied string must not become UI copy.
-String describeDownloadFailure(DownloadFailure? failure) => switch (failure) {
-  DownloadFailure.permissionDenied =>
-    'You do not have permission to read this file.',
-  DownloadFailure.notFound => 'This file no longer exists on the host.',
-  DownloadFailure.disconnected =>
-    'The connection dropped before the file finished downloading.',
-  DownloadFailure.stalled =>
-    'The download stopped receiving data and was abandoned.',
-  DownloadFailure.unknownSize =>
-    'The host would not say how large this file is, so it was not downloaded.',
-  DownloadFailure.sizeMismatch =>
-    'The file arrived incomplete and was discarded.',
-  DownloadFailure.storage =>
-    'There was not enough room on this device to save the file.',
-  DownloadFailure.unknown ||
-  null => 'The file could not be downloaded, and the host did not say why.',
-};
-
-/// One sentence per reason an upload stopped, mirroring
-/// [describeDownloadFailure] exactly: written from the [UploadFailure]
-/// alone, never from [UploadFailed.detail] — a server-supplied string must
-/// not become UI copy.
-String describeUploadFailure(UploadFailure? failure) => switch (failure) {
-  UploadFailure.permissionDenied =>
-    'You do not have permission to write to this directory.',
-  UploadFailure.notFound => 'This directory no longer exists on the host.',
-  UploadFailure.disconnected =>
-    'The connection dropped before the file finished uploading.',
-  UploadFailure.stalled =>
-    'The upload stopped receiving acknowledgements and was abandoned.',
-  UploadFailure.sourceUnreadable => 'The local file could not be read.',
-  UploadFailure.sizeMismatch =>
-    'The file did not upload completely and was discarded.',
-  UploadFailure.unknown ||
-  null => 'The file could not be uploaded, and the host did not say why.',
-};
-
-/// One sentence per locally-rejected name, matching [describeDownloadFailure]
-/// in being written from the enum alone — there is no server round trip to
-/// carry a message, which is the whole point of validating locally.
-String describeNameRejection(NameRejection reason) => switch (reason) {
-  NameRejection.empty => 'Enter a name.',
-  NameRejection.containsSeparator => 'A name cannot contain "/".',
-  NameRejection.currentDirectory => '"." is not a usable name.',
-  NameRejection.parentDirectory => '".." is not a usable name.',
-};
-
-/// One sentence per reason a create, rename or delete was refused by the
-/// server, mirroring [describeDownloadFailure]: never built from the
-/// underlying message, only from the classified reason.
-String describeRemoteWriteFailure(RemoteWriteFailure reason) =>
-    switch (reason) {
-      RemoteWriteFailure.permissionDenied =>
-        'You do not have permission to do this.',
-      RemoteWriteFailure.notFound => 'This entry no longer exists on the host.',
-      RemoteWriteFailure.disconnected =>
-        'The connection dropped before this could finish.',
-      RemoteWriteFailure.unknown =>
-        'The host refused this, without saying why.',
-    };
-
-// ── Chrome ─────────────────────────────────────────────────────────────────
-
-class _Grabber extends StatelessWidget {
-  const _Grabber();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 36,
-      height: 4,
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: _border,
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
-  }
-}
-
-/// Names where the browser is, and offers the only two moves it has.
-///
-/// The path is shown in full and ellipsized at the START, so a deep path
-/// keeps the part that identifies it — the last segments — rather than the
-/// `/Users/...` prefix every path on the host shares.
-class _PathBar extends StatelessWidget {
-  const _PathBar({
-    required this.path,
-    required this.canGoUp,
-    required this.onUp,
-    required this.onRefresh,
-    required this.onCreateFolder,
-    required this.showUpload,
-    required this.onUpload,
-  });
-
-  final String? path;
-  final bool canGoUp;
-  final Future<void> Function() onUp;
-  final Future<void> Function() onRefresh;
-
-  /// Opens the "create a folder" prompt. Null while the browser is not
-  /// showing a readable directory — see `FileBrowserSheet.build` for why
-  /// a failed or still-loading listing has no directory to create one in.
-  final VoidCallback? onCreateFolder;
-
-  /// Whether this platform can pick a local file to upload at all.
-  ///
-  /// A platform without a picker gets NO BUTTON, not a disabled one —
-  /// [UploadSourcePicker]'s own class comment makes the same choice for
-  /// the picker itself: a control that always fails is worse than no
-  /// control. [onUpload] still decides whether THIS PICKER-CAPABLE
-  /// platform's button is enabled right now.
-  final bool showUpload;
-
-  /// Opens the local file picker. Null while the browser is not showing a
-  /// readable directory, mirroring [onCreateFolder]. Read only when
-  /// [showUpload] is true.
-  final Future<void> Function()? onUpload;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _border)),
-      ),
-      child: Row(
-        children: [
-          Semantics(
-            identifier: FilesSemantics.upButton,
-            child: IconButton(
-              icon: const Icon(Icons.arrow_upward, size: 18),
-              color: canGoUp ? _accent : _mutedText.withValues(alpha: 0.4),
-              tooltip: 'Parent directory',
-              // Disabled at the root rather than hidden: a control that
-              // disappears makes the row jump, and its absence would not
-              // explain itself.
-              onPressed: canGoUp ? onUp : null,
-            ),
-          ),
-          Expanded(
-            child: Semantics(
-              identifier: FilesSemantics.pathBar,
-              child: Text(
-                path ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textDirection: TextDirection.rtl,
-                style: const TextStyle(
-                  color: _primaryText,
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ),
-          Semantics(
-            identifier: FilesSemantics.createFolderButton,
-            child: IconButton(
-              icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-              color: onCreateFolder == null
-                  ? _mutedText.withValues(alpha: 0.4)
-                  : _mutedText,
-              tooltip: 'New folder',
-              onPressed: onCreateFolder,
-            ),
-          ),
-          if (showUpload)
-            Semantics(
-              identifier: FilesSemantics.uploadButton,
-              child: IconButton(
-                icon: const Icon(Icons.upload_file_outlined, size: 18),
-                color: onUpload == null
-                    ? _mutedText.withValues(alpha: 0.4)
-                    : _mutedText,
-                tooltip: 'Upload a file',
-                onPressed: onUpload,
-              ),
-            ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 18),
-            color: _mutedText,
-            tooltip: 'Reload',
-            onPressed: onRefresh,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Body ───────────────────────────────────────────────────────────────────
-
-/// Renders exactly one of the four states, with no fall-through.
-///
-/// A `switch` over the enum rather than nested `if`s, so adding a state
-/// later is a compile error here instead of a silently blank sheet.
-class _Body extends StatelessWidget {
-  const _Body({
-    required this.state,
-    required this.selected,
-    required this.onTap,
-    required this.onRetry,
-    required this.onRename,
-    required this.onDelete,
-  });
-
-  final FileBrowserState state;
-  final RemoteEntry? selected;
-  final Future<void> Function(RemoteEntry) onTap;
-  final Future<void> Function() onRetry;
-  final void Function(RemoteEntry) onRename;
-  final void Function(RemoteEntry) onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    switch (state.status) {
-      case FileBrowserStatus.idle:
-      case FileBrowserStatus.loading:
-        return const Center(
-          child: SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: _accent),
-          ),
-        );
-
-      case FileBrowserStatus.failed:
-        return _ListingError(
-          failure: state.failure ?? RemoteListingFailure.unknown,
-          onRetry: onRetry,
-        );
-
-      case FileBrowserStatus.ready:
-        if (state.entries.isEmpty) return const _EmptyDirectory();
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          itemCount: state.entries.length,
-          itemBuilder: (_, i) {
-            final entry = state.entries[i];
-            return _EntryRow(
-              key: ValueKey(entry.path),
-              entry: entry,
-              isSelected: entry == selected,
-              onTap: () => onTap(entry),
-              onRename: () => onRename(entry),
-              onDelete: () => onDelete(entry),
-            );
-          },
-        );
-    }
-  }
-}
-
-/// The directory was read and held nothing.
-///
-/// A DIFFERENT widget from [_ListingError], with a different semantic id,
-/// because these two are the pair this feature most needs to keep apart —
-/// see [FilesSemantics.emptyDirectory].
-class _EmptyDirectory extends StatelessWidget {
-  const _EmptyDirectory();
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      identifier: FilesSemantics.emptyDirectory,
-      child: const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.folder_open, size: 32, color: _mutedText),
-              SizedBox(height: 12),
-              Text(
-                'This directory is empty',
-                style: TextStyle(color: _mutedText, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The directory was NOT read, and nothing is known about its contents.
-class _ListingError extends StatelessWidget {
-  const _ListingError({required this.failure, required this.onRetry});
-
-  final RemoteListingFailure failure;
-  final Future<void> Function() onRetry;
-
-  /// One sentence per reason, written as a statement about what happened
-  /// rather than as an apology, and never as a claim about contents.
-  String get _message => switch (failure) {
-    RemoteListingFailure.permissionDenied =>
-      'You do not have permission to read this directory.',
-    RemoteListingFailure.notFound =>
-      'This directory no longer exists on the host.',
-    RemoteListingFailure.disconnected =>
-      'The connection dropped before this directory could be read.',
-    RemoteListingFailure.unknown =>
-      'The host refused to read this directory, without saying why.',
-  };
-
-  IconData get _icon => switch (failure) {
-    RemoteListingFailure.permissionDenied => Icons.lock_outline,
-    RemoteListingFailure.notFound => Icons.search_off,
-    RemoteListingFailure.disconnected => Icons.link_off,
-    RemoteListingFailure.unknown => Icons.error_outline,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      identifier: FilesSemantics.listingError,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_icon, size: 32, color: _danger),
-              const SizedBox(height: 12),
-              Text(
-                _message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: _danger, fontSize: 13),
-              ),
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Try again'),
-                style: TextButton.styleFrom(foregroundColor: _accent),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Entry row ──────────────────────────────────────────────────────────────
-
-class _EntryRow extends StatelessWidget {
-  const _EntryRow({
-    required this.entry,
-    required this.isSelected,
-    required this.onTap,
-    required this.onRename,
-    required this.onDelete,
-    super.key,
-  });
-
-  final RemoteEntry entry;
-  final bool isSelected;
-  final VoidCallback onTap;
-  final VoidCallback onRename;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      visualDensity: VisualDensity.compact,
-      tileColor: isSelected ? _raised : null,
-      leading: Icon(_iconFor(entry), size: 20, color: _colorFor(entry)),
-      title: Text(
-        entry.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: _primaryText, fontSize: 14),
-      ),
-      subtitle: Text(
-        describeRemoteEntry(entry),
-        style: const TextStyle(color: _mutedText, fontSize: 11),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (entry.isNavigable)
-            const Icon(Icons.chevron_right, size: 18, color: _mutedText),
-          Semantics(
-            identifier: FilesSemantics.entryMenuButton(entry.path),
-            child: PopupMenuButton<_EntryAction>(
-              icon: const Icon(Icons.more_vert, size: 18, color: _mutedText),
-              color: _raised,
-              tooltip: 'More actions',
-              onSelected: (action) => switch (action) {
-                _EntryAction.rename => onRename(),
-                _EntryAction.delete => onDelete(),
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: _EntryAction.rename,
-                  child: Semantics(
-                    identifier: FilesSemantics.renameMenuItem,
-                    child: const Text(
-                      'Rename',
-                      style: TextStyle(color: _primaryText, fontSize: 13),
-                    ),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _EntryAction.delete,
-                  child: Semantics(
-                    identifier: FilesSemantics.deleteMenuItem,
-                    child: const Text(
-                      'Delete',
-                      style: TextStyle(color: _danger, fontSize: 13),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      onTap: onTap,
-    );
-  }
-
-  static IconData _iconFor(RemoteEntry entry) => switch (entry.kind) {
-    RemoteEntryKind.directory => Icons.folder,
-    RemoteEntryKind.symlink => Icons.link,
-    RemoteEntryKind.file => Icons.insert_drive_file_outlined,
-    RemoteEntryKind.other => Icons.help_outline,
-  };
-
-  static Color _colorFor(RemoteEntry entry) =>
-      entry.isNavigable ? _accent : _mutedText;
-}
-
-/// The two destructive-adjacent actions every row offers through
-/// [FilesSemantics.entryMenuButton].
-///
-/// Rename and delete rather than a free-for-all menu, matching the scope
-/// this slice was built for — see `SftpSession`'s widened-seam doc comment.
-enum _EntryAction { rename, delete }
-
-// ── Formatting ─────────────────────────────────────────────────────────────
-
-/// The secondary line under an entry's name.
-///
-/// Public so a widget test can assert on the exact string a row shows
-/// without reaching into a private widget.
-///
-/// States what the entry IS first, then only what is known about it.
-/// Absent facts are OMITTED rather than rendered as `0 B` or `—`: every
-/// `SftpFileAttrs` field is optional, and a zero-byte file has to stay
-/// distinguishable from a server that did not send a size.
-String describeRemoteEntry(RemoteEntry entry) {
-  final parts = <String>[_describeKind(entry)];
-
-  final size = entry.size;
-  if (size != null && entry.kind == RemoteEntryKind.file) {
-    parts.add(formatByteSize(size));
-  }
-
-  final modified = entry.modifiedAt;
-  if (modified != null) parts.add(formatRemoteDate(modified));
-
-  return parts.join(' · ');
-}
-
-String _describeKind(RemoteEntry entry) => switch (entry.kind) {
-  RemoteEntryKind.directory => 'Directory',
-  RemoteEntryKind.file => 'File',
-  RemoteEntryKind.other => 'Special file',
-  RemoteEntryKind.symlink => switch (entry.linkTarget) {
-    RemoteEntryKind.directory => 'Link to directory',
-    RemoteEntryKind.file => 'Link to file',
-    // Covers both "points at something exotic" and "we could not follow
-    // it", which are not worth telling apart on one line of a list row.
-    _ => 'Link',
-  },
-};
-
-/// [bytes] in the largest unit that keeps it under 1024.
-///
-/// Binary units (1024) with SI-looking labels, which is the convention
-/// `ls -lh` and every file manager on a POSIX host already uses — matching
-/// the tool the user would otherwise run in the terminal beside this.
-String formatByteSize(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-
-  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
-  var value = bytes / 1024;
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  // One decimal below 10, none above: "9.8 MB" is useful precision,
-  // "812.4 MB" is noise.
-  final formatted = value < 10
-      ? value.toStringAsFixed(1)
-      : value.round().toString();
-  return '$formatted ${units[unit]}';
-}
-
-/// [moment] as a short, unambiguous date.
-///
-/// ISO-ordered (`2026-08-27 14:05`) rather than localized, because this
-/// list sorts by name and a reader scanning dates down a column needs them
-/// to line up. No relative phrasing: "2 days ago" is a moving target on a
-/// screen the user may leave open.
-String formatRemoteDate(DateTime moment) {
-  final local = moment.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${local.year}-${two(local.month)}-${two(local.day)} '
-      '${two(local.hour)}:${two(local.minute)}';
 }

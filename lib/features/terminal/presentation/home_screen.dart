@@ -41,10 +41,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with WidgetsBindingObserver, TickerProviderStateMixin {
+    with WidgetsBindingObserver {
   List<TabSnapshot>? _pendingRecovery;
-  late final AnimationController _kbAnimController;
-  late final Animation<double> _kbAnimation;
 
   /// Owns the [Scaffold] so the back handler can close the drawer.
   final _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -59,16 +57,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    _kbAnimController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    _kbAnimation = CurvedAnimation(
-      parent: _kbAnimController,
-      curve: Curves.easeOutCubic,
-    );
-    _kbAnimController.value = 1.0;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final repo = ref.read(sessionSnapshotRepoProvider);
@@ -113,7 +101,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
-    _kbAnimController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -148,12 +135,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
     final theme = Theme.of(context);
 
-    if (kbVisible) {
-      _kbAnimController.forward();
-    } else {
-      _kbAnimController.reverse();
-    }
-
     return PopScope(
       // HomeScreen is the only route on the stack, so an unhandled back
       // closes the app. While the drawer is open that is wrong: back
@@ -173,6 +154,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // value draws a visible seam around it during resize and scroll.
         backgroundColor: HelmTerminalTheme.background,
         drawer: const ShortcutsDrawer(),
+        // NO reserved shelf. This used to be a
+        // `bottomNavigationBar: SizedBox(height: 80)`, chosen to keep the
+        // FAB off the terminal's last output row in both states.
+        //
+        // The Scaffold subtracts that from the body, so it cost 80dp of
+        // terminal height in EVERY frame — keyboard open or closed — to
+        // avoid a corner overlay that costs nothing most of the time.
+        // Reported on a real S22 as "al poner el FAB, se recorta esa
+        // parte", and the report is right: trading permanent output for
+        // an occasional overlap is the trade backwards. A floating action
+        // button overlays by definition; reserving space for one defeats
+        // what it is.
+        //
+        // Toggling the keyboard still never resizes the PTY. Removing the
+        // shelf changes the terminal's height ONCE, upward, which is the
+        // direction that gives rows back.
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        // Present ONLY while the keyboard is hidden. It floats over the
+        // terminal, so leaving it up alongside the panel put it on top of
+        // the panel's resize grip — the one control a user needs to undo
+        // a bad size. Dismissing now lives in the panel's own footer, so
+        // each control sits where the thing it acts on is, and neither
+        // reserves space from the terminal.
+        floatingActionButton: tabsState.hasTabs && !kbVisible
+            ? Semantics(
+                identifier: TerminalSemantics.keyboardToggle,
+                child: FloatingActionButton(
+                  tooltip: 'Show keyboard',
+                  onPressed: () =>
+                      ref.read(keyboardProvider.notifier).toggleVisibility(),
+                  child: const Icon(Icons.keyboard),
+                ),
+              )
+            : null,
         appBar: AppBar(
           backgroundColor: AppTheme.surface,
           elevation: 0,
@@ -218,23 +233,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   onPressed: () => _showNewTabDialog(context),
                 ),
               ),
-            _buildBrowseAction(tabsState.activeTab?.session),
-            // HOLD STAYS on the bar. It is the one action here decided in
-            // a moment — you reach for it BECAUSE you are about to leave
-            // — and putting a time-sensitive control behind opening a
-            // drawer is how it stops being used.
-            _buildHoldAction(tabsState.activeTab?.session),
-            // SETTINGS moved to the drawer's footer, and only settings.
+            // ONE button instead of three loose icons.
             //
-            // It is the least frequent control on this bar and was paying
-            // permanent width out of the tab strip's pocket — the one
-            // element here that is actually starved. A drawer footer is
-            // also where the platform already puts settings.
+            // Each icon was paying permanent width out of the tab strip's
+            // pocket — the one element on this bar that is actually
+            // starved, with twenty tabs behind it. An overflow menu also
+            // NAMES these actions; as icons, a circular arrow and a pin
+            // were asking the user to remember what they meant.
             //
-            // Browse did NOT move with it, for the reason stated on
-            // [_buildBrowseAction]: the drawer is the surface that CHANGES
-            // which tab is active, so a control scoped to the active tab
-            // cannot live inside it without becoming ambiguous.
+            // The cost is honest: hold is the one action here decided in
+            // a moment, and it now takes two taps instead of one. Still
+            // on this bar rather than in the drawer, though, because the
+            // drawer is the surface that CHANGES which tab is active, and
+            // both hold and browse are scoped to the active one.
+            if (tabsState.hasTabs)
+              _buildOverflowMenu(context, ref, tabsState.activeTab?.session),
           ],
         ),
         body: Column(
@@ -274,24 +287,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
 
-    return Column(
-      children: [
-        Expanded(
-          child: HelmTerminalView(
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        fit: StackFit.expand,
+        children: [
+          HelmTerminalView(
             key: ValueKey(activeTab.id),
             session: activeTab.session,
             isActive: true,
           ),
-        ),
-        _buildKeyboardToggle(kbVisible),
-        SizeTransition(
-          sizeFactor: _kbAnimation,
-          axisAlignment: 1.0,
-          child: RepaintBoundary(
-            child: TerminalKeyboard(terminal: activeTab.session.terminal),
-          ),
-        ),
-      ],
+          // Geometry only changes this overlay, never the terminal constraints.
+          if (kbVisible)
+            FloatingKeyboardPanel(
+              viewport: constraints.biggest,
+              terminal: activeTab.session.terminal,
+            ),
+        ],
+      ),
     );
   }
 
@@ -306,92 +318,103 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// `SessionHoldController` keys "am I already holding this?" on the
   /// identity of `statusNotifier`, which survives the rebuild, rather than
   /// on the record's own identity, which does not.
-  Widget _buildHoldAction(TerminalSession? session) {
-    if (session == null) return const SizedBox.shrink();
-
-    return SessionHoldAction(
-      session: holdableSession(
-        multiplexerSessionName: session.tmuxSessionName,
-        profileName: session.profile.name,
-        status: session.statusNotifier,
-      ),
-    );
-  }
-
-  /// The action that opens the remote file browser for the ACTIVE tab.
+  /// The app bar's single overflow button.
   ///
-  /// Lives on Home's AppBar rather than in the shortcuts drawer, because
-  /// the drawer navigates between SESSIONS — workspaces, tabs, agents,
-  /// project shortcuts — while this browses INSIDE one. Putting it there
-  /// would make a control whose meaning depends on the active tab sit in
-  /// the surface used to change which tab is active.
+  /// Items are built when the menu OPENS, so each one reads the state it
+  /// depends on at that moment rather than holding a subscription. Both
+  /// facts it reads — connection status and hold state — arrive from
+  /// listenables that outlive the menu, and a menu that is open for two
+  /// seconds does not need to repaint on their clock.
   ///
-  /// Rendered as nothing at all unless a session is connected. A browser
-  /// over a dead connection has only one outcome, and offering the tap
-  /// just to answer it with an error is worse than not offering it —
-  /// the same reasoning [TerminalSemantics.hostAdvisory] is built on.
-  Widget _buildBrowseAction(TerminalSession? session) {
-    if (session == null) return const SizedBox.shrink();
-
-    return ValueListenableBuilder<ConnectionStatus>(
-      valueListenable: session.statusNotifier,
-      builder: (context, status, _) {
-        final service = session.fileService;
-        final downloads = session.downloadService;
-        final uploads = session.uploadService;
-        if (status != ConnectionStatus.connected ||
-            service == null ||
-            downloads == null ||
-            uploads == null) {
-          return const SizedBox.shrink();
-        }
-        return Semantics(
-          identifier: FilesSemantics.browseButton,
-          child: IconButton(
-            icon: Icon(
-              Icons.folder_outlined,
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.7),
-            ),
-            tooltip: 'Browse files',
-            onPressed: () => FileBrowserSheet.show(
-              context,
-              service: service,
-              downloadService: downloads,
-              uploadService: uploads,
+  /// Unavailable actions are OMITTED rather than greyed out, the same
+  /// reasoning [_buildBrowseAction] was built on: a browser over a dead
+  /// connection has one outcome, and offering the tap just to answer it
+  /// with an error is worse than not offering it.
+  Widget _buildOverflowMenu(
+    BuildContext context,
+    WidgetRef ref,
+    TerminalSession? session,
+  ) {
+    return Semantics(
+      identifier: HomeSemantics.appBarOverflowButton,
+      child: PopupMenuButton<VoidCallback>(
+        tooltip: 'More actions',
+        icon: Icon(
+          Icons.more_vert,
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+        ),
+        onSelected: (action) => action(),
+        itemBuilder: (menuContext) => [
+          // Recovery first, and ALWAYS present: short bodies and system
+          // keyboard insets can hide every control on the panel itself,
+          // so this is the way back from a layout you cannot reach.
+          PopupMenuItem<VoidCallback>(
+            value: () =>
+                unawaited(ref.read(keyboardProvider.notifier).resetGeometry()),
+            child: const ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.restart_alt),
+              title: Text('Reset keyboard layout'),
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildKeyboardToggle(bool kbVisible) {
-    return Container(
-      height: 32,
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.divider, width: 1)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
-            icon: Icon(
-              kbVisible ? Icons.keyboard_hide : Icons.keyboard,
-              color: AppTheme.onSurfaceMuted,
-              size: 18,
-            ),
-            tooltip: kbVisible ? 'Hide keyboard' : 'Show keyboard',
-            onPressed: () =>
-                ref.read(keyboardProvider.notifier).toggleVisibility(),
-          ),
+          ..._overflowSessionItems(session),
         ],
       ),
     );
+  }
+
+  /// The menu entries that only exist while a session is connected.
+  List<PopupMenuEntry<VoidCallback>> _overflowSessionItems(
+    TerminalSession? session,
+  ) {
+    if (session == null) return const [];
+    if (session.statusNotifier.value != ConnectionStatus.connected) {
+      return const [];
+    }
+
+    final entries = <PopupMenuEntry<VoidCallback>>[];
+    final service = session.fileService;
+    final downloads = session.downloadService;
+    final uploads = session.uploadService;
+    if (service != null && downloads != null && uploads != null) {
+      entries.add(
+        PopupMenuItem<VoidCallback>(
+          value: () => FileBrowserSheet.show(
+            context,
+            service: service,
+            downloadService: downloads,
+            uploadService: uploads,
+          ),
+          child: const ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.folder_outlined),
+            title: Text('Browse files'),
+          ),
+        ),
+      );
+    }
+
+    entries.add(
+      PopupMenuItem<VoidCallback>(
+        enabled: false,
+        // The hold action keeps its OWN widget rather than becoming a
+        // plain row here. Its label and icon depend on whether THIS
+        // session is the held one, and that is two listenables deep;
+        // flattening it into a value read at open time would reproduce
+        // the logic its own tests already cover.
+        child: SessionHoldAction(
+          session: holdableSession(
+            multiplexerSessionName: session.tmuxSessionName,
+            profileName: session.profile.name,
+            status: session.statusNotifier,
+          ),
+          asMenuItem: true,
+        ),
+      ),
+    );
+    return entries;
   }
 
   Widget _buildEmptyState(BuildContext context) {
