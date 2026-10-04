@@ -498,13 +498,28 @@ class _TestStatusCard extends StatelessWidget {
 /// LIVE column count `previewColumnsForFontSize` measures for it at this
 /// control's own on-screen width.
 ///
-/// That width comes from a [LayoutBuilder] around this control, not from
-/// `MediaQuery`'s screen size — the real terminal view sits inside this
-/// same Scaffold's body, narrower than the full screen once its own
-/// padding is subtracted, so the control's own measured width is the
-/// closer honest answer of the two, even though neither is the ACTUAL
-/// terminal viewport width. That number only ever comes from
-/// `TerminalView`'s real layout once a session exists (see
+/// The width is the SCREEN's, and that choice was wrong here until it was
+/// measured. This control previously used its own [LayoutBuilder]
+/// constraints, reasoning that the terminal sits inside the same Scaffold
+/// and must therefore be narrower than the full screen. Measured on a
+/// Samsung S22 Ultra on 2026-10-04, that reasoning was backwards: the
+/// preview announced **~39 columns at 13pt while the PTY the terminal
+/// actually negotiated was 49** — read from the host with `stty -f
+/// /dev/ttysNNN size` against the session that phone had just opened.
+///
+/// The cause is that this control is not the terminal. It sits inside the
+/// editor's page padding AND its own card padding, roughly 40dp a side,
+/// so its constraints describe a box about 80% as wide as the terminal.
+/// `HelmTerminalView` is a direct child of an `Expanded` with no
+/// horizontal padding at all (`home_screen.dart:279-280`), so the screen
+/// width is the honest approximation and the card's width never was.
+///
+/// The error was systematic rather than noisy, which is what made it
+/// findable: 49/39 is 1.256, and applying that to the 8pt chip's old ~64
+/// lands on ~80, matching an earlier device reading of 81 columns at 8pt.
+///
+/// This is still an approximation. The ACTUAL viewport only ever comes
+/// from `TerminalView`'s real layout once a session exists (see
 /// `terminal_view_widget.dart`); this preview exists to inform the choice
 /// before a session does.
 class _FontSizeControl extends StatelessWidget {
@@ -533,36 +548,29 @@ class _FontSizeControl extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               'Smaller text fits more columns, which matters for TUIs '
-              'that paint a fixed 80-column layout — shown below for '
-              'each size on this screen.',
+              'that paint a fixed 80-column layout — the estimate below '
+              'is for the terminal on this device.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: AppConstants.terminalFontSizeOptions.map((size) {
-                    final columns = previewColumnsForFontSize(
-                      fontSize: size,
-                      viewportWidth: width,
-                    );
-                    final selected = size == value;
-                    return Semantics(
-                      identifier: ProfileEditSemantics.fontSizeOption(
-                        size.round(),
-                      ),
-                      child: ChoiceChip(
-                        label: Text('${size.round()}pt — ~$columns cols'),
-                        selected: selected,
-                        onSelected: (_) => onChanged(size),
-                      ),
-                    );
-                  }).toList(),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: AppConstants.terminalFontSizeOptions.map((size) {
+                final columns = previewColumnsForFontSize(
+                  fontSize: size,
+                  viewportWidth: MediaQuery.sizeOf(context).width,
                 );
-              },
+                final selected = size == value;
+                return Semantics(
+                  identifier: ProfileEditSemantics.fontSizeOption(size.round()),
+                  child: ChoiceChip(
+                    label: Text('${size.round()}pt — ~$columns cols'),
+                    selected: selected,
+                    onSelected: (_) => onChanged(size),
+                  ),
+                );
+              }).toList(),
             ),
           ],
         ),
