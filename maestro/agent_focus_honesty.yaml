@@ -1,0 +1,43 @@
+# Validates that tapping an agent reports WHERE the focus landed instead of
+# closing the drawer as if this screen had followed it.
+#
+# Deliberately does NOT launch the app. helm opens behind a biometric gate
+# Maestro cannot pass, so `launchApp` would strand the run there. This
+# attaches to the already-running, already-unlocked app.
+#
+# The assertion that matters is the drawer STAYING OPEN. Before the fix,
+# closing it was the success report — it told the user they were now
+# looking at that agent, which is the one thing that did not happen.
+appId: com.darkcodex.helm
+---
+# Idempotent start: a previous run leaves the drawer OPEN, and with it open
+# the hamburger is covered, so asserting on it first fails for reasons that
+# have nothing to do with what this flow tests.
+- runFlow:
+    when:
+      visible: "WORKSPACES"
+    commands:
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+- assertVisible:
+    id: "helm.home.drawer_button"
+- tapOn:
+    id: "helm.home.drawer_button"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "AGENTS"
+- tapOn: ".*Helm.*Go Nexa.*"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: /tmp/maestro_after_agent_tap
+# The drawer must still be here: it never followed the focus.
+- assertVisible: "AGENTS"
+# Full-string regex, not substring: Maestro matches the WHOLE text of a
+# node. "on the Mac" alone never matches "Focused pi on the Mac — this
+# screen does not follow", and the failure reads like the app is silent
+# when it is in fact saying exactly the right thing.
+- assertVisible: ".*on the Mac.*does not follow.*"
+# Both halves, in order: what moved, and what did not. A message naming
+# only the first would be the old lie in a longer sentence.
+- assertVisible: ".*Focused.*on the Mac.*"
