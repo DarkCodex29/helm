@@ -267,7 +267,15 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       confirmLabel: 'Create',
       confirmSemanticsId: FilesSemantics.createFolderConfirmButton,
     );
-    if (name == null) return;
+    // `!mounted` as well as a null name, matching [_upload]'s discipline.
+    // These dialogs belong to the ROOT navigator, so the sheet underneath
+    // can be removed while the confirmation stays on screen. Without this
+    // guard the write still went through on the captured notifier — and
+    // [_report]'s own mounted check only suppressed the TOAST, never the
+    // operation. Worse, if another sheet had rebound that notifier
+    // meanwhile, this confirmation would write through the new sheet's
+    // service and current directory.
+    if (name == null || !mounted) return;
 
     final outcome = await _browser.createFolder(name);
     switch (outcome) {
@@ -291,7 +299,8 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       confirmLabel: 'Rename',
       confirmSemanticsId: FilesSemantics.renameConfirmButton,
     );
-    if (name == null) return;
+    // See [_createFolder] for why `!mounted` belongs here.
+    if (name == null || !mounted) return;
 
     final outcome = await _browser.renameEntry(entry, name);
     switch (outcome) {
@@ -375,7 +384,11 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    // `!mounted` first: this is the one of the three that called
+    // `setState` after its dialog, so a sheet removed under the open
+    // confirmation threw outright rather than merely writing when it
+    // should not. See [_createFolder].
+    if (confirmed != true || !mounted) return;
 
     setState(() => _selected = null);
     final outcome = await _browser.deleteEntry(entry);
