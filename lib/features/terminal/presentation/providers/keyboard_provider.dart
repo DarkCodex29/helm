@@ -40,11 +40,31 @@ class KeyboardNotifier extends Notifier<KeyboardState> {
   Object _loadToken = Object();
   Future<void> _writes = Future.value();
 
+  /// Set once this notifier is gone, so a queued write cannot outlive it.
+  ///
+  /// The write queue is per notifier. A container disposed with a write
+  /// still parked could let it finish AFTER a replacement notifier had
+  /// already reset the same stored preference, putting stale geometry
+  /// back. A disposal check rather than a shared global queue: global
+  /// state in a preference store is hostile to tests, and the trigger
+  /// needs slow storage plus container replacement.
+  var _disposed = false;
+
   @override
   KeyboardState build() {
     final token = _loadToken = Object();
-    final store = ref.watch(keyboardGeometryStoreProvider);
-    ref.onDispose(() => _loadToken = Object());
+    // READ, not watch. This notifier only ever CALLS methods on the
+    // store; it has nothing to react to. Watching it meant any
+    // invalidation rebuilt the notifier, which returns a fresh default
+    // state — discarding the geometry, the modifiers and the visibility —
+    // and then let an older read repopulate it. Not watching removes that
+    // path rather than defending it, which matters because a defended
+    // rebuild is still a rebuild waiting for another trigger.
+    final store = ref.read(keyboardGeometryStoreProvider);
+    ref.onDispose(() {
+      _disposed = true;
+      _loadToken = Object();
+    });
     store.read().then((geometry) {
       if (identical(token, _loadToken) && geometry != null) {
         state = state.copyWith(geometry: geometry);
@@ -63,7 +83,8 @@ class KeyboardNotifier extends Notifier<KeyboardState> {
     final store = ref.read(keyboardGeometryStoreProvider);
     // Serialize gesture-end writes and reset so stale writes cannot win.
     return _writes = _writes.then((_) async {
-      if (geometry != null) await store.write(geometry);
+      if (_disposed || geometry == null) return;
+      await store.write(geometry);
     });
   }
 
@@ -71,7 +92,10 @@ class KeyboardNotifier extends Notifier<KeyboardState> {
     _loadToken = Object();
     state = state.copyWith(resetGeometry: true);
     final store = ref.read(keyboardGeometryStoreProvider);
-    return _writes = _writes.then((_) => store.clear());
+    return _writes = _writes.then((_) async {
+      if (_disposed) return;
+      await store.clear();
+    });
   }
 
   void toggleVisibility() => state = state.copyWith(visible: !state.visible);

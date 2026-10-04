@@ -38,11 +38,20 @@ class FloatingKeyboardPanel extends ConsumerStatefulWidget {
 class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
   String? _limit;
 
+  /// The viewport the current [_limit] was measured against.
+  ///
+  /// "Minimum size" and "Maximum size" describe a clamp, and rotating or
+  /// resizing the window MOVES that clamp — so the message outlived the
+  /// fact it reported, telling the user they were at a limit they no
+  /// longer were. Reported as cosmetic by an adversarial review; see
+  /// odd/reviews/floating-keyboard.md.
+  Size? _limitViewport;
+
   @override
   Widget build(BuildContext context) {
     final geometry = ref.watch(keyboardProvider.select((s) => s.geometry));
     final notifier = ref.read(keyboardProvider.notifier);
-    if (geometry == null) {
+    if (geometry == null || widget.viewport != _limitViewport) {
       _limit = null;
     }
     // Home's AppBar and fixed safe-area FAB shelf already consume vertical
@@ -109,7 +118,10 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
           h,
         ),
       );
-      setState(() => _limit = limit);
+      setState(() {
+        _limit = limit;
+        _limitViewport = widget.viewport;
+      });
     }
 
     Widget grip(String label, String id, IconData icon, bool resize) =>

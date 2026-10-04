@@ -117,4 +117,73 @@ void main() {
     await store.clear();
     expect(await store.read(), isNull);
   });
+
+  test('invalidating the store does not discard the live geometry', () async {
+    // `build()` used to `ref.watch` the store while only ever CALLING
+    // methods on it. Watching something you do not react to means any
+    // invalidation rebuilds the notifier, which returns a fresh default
+    // state — losing the geometry, the modifiers and the visibility — and
+    // then lets an older read repopulate it. An adversarial review
+    // reported it as a lifecycle risk; see
+    // odd/reviews/floating-keyboard.md.
+    //
+    // The fix is to stop watching rather than to defend the rebuild: the
+    // store is a fixed dependency, so there is no recompute to survive.
+    final store = _MemoryStore();
+    final container = ProviderContainer(
+      overrides: [keyboardGeometryStoreProvider.overrideWithValue(store)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(keyboardProvider.notifier);
+    await Future<void>.delayed(Duration.zero);
+
+    notifier.setGeometry(const KeyboardGeometry(.25, .75, 420, 320));
+    notifier.toggleCtrl();
+    container.invalidate(keyboardGeometryStoreProvider);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      container.read(keyboardProvider).geometry,
+      const KeyboardGeometry(.25, .75, 420, 320),
+    );
+    expect(container.read(keyboardProvider).ctrlHeld, isTrue);
+  });
+
+  test('a write queued before disposal does not land after it', () async {
+    // The write queue is per notifier, so a container disposed with a
+    // pending write could let that write finish AFTER a replacement
+    // notifier had already reset the same stored preference, restoring
+    // stale geometry. Review risk R3; the trigger needs slow storage plus
+    // container replacement, which is why the guard is a disposal check
+    // rather than shared global state.
+    final store = _BlockedWriteStore();
+    final container = ProviderContainer(
+      overrides: [keyboardGeometryStoreProvider.overrideWithValue(store)],
+    );
+    final notifier = container.read(keyboardProvider.notifier);
+    await Future<void>.delayed(Duration.zero);
+
+    notifier.setGeometry(const KeyboardGeometry(.1, .1, 400, 300));
+    final pending = notifier.saveGeometry();
+    container.dispose();
+    store.release.complete();
+    await pending;
+
+    expect(
+      store.value,
+      isNull,
+      reason: 'a disposed notifier must not reach storage',
+    );
+  });
+}
+
+/// A store whose writes park until the test releases them.
+class _BlockedWriteStore extends _MemoryStore {
+  final release = Completer<void>();
+
+  @override
+  Future<void> write(KeyboardGeometry geometry) async {
+    await release.future;
+    return super.write(geometry);
+  }
 }
