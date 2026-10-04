@@ -137,13 +137,18 @@ class HostDiagnostics {
   // ── Tailscale raw-address stability ─────────────────────────────────
   //
   // The paid-for failure this check exists for: a profile held
-  // `100.100.133.42` while the real host answered on `100.108.167.71` —
+  // `100.64.0.9` while the real host answered on `100.64.0.1` —
   // a dead node-registration address read as a network problem. The
   // MagicDNS name follows the node across a reinstall or a
   // logout/login; the address does not. See README.md (corrected in
   // commit 2f12b55) for the user-facing version of this same warning.
   //
-  // Measured against the owner's real Mac (Tailscale 1.102.4):
+  // Measured against the owner's real Mac (Tailscale 1.102.4). The
+  // addresses and names quoted anywhere below are REDACTED to
+  // documentation placeholders - this repository is public, and a real
+  // tailnet suffix and machine name document someone's live network for
+  // no benefit. Every SHAPE, size, field name and trailing dot is
+  // verbatim from that measurement; only the identifiers were swapped:
   //
   // 1. `tailscale status --peers=false --json` — `--peers=false` OMITS
   //    the `Peer` map, so this command's output size does NOT grow with

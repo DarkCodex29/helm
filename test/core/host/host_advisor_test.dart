@@ -171,9 +171,9 @@ void main() {
         const HostCommandResult(
           stdout:
               '{"BackendState":"Running",'
-              '"TailscaleIPs":["100.108.167.71"],'
-              '"Self":{"DNSName":"gian-macbook-pro.taila49d8e.ts.net."},'
-              '"CurrentTailnet":{"MagicDNSSuffix":"taila49d8e.ts.net",'
+              '"TailscaleIPs":["100.64.0.1"],'
+              '"Self":{"DNSName":"example-host.tailnet-example.ts.net."},'
+              '"CurrentTailnet":{"MagicDNSSuffix":"tailnet-example.ts.net",'
               '"MagicDNSEnabled":true}}',
           exitCode: 0,
         ),
@@ -190,7 +190,7 @@ void main() {
       final advisories = await const HostAdvisor().collect(
         selection: _verifiedTmux,
         runner: runner,
-        connectHost: '100.108.167.71',
+        connectHost: '100.64.0.1',
       );
 
       expect(

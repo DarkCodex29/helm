@@ -324,9 +324,9 @@ void main() {
     // `HostDiagnostics._tailscaleStatusCommand` for the full citation.
     const statusJson =
         '{"BackendState":"Running",'
-        '"TailscaleIPs":["100.108.167.71","fd7a:115c:a1e0::9401:a7d8"],'
-        '"Self":{"DNSName":"gian-macbook-pro.taila49d8e.ts.net."},'
-        '"CurrentTailnet":{"MagicDNSSuffix":"taila49d8e.ts.net",'
+        '"TailscaleIPs":["100.64.0.1","fd7a:115c:a1e0::1"],'
+        '"Self":{"DNSName":"example-host.tailnet-example.ts.net."},'
+        '"CurrentTailnet":{"MagicDNSSuffix":"tailnet-example.ts.net",'
         '"MagicDNSEnabled":true}}';
 
     test('warns and names the MagicDNS name, stripped of its trailing dot, '
@@ -342,17 +342,17 @@ void main() {
       );
 
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        '100.108.167.71',
+        '100.64.0.1',
       );
 
       expect(finding.status, DiagnosticStatus.warn);
-      expect(finding.detail, contains('gian-macbook-pro.taila49d8e.ts.net'));
+      expect(finding.detail, contains('example-host.tailnet-example.ts.net'));
       // The trailing dot from Self.DNSName must never survive into
       // user-facing text.
       expect(finding.detail, isNot(contains('ts.net..')));
       expect(
         finding.remediationCopy,
-        contains('gian-macbook-pro.taila49d8e.ts.net'),
+        contains('example-host.tailnet-example.ts.net'),
       );
       expect(finding.remediationCopy, isNot(contains('ts.net..')));
     });
@@ -369,7 +369,7 @@ void main() {
       );
 
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        'gian-macbook-pro.taila49d8e.ts.net',
+        'example-host.tailnet-example.ts.net',
       );
 
       expect(finding.status, DiagnosticStatus.ok);
@@ -407,9 +407,12 @@ void main() {
       );
 
       // In-range but NOT the exact address this host's TailscaleIPs
-      // lists — must not be treated as a match.
+      // lists — must not be treated as a match. Kept deliberately far
+      // from the fixture's own 100.64.0.1 so the two can never collapse
+      // into the same literal again: when they did, this test failed
+      // honestly rather than passing on a coincidence.
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        '100.64.0.1',
+        '100.64.0.77',
       );
 
       expect(finding.status, DiagnosticStatus.ok);
@@ -422,7 +425,7 @@ void main() {
       );
 
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        '100.108.167.71',
+        '100.64.0.1',
       );
 
       expect(finding.status, DiagnosticStatus.ok);
@@ -447,7 +450,7 @@ void main() {
         );
 
         final finding = await diagnostics.evaluateTailscaleAddressStability(
-          '100.108.167.71',
+          '100.64.0.1',
         );
 
         expect(finding.status, DiagnosticStatus.unknown);
@@ -466,7 +469,7 @@ void main() {
       );
 
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        '100.108.167.71',
+        '100.64.0.1',
       );
 
       expect(finding.status, DiagnosticStatus.unknown);
@@ -485,16 +488,16 @@ void main() {
         const HostCommandResult(
           stdout:
               '{"BackendState":"Running",'
-              '"TailscaleIPs":["100.108.167.71"],'
-              '"Self":{"DNSName":"gian-macbook-pro.taila49d8e.ts.net."},'
-              '"CurrentTailnet":{"MagicDNSSuffix":"taila49d8e.ts.net",'
+              '"TailscaleIPs":["100.64.0.1"],'
+              '"Self":{"DNSName":"example-host.tailnet-example.ts.net."},'
+              '"CurrentTailnet":{"MagicDNSSuffix":"tailnet-example.ts.net",'
               '"MagicDNSEnabled":false}}',
           exitCode: 0,
         ),
       );
 
       final finding = await diagnostics.evaluateTailscaleAddressStability(
-        '100.108.167.71',
+        '100.64.0.1',
       );
 
       expect(finding.status, DiagnosticStatus.warn);
@@ -503,7 +506,7 @@ void main() {
       // exact antipattern this project already paid for elsewhere
       // (an error message instructing "forget the pinned key" when
       // no such UI existed).
-      expect(finding.remediationCopy, isNot(contains('gian-macbook-pro')));
+      expect(finding.remediationCopy, isNot(contains('example-host')));
       expect(finding.remediationCopy, contains('MagicDNS'));
     });
   });

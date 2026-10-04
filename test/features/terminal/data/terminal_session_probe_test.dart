@@ -593,9 +593,9 @@ void main() {
         const HostCommandResult(
           stdout:
               '{"BackendState":"Running",'
-              '"TailscaleIPs":["100.108.167.71"],'
-              '"Self":{"DNSName":"gian-macbook-pro.taila49d8e.ts.net."},'
-              '"CurrentTailnet":{"MagicDNSSuffix":"taila49d8e.ts.net",'
+              '"TailscaleIPs":["100.64.0.1"],'
+              '"Self":{"DNSName":"example-host.tailnet-example.ts.net."},'
+              '"CurrentTailnet":{"MagicDNSSuffix":"tailnet-example.ts.net",'
               '"MagicDNSEnabled":true}}',
           exitCode: 0,
         ),
@@ -613,7 +613,7 @@ void main() {
         profile: ConnectionProfile(
           id: 'profile-1',
           name: 'Test Host',
-          host: '100.108.167.71',
+          host: '100.64.0.1',
           username: 'tester',
           multiplexer: 'tmux',
         ),
@@ -636,7 +636,7 @@ void main() {
         session.advisoriesNotifier.value
             .firstWhere((a) => a.id == HostAdvisoryId.tailscaleAddressUnstable)
             .detail,
-        contains('gian-macbook-pro.taila49d8e.ts.net'),
+        contains('example-host.tailnet-example.ts.net'),
       );
     });
 

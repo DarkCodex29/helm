@@ -14,7 +14,7 @@ import '../../../../helpers/fake_ssh_service.dart';
 const _defaultProfile = ConnectionProfile(
   id: 'p-default',
   name: 'Mac',
-  host: '100.100.133.42',
+  host: '100.64.0.9',
   username: 'gian',
   isDefault: true,
 );

@@ -484,11 +484,11 @@ void main() {
       final summary = SSHService.summarizeError(
         SocketException(
           'Connection timed out',
-          address: InternetAddress('100.100.133.42'),
+          address: InternetAddress('100.64.0.9'),
         ),
       );
 
-      expect(summary, contains('100.100.133.42'));
+      expect(summary, contains('100.64.0.9'));
     });
 
     test('distinguishes a refused connection from an unanswered one', () {

@@ -10,18 +10,22 @@ in how the project teaches and detects its use. Baseline `089f30c` on
 explicitly "Usá la IP de Tailscale, no la de la LAN". A Tailscale IP is stable
 per NODE REGISTRATION, not per machine: a reinstall, a logout/login, or a new
 tailnet entry issues a new one. That already cost one misdiagnosed bug, where a
-profile still held `100.100.133.42` while the host answered on
-`100.108.167.71`, and it read as a network failure.
+profile still held `100.64.0.9` while the host answered on
+`100.64.0.1`, and it read as a network failure.
 
 MagicDNS is the stable identifier and is already enabled on the owner's tailnet.
 
 ## Measured evidence (owner's Mac, 2026-10-03)
 
+Identifiers below are REDACTED to documentation placeholders, because this
+repository is public. The shapes, field names, sizes and the trailing dot are
+verbatim from the real measurement; only addresses and names were swapped.
+
 ```text
 MagicDNSEnabled: true
-MagicDNSSuffix:  taila49d8e.ts.net
-Self.DNSName:    "gian-macbook-pro.taila49d8e.ts.net."   <- trailing dot
-TailscaleIPs:    ["100.108.167.71", "fd7a:115c:a1e0::9401:a7d8"]
+MagicDNSSuffix:  tailnet-example.ts.net
+Self.DNSName:    "example-host.tailnet-example.ts.net."   <- trailing dot
+TailscaleIPs:    ["100.64.0.1", "fd7a:115c:a1e0::1"]
 RunSSH:          false
 ```
 
