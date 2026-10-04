@@ -90,6 +90,10 @@ class ShortcutsSemantics {
 class TerminalSemantics {
   const TerminalSemantics._();
 
+  /// The floating keyboard toggle, outside the terminal's output area.
+  /// This checkout's former docked strip had no identifier to migrate.
+  static const keyboardToggle = 'helm.terminal.keyboard_toggle';
+
   /// The overlay shown whenever the session is not connected. Its
   /// presence is the assertion target for connection-failure flows.
   static const connectionStatusOverlay =
@@ -339,4 +343,13 @@ class ProfileEditSemantics {
   /// "the 9pt option" without caring which index it currently renders at.
   static String fontSizeOption(int fontSize) =>
       'helm.profile_edit.font_size_option_$fontSize';
+}
+
+/// Device-local floating keyboard layout controls.
+class KeyboardLayoutSemantics {
+  const KeyboardLayoutSemantics._();
+  static const move = 'helm.terminal.keyboard_move';
+  static const resize = 'helm.terminal.keyboard_resize';
+  static const reset = 'helm.terminal.keyboard_reset';
+  static const limit = 'helm.terminal.keyboard_limit';
 }
