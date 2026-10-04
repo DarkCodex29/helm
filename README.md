@@ -243,4 +243,14 @@ diseño de seguridad funcionando, no un bug.
 
 ## Licencia
 
-Proyecto personal. No distribuido públicamente.
+[Apache License 2.0](LICENSE). Podés usarlo, modificarlo y redistribuirlo, incluso en
+algo comercial, mientras conserves el aviso de copyright y la licencia.
+
+Se eligió Apache-2.0 sobre MIT por dos cosas que a esta app le aplican: trae una
+concesión explícita de patentes — MIT no dice nada al respecto, y esto implementa SSH y
+criptografía — y su sección 5 hace que cualquier contribución que te manden quede bajo
+los mismos términos sin que haya que acordarlo aparte.
+
+Ojó: la licencia te deja redistribuir el código, pero el APK que sale de este repo sin un
+keystore propio está firmado con la clave de debug. Ver *Firma de release* más arriba
+antes de pasarle un build a alguien.
