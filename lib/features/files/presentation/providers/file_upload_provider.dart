@@ -1,185 +1,290 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/files/data/document_tree_gateway.dart';
 import 'package:helm/features/files/data/saf_upload_source.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/upload_outcome.dart';
 
-/// The live file picker for uploads.
-///
-/// A provider for the same reason
-/// [downloadDestinationServiceProvider] is one: overridden wholesale in
-/// tests, since [SafDocumentTreeGateway] reaches the platform over a
-/// method channel a test host does not have.
+/// The live picker is replaceable in tests because SAF uses a platform channel.
 final uploadSourcePickerProvider = Provider<UploadSourcePicker>(
   (_) => UploadSourcePicker(gateway: SafDocumentTreeGateway()),
 );
 
-// ── State ──────────────────────────────────────────────────────────────────
-
-/// Where one upload is in its life.
-///
-/// FOUR terminal states rather than one generic failure, mirroring
-/// [FileDownloadStatus]'s own split: [destinationExists] is kept apart
-/// from [failed] because the user can ACT on it \u2014 pick a different file,
-/// or rename the one on the host \u2014 and folding it into a generic failure
-/// would hide that there is anything to do.
+/// Each item is pending, moving bytes, or in one of the service's four
+/// distinct terminal states. An empty queue replaces the old idle status.
 enum FileUploadStatus {
-  /// Nothing is running and nothing needs acknowledging.
-  idle,
-
-  /// Bytes are moving. [FileUploadState.percent] is meaningful only here.
+  pending,
   uploading,
-
-  /// Every byte arrived and the server holds it under [FileUploadState.name].
   completed,
-
-  /// The user stopped it. NOT a failure.
   cancelled,
-
-  /// Something already answers to the destination path. See
-  /// [UploadDestinationExists] for why this is checked before a single
-  /// local byte is read.
   destinationExists,
-
-  /// It did not finish. [FileUploadState.failure] says why.
   failed,
 }
 
+/// Immutable detail for ONE queue item; names need not be unique, IDs are.
 @immutable
-class FileUploadState {
-  const FileUploadState({
-    this.name,
-    this.status = FileUploadStatus.idle,
+class FileUploadItem {
+  const FileUploadItem({
+    required this.id,
+    required this.source,
+    required this.destinationPath,
+    this.status = FileUploadStatus.pending,
     this.percent = 0,
-    this.failure,
+    this.outcome,
   });
 
-  /// What is being, or was last, uploaded. Null only in [idle].
-  final String? name;
-
+  final int id;
+  final SafUploadSource source;
+  final String destinationPath;
+  String get name => source.name;
   final FileUploadStatus status;
 
-  /// Whole percent, 0-100. Updated only when the number CHANGES \u2014 the
-  /// throttling happens in [SftpUploadService.upload], the only place that
-  /// knows the total.
+  /// Whole percent for this item alone. Completed items retain 100;
+  /// cancelled/failed items retain their last observed progress.
   final int percent;
 
-  /// Why [status] is [FileUploadStatus.failed]. Null in every other state.
-  final UploadFailure? failure;
+  /// The exact service result, including the completed remote path. Pending
+  /// cancellations have a synthetic UploadCancelled without opening a channel.
+  final UploadOutcome? outcome;
+  UploadFailure? get failure => switch (outcome) {
+    UploadFailed(:final reason) => reason,
+    _ => null,
+  };
+  bool get isTerminal =>
+      status != FileUploadStatus.pending &&
+      status != FileUploadStatus.uploading;
 
-  /// Whether a transfer is running and can still be stopped.
-  bool get isRunning => status == FileUploadStatus.uploading;
-
-  /// Whether this state is something the user has to dismiss.
-  bool get needsAcknowledgement =>
-      status == FileUploadStatus.completed ||
-      status == FileUploadStatus.cancelled ||
-      status == FileUploadStatus.destinationExists ||
-      status == FileUploadStatus.failed;
+  FileUploadItem _with({
+    FileUploadStatus? status,
+    int? percent,
+    UploadOutcome? outcome,
+  }) => FileUploadItem(
+    id: id,
+    source: source,
+    destinationPath: destinationPath,
+    status: status ?? this.status,
+    percent: percent ?? this.percent,
+    outcome: outcome ?? this.outcome,
+  );
 }
 
-// ── Notifier ───────────────────────────────────────────────────────────────
+/// A stable snapshot, including finished items until acknowledged. Aggregates
+/// are computed once per snapshot, so UI consumers need not scan the queue.
+@immutable
+class FileUploadState {
+  FileUploadState({Iterable<FileUploadItem> items = const []})
+    : items = List.unmodifiable(items) {
+    doneCount = this.items.where((item) => item.isTerminal).length;
+    remainingCount = this.items.length - doneCount;
+    isRunning = this.items.any(
+      (item) => item.status == FileUploadStatus.uploading,
+    );
+  }
 
-/// Uploads one local file at a time.
-///
-/// One at a time for the same reason [FileDownloadNotifier] is: the sheet
-/// offers exactly one upload affordance, and a second concurrent transfer
-/// would have nowhere to show its progress. [start] replaces whatever came
-/// before rather than queueing.
+  final List<FileUploadItem> items;
+
+  /// All terminal items, not just successful ones.
+  late final int doneCount;
+
+  /// Pending plus uploading items, including cancellation awaiting cleanup.
+  late final int remainingCount;
+  late final bool isRunning;
+}
+
+/// FIFO orchestration, not a replacement of the last transfer. Enqueue adds
+/// work even during a drain; progress and terminal outcomes belong to IDs.
 class FileUploadNotifier extends Notifier<FileUploadState> {
   @override
-  FileUploadState build() => const FileUploadState();
+  FileUploadState build() {
+    final generation = Object();
+    _generation = generation;
+    // A rebuild cancels old work but must retain its drain lock until the
+    // awaited service returns: cancellation alone does not close a channel.
+    _services.clear();
+    ref.onDispose(() {
+      if (!identical(_generation, generation)) return;
+      _generation = null;
+      _cancellation?.cancel();
+      _cancellation = null;
+      _activeId = null;
+      _services.clear();
+    });
+    return FileUploadState();
+  }
 
-  /// The cancellation for the transfer in flight, or null when none is.
+  int _nextId = 0;
+  Object? _generation;
+  bool _draining = false;
+  int? _activeId;
   UploadCancellation? _cancellation;
+  final _services = <int, SftpUploadService>{};
 
-  /// Uploads [source] to [destinationPath] through [service].
-  ///
-  /// Returns whether it completed, which is the ONE outcome the caller
-  /// needs to act on beyond reporting: [FileBrowserSheet] refreshes its
-  /// listing only then, mirroring the refresh-on-success rule
-  /// [FileBrowserNotifier.createFolder] already follows for every other
-  /// write.
-  ///
-  /// Never throws \u2014 [SftpUploadService.upload] reports every ending as a
-  /// value.
-  Future<bool> start(
+  /// Returns the new ID immediately. Observe its outcome through the provider
+  /// (and refresh a listing on UploadCompleted), rather than awaiting a bool.
+  int enqueue(
     SftpUploadService service,
     String destinationPath,
     SafUploadSource source,
-  ) async {
-    final cancellation = UploadCancellation();
-    _cancellation = cancellation;
-
+  ) {
+    final id = _nextId++;
+    _services[id] = service;
     state = FileUploadState(
-      name: source.name,
-      status: FileUploadStatus.uploading,
+      items: [
+        ...state.items,
+        FileUploadItem(
+          id: id,
+          source: source,
+          destinationPath: destinationPath,
+        ),
+      ],
     );
+    unawaited(_drain());
+    return id;
+  }
 
-    final outcome = await service.upload(
-      source,
-      destinationPath,
-      cancellation: cancellation,
-      onProgress: (percent) {
-        // A newer transfer may have started while this one was in flight;
-        // its progress is the current one, and this is a stale echo.
-        if (!identical(_cancellation, cancellation)) return;
-        state = FileUploadState(
-          name: source.name,
-          status: FileUploadStatus.uploading,
-          percent: percent,
+  Future<void> _drain() async {
+    // Each upload opens an SFTP channel. Twenty simultaneous channels on
+    // one SSH connection are deliberately NOT this change: retain this lock
+    // through cancellation and service cleanup before opening the next one.
+    if (_draining) return;
+    _draining = true;
+    final generation = _generation;
+    try {
+      while (identical(_generation, generation)) {
+        final pending = state.items.where(
+          (item) => item.status == FileUploadStatus.pending,
         );
-      },
-    );
-
-    if (!identical(_cancellation, cancellation)) return false;
-    _cancellation = null;
-
-    switch (outcome) {
-      case UploadCompleted():
-        state = FileUploadState(
-          name: source.name,
-          status: FileUploadStatus.completed,
-          percent: 100,
+        if (pending.isEmpty) break;
+        final item = pending.first;
+        final service = _services.remove(item.id)!;
+        final cancellation = UploadCancellation();
+        _activeId = item.id;
+        _cancellation = cancellation;
+        _replace(item._with(status: FileUploadStatus.uploading));
+        UploadOutcome outcome;
+        try {
+          outcome = await service.upload(
+            item.source,
+            item.destinationPath,
+            cancellation: cancellation,
+            onProgress: (percent) {
+              // Identity guards both the item and its transfer, not its name or
+              // list position. Late callbacks after cancel, completion, disposal
+              // or a provider rebuild must never overwrite another item's data.
+              if (!identical(_generation, generation) ||
+                  !identical(_cancellation, cancellation) ||
+                  _activeId != item.id ||
+                  cancellation.isCancelled) {
+                return;
+              }
+              _replace(
+                item._with(
+                  status: FileUploadStatus.uploading,
+                  percent: percent,
+                ),
+              );
+            },
+          );
+        } catch (error, stack) {
+          // A throw violates the service contract: this is a bug being
+          // contained, not a normal ending or evidence of user cancellation.
+          const HelmLogger('FileUploadNotifier').e(
+            'Upload service unexpectedly threw for queue item ${item.id}',
+            error,
+            stack,
+          );
+          outcome = UploadFailed(UploadFailure.unknown, detail: '$error');
+        }
+        if (!identical(_generation, generation) ||
+            !identical(_cancellation, cancellation)) {
+          return;
+        }
+        _cancellation = null;
+        _activeId = null;
+        final current = state.items.firstWhere((entry) => entry.id == item.id);
+        final status = switch (outcome) {
+          UploadCompleted() => FileUploadStatus.completed,
+          UploadCancelled() => FileUploadStatus.cancelled,
+          UploadDestinationExists() => FileUploadStatus.destinationExists,
+          UploadFailed() => FileUploadStatus.failed,
+        };
+        _replace(
+          current._with(
+            status: status,
+            outcome: outcome,
+            percent: outcome is UploadCompleted ? 100 : current.percent,
+          ),
         );
-        return true;
-
-      case UploadCancelled():
-        state = FileUploadState(
-          name: source.name,
-          status: FileUploadStatus.cancelled,
-        );
-        return false;
-
-      case UploadDestinationExists():
-        state = FileUploadState(
-          name: source.name,
-          status: FileUploadStatus.destinationExists,
-        );
-        return false;
-
-      case UploadFailed(:final reason):
-        state = FileUploadState(
-          name: source.name,
-          status: FileUploadStatus.failed,
-          failure: reason,
-        );
-        return false;
+        // Every terminal outcome advances FIFO, including a failure or a
+        // single-item cancellation; none implicitly cancels pending work.
+      }
+    } finally {
+      // Release only after the awaited upload (including cleanup) settles.
+      _cancellation = null;
+      _activeId = null;
+      _draining = false;
+      // Old generation's cleanup has now finished. A rebuilt provider may
+      // have pending work, but a disposed provider must not read state.
+      if (_generation != null && !identical(_generation, generation)) {
+        unawaited(_drain());
+      }
     }
   }
 
-  /// Stops the transfer in flight, if there is one.
-  ///
-  /// Only a REQUEST, mirroring [FileDownloadNotifier.cancel]: the engine
-  /// notices at the next chunk boundary and reports [UploadCancelled]
-  /// itself.
-  void cancel() => _cancellation?.cancel();
+  void _replace(FileUploadItem item) {
+    state = FileUploadState(
+      items: state.items.map((entry) => entry.id == item.id ? item : entry),
+    );
+  }
 
-  /// Clears a finished upload the user has acknowledged.
+  /// Cancels only this ID. Pending work ends immediately without a channel;
+  /// active work is a REQUEST and remains uploading until the service returns
+  /// its actual outcome (a too-late request can still finish successfully).
+  void cancelItem(int id) {
+    if (_activeId == id) {
+      _cancellation?.cancel();
+      return;
+    }
+    final pending = state.items.where(
+      (item) => item.id == id && item.status == FileUploadStatus.pending,
+    );
+    if (pending.isEmpty) return;
+    _services.remove(id);
+    _replace(
+      pending.first._with(
+        status: FileUploadStatus.cancelled,
+        outcome: const UploadCancelled(),
+      ),
+    );
+  }
+
+  /// Cancels all CURRENT work, not future enqueues. Mark pending items in
+  /// one snapshot before any listener can enqueue new work. Keep the active
+  /// lock until cleanup; cancel-all must not let a new channel race that one.
+  void cancelAll() {
+    _cancellation?.cancel();
+    _services.clear();
+    state = FileUploadState(
+      items: state.items.map(
+        (item) => item.status == FileUploadStatus.pending
+            ? item._with(
+                status: FileUploadStatus.cancelled,
+                outcome: const UploadCancelled(),
+              )
+            : item,
+      ),
+    );
+  }
+
+  /// Acknowledges terminal history only. Unlike the old single-upload
+  /// dismiss, this cannot invalidate or silently discard outstanding work.
   void dismiss() {
-    _cancellation = null;
-    state = const FileUploadState();
+    state = FileUploadState(
+      items: state.items.where((item) => !item.isTerminal),
+    );
   }
 }
 

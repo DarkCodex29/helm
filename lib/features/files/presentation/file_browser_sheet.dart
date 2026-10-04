@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
+import 'package:helm/features/files/data/saf_upload_source.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/download_destination.dart';
@@ -34,6 +35,7 @@ import 'package:helm/features/files/presentation/providers/file_upload_provider.
 // keeps the privacy that was already correct.
 
 part 'sheet/name_prompt_dialog.dart';
+part 'sheet/upload_source_dialog.dart';
 part 'sheet/transfer_strip.dart';
 part 'sheet/destination_bar.dart';
 part 'sheet/failure_copy.dart';
@@ -189,35 +191,43 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     await _downloads.start(widget.downloadService, entry);
   }
 
-  /// Picks a local file and uploads it into the directory currently shown.
-  ///
-  /// Refuses while [FileUploadState.isRunning], mirroring [_download]'s
-  /// own refusal and for the identical reason: the strip shows one
-  /// transfer, and starting a second would abandon the one on screen with
-  /// nothing left to show its progress.
-  ///
-  /// A DECLINED PICK ends here silently — [UploadSourcePicker.pick]
-  /// already folds "nothing to upload" and "this platform cannot pick" into
-  /// the same null, and neither is a failure worth a toast.
-  ///
-  /// Refreshes the listing on completion, matching every other write this
-  /// sheet performs: a browser that still omitted the uploaded file would
-  /// tell the user their upload did nothing when it worked.
+  final _uploadDirectories = <int, String>{};
+  bool _pickingUpload = false;
+
+  /// Snapshot the destination before opening either modal. New picks append
+  /// to the FIFO even while bytes move; overlapping picker routes do not.
+  /// Decline and unsupported picking both stay silent, as the picker intends.
   Future<void> _upload() async {
-    if (ref.read(fileUploadProvider).isRunning) return;
+    if (_pickingUpload) return;
     final current = ref.read(fileBrowserProvider).path;
     if (current == null) return;
-
-    final source = await ref.read(uploadSourcePickerProvider).pick();
-    if (source == null) return;
-
-    final destinationPath = remoteJoin(current, source.name);
-    final completed = await _uploads.start(
-      widget.uploadService,
-      destinationPath,
-      source,
-    );
-    if (completed) await _browser.refresh();
+    final picker = ref.read(uploadSourcePickerProvider);
+    _pickingUpload = true;
+    try {
+      final choice = await showDialog<_UploadSource>(
+        context: context,
+        builder: (_) => const _UploadSourceDialog(),
+      );
+      if (choice == null || !mounted) return;
+      final List<SafUploadSource> sources;
+      if (choice == _UploadSource.documents) {
+        final source = await picker.pick();
+        sources = source == null ? [] : [source];
+      } else {
+        sources = await picker.pickMedia() ?? [];
+      }
+      if (!mounted) return;
+      for (final source in sources) {
+        final id = _uploads.enqueue(
+          widget.uploadService,
+          remoteJoin(current, source.name),
+          source,
+        );
+        _uploadDirectories[id] = current;
+      }
+    } finally {
+      _pickingUpload = false;
+    }
   }
 
   /// Opens the system folder picker.
@@ -387,6 +397,21 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
     final state = ref.watch(fileBrowserProvider);
     final download = ref.watch(fileDownloadProvider);
     final upload = ref.watch(fileUploadProvider);
+    ref.listen(fileUploadProvider, (_, next) {
+      var refresh = false;
+      for (final item in next.items) {
+        if (!item.isTerminal) continue;
+        final directory = _uploadDirectories.remove(item.id);
+        if (directory != null &&
+            item.outcome is UploadCompleted &&
+            directory == ref.read(fileBrowserProvider).path) {
+          refresh = true;
+        }
+      }
+      // Observe each owned ID once, not a boolean or a name shared by items.
+      // Do not jump back if the user navigated away while uploading.
+      if (refresh) _browser.refresh();
+    });
     final notifier = _browser;
     final picker = ref.watch(uploadSourcePickerProvider);
 
@@ -452,7 +477,7 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
               const _DestinationBar(),
               _UploadStatusBar(
                 state: upload,
-                onCancel: _uploads.cancel,
+                onCancel: _uploads.cancelAll,
                 onDismiss: _uploads.dismiss,
               ),
               _DownloadStatusBar(
