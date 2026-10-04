@@ -1252,10 +1252,11 @@ void main() {
 
       final pins = await service.listPinnedHosts();
 
-      expect(
-        pins.map((p) => '${p.host}:${p.port}'),
-        ['alpha.example.com:22', 'alpha.example.com:2222', 'charlie.example.com:22'],
-      );
+      expect(pins.map((p) => '${p.host}:${p.port}'), [
+        'alpha.example.com:22',
+        'alpha.example.com:2222',
+        'charlie.example.com:22',
+      ]);
     });
 
     test('enumerates several pinned hosts', () async {
