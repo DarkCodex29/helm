@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +19,8 @@ void main() {
   FileBrowserNotifier notifier() =>
       container.read(fileBrowserProvider.notifier);
   FileBrowserState state() => container.read(fileBrowserProvider);
+
+  _staleRefreshGroup(notifier, state);
 
   group('open', () {
     test(
@@ -363,6 +367,90 @@ void main() {
       expect(state().entries.map((e) => e.name), ['full-dir']);
     });
   });
+}
+
+/// Two refreshes of one directory: the newest reply must win.
+///
+/// Found by an adversarial review — see odd/reviews/queue-and-strip.md.
+/// Each successful upload starts a refresh without waiting for the one
+/// before it, and the notifier accepted any reply whose path matched the
+/// current path. Upload A and B into the same directory: A's refresh
+/// stalls (the service resolves symlinks asynchronously per entry, with
+/// no serialization), B's refresh returns both files, then A's lands and
+/// overwrites it. The user gets two success receipts and a listing that
+/// omits B.
+void _staleRefreshGroup(
+  FileBrowserNotifier Function() notifier,
+  FileBrowserState Function() state,
+) {
+  group('two listings for the same directory', () {
+    test('the newest reply wins, even when an older one lands later', () async {
+      final session = _GatedSession(directories: {'/home/gian': const []});
+      final service = SftpFileService.withOpener(() async => session);
+
+      final opened = notifier().open(service);
+      await pumpEventQueue();
+      session.gates[0].complete();
+      await opened;
+
+      // Both refreshes in flight at once, which is exactly what two
+      // completing uploads produce.
+      // Deliberately DIFFERENT contents per call: if both replies carried
+      // the same listing the test would pass by coincidence and prove
+      // nothing about which one won.
+      session.listings[1] = [fakeSftpName('a.txt', mode: FakeSftpModes.file)];
+      session.listings[2] = [
+        fakeSftpName('a.txt', mode: FakeSftpModes.file),
+        fakeSftpName('b.txt', mode: FakeSftpModes.file),
+      ];
+      final first = notifier().refresh();
+      await pumpEventQueue();
+      final second = notifier().refresh();
+      await pumpEventQueue();
+      expect(session.gates.length, 3, reason: 'both refreshes are in flight');
+
+      // The NEWER one answers first, then the older one lands late.
+      session.gates[2].complete();
+      await pumpEventQueue();
+      session.gates[1].complete();
+      await Future.wait([first, second]);
+
+      expect(
+        state().entries.map((e) => e.name),
+        containsAll(<String>['a.txt', 'b.txt']),
+        reason: 'a stale reply must not drop the newer listing',
+      );
+    });
+  });
+}
+
+/// A session whose directory listings finish only when the test says so.
+///
+/// The staleness guard the notifier shipped with compared only PATHS, so
+/// two refreshes of the SAME directory both passed it and whichever
+/// finished last won — not the newest. Proving that needs the first reply
+/// to land AFTER the second, which real timing will not reliably produce,
+/// so each `listdir` parks on a completer this test releases by hand.
+class _GatedSession extends FakeSftpSession {
+  _GatedSession({required super.directories});
+
+  /// One completer per `listdir` call, in call order.
+  final gates = <Completer<void>>[];
+
+  /// What the Nth call should see, keyed by call index, so an older reply
+  /// can carry an older listing rather than merely arriving late with
+  /// identical contents. A map rather than a list: an indexed list has to
+  /// be grown with nulls it cannot hold.
+  final listings = <int, List<SftpName>>{};
+
+  @override
+  Future<List<SftpName>> listdir(String path) async {
+    final index = gates.length;
+    final gate = Completer<void>();
+    gates.add(gate);
+    await gate.future;
+    return listings[index] ?? await super.listdir(path);
+  }
 }
 
 SftpFileService _service({

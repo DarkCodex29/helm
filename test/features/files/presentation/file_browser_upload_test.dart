@@ -324,7 +324,13 @@ void main() {
       expect(find.text('Cancel all'), findsOneWidget);
       await tester.tap(_byId(FilesSemantics.uploadCancelButton));
       await tester.pumpAndSettle();
-      expect(find.text('Upload cancelled.'), findsOneWidget);
+      // NAMES the file. Success and exhaustion receipts already did;
+      // cancellation and failure did not, so once the active line moved
+      // on the user could not tell WHICH file was cancelled, and several
+      // cancellations rendered as indistinguishable receipts with nothing
+      // to retry from. Found by an adversarial review — see
+      // odd/reviews/queue-and-strip.md.
+      expect(find.text('Cancelled a.jpg.'), findsOneWidget);
       expect(find.byTooltip('Dismiss'), findsOneWidget);
     });
 
@@ -428,6 +434,13 @@ void main() {
         session.writtenBytes['/home/gian/report.docx'],
         'hello world'.codeUnits,
       );
+      // ...and the listing is what the USER sees. Asserting only on
+      // `writtenBytes` let this test pass against a still-empty
+      // directory, which is exactly the outcome the comment above calls
+      // dishonest. An adversarial review caught that; see
+      // odd/reviews/queue-and-strip.md.
+      expect(find.text('report.docx'), findsOneWidget);
+      expect(_byId(FilesSemantics.emptyDirectory), findsNothing);
     });
   });
 
@@ -463,6 +476,31 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('could not be uploaded'), findsNothing);
+    });
+
+    testWidgets('a failure receipt names the file that failed', (tester) async {
+      final gateway = FakeDocumentTreeGateway(
+        fileContents: {'content://x/secret.txt': 'nope'.codeUnits},
+        filePick: const PickedDocument(
+          uri: 'content://x/secret.txt',
+          name: 'secret.txt',
+          length: 4,
+        ),
+      );
+      final session = FakeSftpSession(
+        directories: {'/home/gian': const []},
+        openWriteError: SftpStatusError(
+          SftpStatusCode.permissionDenied,
+          'Permission denied',
+        ),
+      );
+      await _pumpSheet(tester, session, gateway: gateway);
+      await _tapUpload(tester);
+
+      // Same rule as the cancellation receipt: with several failures in a
+      // queue, a receipt carrying only the reason leaves the user unable
+      // to tell which file it belongs to.
+      expect(find.textContaining('secret.txt'), findsOneWidget);
     });
   });
 
@@ -539,7 +577,7 @@ void main() {
         container.read(fileUploadProvider).items.single.status,
         FileUploadStatus.cancelled,
       );
-      expect(find.text('Upload cancelled.'), findsOneWidget);
+      expect(find.text('Cancelled big.bin.'), findsOneWidget);
     });
   });
 }
