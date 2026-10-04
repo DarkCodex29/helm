@@ -14,16 +14,45 @@ para atenderlos desde cualquier lado.
 - Pestañas, cada una adjunta a una sesión del multiplexor en la Mac
 - Multiplexores soportados: **herdr** (primario), tmux y zellij
 - Drawer de proyectos con el estado de cada agente en vivo (working / idle / blocked)
-- Barra de teclas especiales: CTRL, ESC, TAB, flechas, PgUp/PgDn
+- Teclado flotante con CTRL, ESC, TAB y flechas; abrilo u ocultalo desde el botón flotante
+- Mové el panel desde el asa y ajustá su tamaño desde la esquina; si queda incómodo,
+  restablecé la disposición con el botón de reinicio
+- Posición y tamaño guardados en este dispositivo (`shared_preferences`), no por servidor
+  ni en la exportación de perfiles; la posición se adapta al girar la pantalla
+- Tamaño entre 370 y 600 píxeles lógicos de ancho y entre 144 y 480 de alto, limitado
+  al espacio disponible; en ventanas más chicas, los límites se reducen y las teclas
+  se pueden recorrer con desplazamiento
+- El panel se superpone al terminal: mostrarlo, moverlo o redimensionarlo no cambia
+  el tamaño de la sesión remota; para recorrer el terminal, arrastrá la vista (sin PgUp/PgDn)
 - Autenticación biométrica antes de cualquier conexión
 - Sesiones persistentes: el multiplexor mantiene todo vivo aunque cierres la app
 
 **Archivos**
 
 - Explorador SFTP sobre la conexión que ya está abierta, sin segundo handshake
+- Creación de carpetas, renombrado y borrado de entradas en el host
 - Descarga con progreso, cancelación y verificación de integridad
-- Guardado en una carpeta que elegís vos, vía Storage Access Framework
+- En Android, guardado en una carpeta que elegís vos, vía Storage Access Framework
 - Apertura con el visor del sistema (Word, PDF, imágenes)
+- Subida al directorio que estás viendo en el host: primero elegís entre documentos
+  o fotos y videos
+- Selección múltiple de fotos y videos: cada elemento entra en una cola y se sube de
+  a uno, con progreso del activo, conteos de terminados y restantes, y resultados
+  por archivo; los terminados incluyen fallidos y cancelados, no solo los exitosos
+- Cancelación de toda la cola desde una sola acción
+- Si el nombre ya existe, se busca uno libre (`foto.jpg` → `foto(1).jpg`) y se informa
+  el nombre con el que quedó guardado. La búsqueda tiene un límite de 100 candidatos
+  (el original y 99 alternativas); si se agotan, se rechaza la subida: elegí otro nombre
+
+**La subida y el selector de galería son solo para Android.** Storage Access Framework
+no tiene contraparte en iOS; donde no se puede subir, la app no muestra el control.
+El Photo Picker nativo requiere Android 13 o posterior, abre la galería real y no pide
+permiso de almacenamiento. En versiones anteriores se usa el selector de documentos
+filtrado a imágenes y videos: funciona, pero no tiene la misma interfaz de galería.
+
+La búsqueda de nombre comprueba el destino antes de publicar, pero no es una garantía
+atómica contra sobrescrituras: otro proceso puede ocuparlo entre la comprobación y el
+renombrado final.
 
 **Notificaciones**
 
@@ -83,7 +112,7 @@ lib/
   features/
     auth/         # Gate biométrico
     connection/   # SSH, llaves, perfiles, confianza de host keys
-    files/        # Explorador SFTP, descarga, destino SAF
+    files/        # Explorador SFTP, descarga, subida en cola, origen y destino SAF
     notifications/# Push, presentación local, ruteo a sesión
     session_hold/ # Foreground service y su ciclo de vida
     settings/     # CRUD de perfiles
@@ -113,7 +142,8 @@ android/app/src/main/kotlin/com/darkcodex/helm/
 ## Setup
 
 1. Abrí Helm y autenticá con huella o Face ID
-2. La app genera una SSH key Ed25519 en el Keystore / Secure Enclave
+2. La app genera una SSH key Ed25519 en memoria y la guarda con `flutter_secure_storage`
+   (Keychain en iOS y almacenamiento seguro en Android)
 3. Copiá la public key desde Settings y agregala en la Mac:
    ```bash
    echo "<public-key>" >> ~/.ssh/authorized_keys
@@ -221,6 +251,10 @@ Dos cosas que conviene saber antes de tocar el repo:
   400 líneas, que mide solo producción.
 
 ### Verificar en un dispositivo
+
+La subida de documentos y fotos/videos, la cola, los nombres libres y la disposición
+flotante del teclado se ejercitaron solo con dobles de prueba. La validación de este
+conjunto de cambios en un dispositivo real sigue pendiente.
 
 ```bash
 flutter build apk --debug && adb install -r build/app/outputs/flutter-apk/app-debug.apk
