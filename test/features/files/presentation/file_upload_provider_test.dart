@@ -30,6 +30,77 @@ void main() {
   SftpUploadService serviceFor(FakeSftpSession session) =>
       SftpUploadService.withOpener(() async => session);
 
+  for (final behavior in ['terminal state', 'next item', 'later enqueue']) {
+    test('unexpected upload throw preserves $behavior', () async {
+      final service = _ThrowingService();
+      final escaped = <Object>[];
+      runZonedGuarded(() {
+        notifier().enqueue(service, '/a', sourceFor('a'));
+      }, (error, stack) => escaped.add(error));
+      if (behavior == 'next item') {
+        notifier().enqueue(serviceFor(FakeSftpSession()), '/b', sourceFor('b'));
+      }
+      service.gate.complete();
+      await pumpEventQueue();
+      if (behavior == 'terminal state') {
+        expect(state().items.single.status, FileUploadStatus.failed);
+        expect(state().items.single.failure, UploadFailure.unknown);
+        expect(state().items.single.percent, 37);
+        expect(state().doneCount, 1);
+        expect(state().remainingCount, 0);
+        expect(state().isRunning, isFalse);
+        final before = state();
+        service.progress!(99);
+        expect(state(), same(before));
+      } else {
+        if (behavior == 'later enqueue') {
+          notifier().enqueue(
+            serviceFor(FakeSftpSession()),
+            '/b',
+            sourceFor('b'),
+          );
+          await pumpEventQueue();
+        }
+        expect(state().items.last.status, FileUploadStatus.completed);
+        expect(state().doneCount, 2);
+      }
+      expect(escaped, isEmpty, reason: 'unawaited drain must contain the bug');
+    });
+  }
+
+  test(
+    'throwing cleanup retains single flight through cancel-all and enqueue',
+    () async {
+      final service = _ThrowingService();
+      final escaped = <Object>[];
+      runZonedGuarded(() {
+        notifier().enqueue(service, '/a', sourceFor('a'));
+      }, (error, stack) => escaped.add(error));
+      final cancelled = FakeSftpSession();
+      notifier().enqueue(serviceFor(cancelled), '/b', sourceFor('b'));
+      notifier().cancelAll();
+      final afterCancel = FakeSftpSession();
+      notifier().enqueue(serviceFor(afterCancel), '/c', sourceFor('c'));
+      final duringCleanup = FakeSftpSession();
+      service.onCleanup = () {
+        notifier().enqueue(serviceFor(duringCleanup), '/d', sourceFor('d'));
+        expect(afterCancel.statedPaths, isEmpty);
+        expect(duringCleanup.statedPaths, isEmpty);
+      };
+      expect(afterCancel.statedPaths, isEmpty);
+      service.gate.complete();
+      await pumpEventQueue();
+      expect(state().items.map((item) => item.status), [
+        FileUploadStatus.failed,
+        FileUploadStatus.cancelled,
+        FileUploadStatus.completed,
+        FileUploadStatus.completed,
+      ]);
+      expect(cancelled.statedPaths, isEmpty);
+      expect(escaped, isEmpty);
+    },
+  );
+
   // Gate the existing fake session's opener, not a new upload engine: the
   // real service still exercises cancellation, outcomes and session cleanup.
   test(
@@ -341,6 +412,33 @@ void main() {
       expect(state().items.single.percent, 100);
     },
   );
+}
+
+// Deliberately violates the service's NEVER THROWS contract. Gate cleanup so
+// enqueues/cancellation can probe the queue lock before the Future settles.
+class _ThrowingService extends SftpUploadService {
+  _ThrowingService() : super.withOpener(() async => FakeSftpSession());
+
+  final gate = Completer<void>();
+  void Function(int)? progress;
+  void Function()? onCleanup;
+
+  @override
+  Future<UploadOutcome> upload(
+    UploadSource source,
+    String destinationPath, {
+    void Function(int percent)? onProgress,
+    UploadCancellation? cancellation,
+  }) async {
+    progress = onProgress;
+    onProgress?.call(37);
+    try {
+      await gate.future;
+      throw StateError('unexpected upload bug');
+    } finally {
+      onCleanup?.call();
+    }
+  }
 }
 
 // Still uses the real upload primitive and existing fake session. Retaining

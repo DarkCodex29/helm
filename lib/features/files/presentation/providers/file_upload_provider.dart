@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/files/data/document_tree_gateway.dart';
 import 'package:helm/features/files/data/saf_upload_source.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
@@ -151,64 +152,86 @@ class FileUploadNotifier extends Notifier<FileUploadState> {
     if (_draining) return;
     _draining = true;
     final generation = _generation;
-    while (identical(_generation, generation)) {
-      final pending = state.items.where(
-        (item) => item.status == FileUploadStatus.pending,
-      );
-      if (pending.isEmpty) break;
-      final item = pending.first;
-      final service = _services.remove(item.id)!;
-      final cancellation = UploadCancellation();
-      _activeId = item.id;
-      _cancellation = cancellation;
-      _replace(item._with(status: FileUploadStatus.uploading));
-      final outcome = await service.upload(
-        item.source,
-        item.destinationPath,
-        cancellation: cancellation,
-        onProgress: (percent) {
-          // Identity guards both the item and its transfer, not its name or
-          // list position. Late callbacks after cancel, completion, disposal
-          // or a provider rebuild must never overwrite another item's data.
-          if (!identical(_generation, generation) ||
-              !identical(_cancellation, cancellation) ||
-              _activeId != item.id ||
-              cancellation.isCancelled) {
-            return;
-          }
-          _replace(
-            item._with(status: FileUploadStatus.uploading, percent: percent),
+    try {
+      while (identical(_generation, generation)) {
+        final pending = state.items.where(
+          (item) => item.status == FileUploadStatus.pending,
+        );
+        if (pending.isEmpty) break;
+        final item = pending.first;
+        final service = _services.remove(item.id)!;
+        final cancellation = UploadCancellation();
+        _activeId = item.id;
+        _cancellation = cancellation;
+        _replace(item._with(status: FileUploadStatus.uploading));
+        UploadOutcome outcome;
+        try {
+          outcome = await service.upload(
+            item.source,
+            item.destinationPath,
+            cancellation: cancellation,
+            onProgress: (percent) {
+              // Identity guards both the item and its transfer, not its name or
+              // list position. Late callbacks after cancel, completion, disposal
+              // or a provider rebuild must never overwrite another item's data.
+              if (!identical(_generation, generation) ||
+                  !identical(_cancellation, cancellation) ||
+                  _activeId != item.id ||
+                  cancellation.isCancelled) {
+                return;
+              }
+              _replace(
+                item._with(
+                  status: FileUploadStatus.uploading,
+                  percent: percent,
+                ),
+              );
+            },
           );
-        },
-      );
-      if (!identical(_generation, generation) ||
-          !identical(_cancellation, cancellation)) {
-        // Old generation's cleanup has now finished. A rebuilt provider may
-        // have pending work, but a disposed provider must not read state.
-        _draining = false;
-        if (_generation != null) unawaited(_drain());
-        return;
+        } catch (error, stack) {
+          // A throw violates the service contract: this is a bug being
+          // contained, not a normal ending or evidence of user cancellation.
+          const HelmLogger('FileUploadNotifier').e(
+            'Upload service unexpectedly threw for queue item ${item.id}',
+            error,
+            stack,
+          );
+          outcome = UploadFailed(UploadFailure.unknown, detail: '$error');
+        }
+        if (!identical(_generation, generation) ||
+            !identical(_cancellation, cancellation)) {
+          return;
+        }
+        _cancellation = null;
+        _activeId = null;
+        final current = state.items.firstWhere((entry) => entry.id == item.id);
+        final status = switch (outcome) {
+          UploadCompleted() => FileUploadStatus.completed,
+          UploadCancelled() => FileUploadStatus.cancelled,
+          UploadDestinationExists() => FileUploadStatus.destinationExists,
+          UploadFailed() => FileUploadStatus.failed,
+        };
+        _replace(
+          current._with(
+            status: status,
+            outcome: outcome,
+            percent: outcome is UploadCompleted ? 100 : current.percent,
+          ),
+        );
+        // Every terminal outcome advances FIFO, including a failure or a
+        // single-item cancellation; none implicitly cancels pending work.
       }
+    } finally {
+      // Release only after the awaited upload (including cleanup) settles.
       _cancellation = null;
       _activeId = null;
-      final current = state.items.firstWhere((entry) => entry.id == item.id);
-      final status = switch (outcome) {
-        UploadCompleted() => FileUploadStatus.completed,
-        UploadCancelled() => FileUploadStatus.cancelled,
-        UploadDestinationExists() => FileUploadStatus.destinationExists,
-        UploadFailed() => FileUploadStatus.failed,
-      };
-      _replace(
-        current._with(
-          status: status,
-          outcome: outcome,
-          percent: outcome is UploadCompleted ? 100 : current.percent,
-        ),
-      );
-      // Every terminal outcome advances FIFO, including a failure or a
-      // single-item cancellation; none implicitly cancels pending work.
+      _draining = false;
+      // Old generation's cleanup has now finished. A rebuilt provider may
+      // have pending work, but a disposed provider must not read state.
+      if (_generation != null && !identical(_generation, generation)) {
+        unawaited(_drain());
+      }
     }
-    if (identical(_generation, generation)) _draining = false;
   }
 
   void _replace(FileUploadItem item) {
