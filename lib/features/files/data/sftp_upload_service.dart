@@ -75,10 +75,14 @@ class SftpUploadService {
   /// Uploads [source] to [destinationPath] and reports how it ended.
   ///
   /// NEVER THROWS, matching every other method in this feature.
-  /// [destinationPath] must not already exist — checked with a `stat`
-  /// BEFORE a single byte of [source] is read; see
-  /// [UploadDestinationExists] for why this cannot rely on the finalizing
-  /// rename failing instead.
+  /// A taken [destinationPath] gets a counter before its extension. Checks
+  /// at most 100 candidates before reading [source]; exhaustion returns
+  /// [UploadDestinationExists]. [UploadCompleted] reports the actual path.
+  ///
+  /// This preserves the existing pre-flight no-overwrite check, but is NOT
+  /// an atomic no-replace guarantee: OpenSSH rename can overwrite a racing
+  /// writer between the last stat and rename. The current session API has
+  /// no atomic no-replace primitive.
   ///
   /// [onProgress] receives WHOLE PERCENTAGES, only on CHANGE, matching
   /// [SftpDownloadService.download] so one progress UI drives both
@@ -125,9 +129,10 @@ class SftpUploadService {
   }) async {
     if (cancellation?.isCancelled ?? false) return const UploadCancelled();
 
-    if (await _exists(session, destinationPath)) {
-      return const UploadDestinationExists();
-    }
+    final requestedPath = destinationPath;
+    final resolvedPath = await _freePath(session, destinationPath);
+    if (resolvedPath == null) return const UploadDestinationExists();
+    destinationPath = resolvedPath;
 
     final int length;
     try {
@@ -167,6 +172,7 @@ class SftpUploadService {
         result,
         partialPath: partialPath,
         destinationPath: destinationPath,
+        requestedPath: requestedPath,
         length: length,
       );
     } finally {
@@ -185,6 +191,7 @@ class SftpUploadService {
     _PumpResult result, {
     required String partialPath,
     required String destinationPath,
+    required String requestedPath,
     required int length,
   }) async {
     switch (result.status) {
@@ -222,7 +229,15 @@ class SftpUploadService {
     }
 
     try {
-      // Silent on every server, by design — see [UploadDestinationExists].
+      // Re-resolve from the ORIGINAL name after streaming: a writer may
+      // have taken a candidate meanwhile. Never compound counters.
+      final finalPath = await _freePath(session, requestedPath);
+      if (finalPath == null) {
+        await _discard(session, partialPath);
+        return const UploadDestinationExists();
+      }
+      destinationPath = finalPath;
+      // The stat/rename race remains; see upload's no-replace caveat.
       await session.rename(partialPath, destinationPath);
       return UploadCompleted(destinationPath, bytes: result.written);
     } catch (error) {
@@ -299,6 +314,26 @@ class SftpUploadService {
     } catch (error) {
       _log.w('Could not remove a partial upload: $error');
     }
+  }
+
+  /// Original plus 99 alternatives: caps network round trips in crowded
+  /// directories while accommodating ordinary gallery-name collisions.
+  static const _nameCandidates = 100;
+
+  Future<String?> _freePath(SftpSession session, String requestedPath) async {
+    final slash = requestedPath.lastIndexOf('/');
+    final name = requestedPath.substring(slash + 1);
+    final dot = name.lastIndexOf('.');
+    // A leading dot is part of a dotfile's stem, not an extension.
+    final split = dot > 0 ? dot : name.length;
+    final stem =
+        requestedPath.substring(0, slash + 1) + name.substring(0, split);
+    final extension = name.substring(split);
+    for (var i = 0; i < _nameCandidates; i++) {
+      final candidate = i == 0 ? requestedPath : '$stem($i)$extension';
+      if (!await _exists(session, candidate)) return candidate;
+    }
+    return null;
   }
 
   /// Whether [path] already answers to something on the server. Same
