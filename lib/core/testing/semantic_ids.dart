@@ -202,6 +202,35 @@ class FilesSemantics {
   /// find mid-download is a setting they cannot find. Absent on platforms
   /// with no folder to choose, where its absence is the correct assertion.
   static const downloadFolderButton = 'helm.files.download_folder_button';
+
+  /// The action, in the path bar, that opens the "create a folder" prompt.
+  static const createFolderButton = 'helm.files.create_folder_button';
+
+  /// The confirm action inside the create-folder dialog.
+  static const createFolderConfirmButton =
+      'helm.files.create_folder_confirm_button';
+
+  /// The row action menu, addressed by the entry's own path rather than by
+  /// position — the same pattern [TrustedHostsSemantics.forgetButton]
+  /// follows: two rows can share a name across different directories, but
+  /// never a path.
+  static String entryMenuButton(String path) => 'helm.files.entry_menu_$path';
+
+  /// The "Rename" action inside [entryMenuButton]'s menu.
+  static const renameMenuItem = 'helm.files.rename_menu_item';
+
+  /// The confirm action inside the rename dialog.
+  static const renameConfirmButton = 'helm.files.rename_confirm_button';
+
+  /// The "Delete" action inside [entryMenuButton]'s menu.
+  static const deleteMenuItem = 'helm.files.delete_menu_item';
+
+  /// The destructive confirm action inside the delete confirmation dialog.
+  ///
+  /// One identifier shared across every row, mirroring
+  /// [TrustedHostsSemantics.confirmForgetButton]: only one delete dialog is
+  /// ever open at a time.
+  static const deleteConfirmButton = 'helm.files.delete_confirm_button';
 }
 
 /// Identifiers on `SessionHoldAction`.

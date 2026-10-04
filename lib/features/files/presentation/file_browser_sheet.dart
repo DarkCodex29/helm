@@ -8,6 +8,7 @@ import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:helm/features/files/domain/download_outcome.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_listing.dart';
+import 'package:helm/features/files/domain/remote_write_outcome.dart';
 import 'package:helm/features/files/presentation/providers/download_destination_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_browser_provider.dart';
 import 'package:helm/features/files/presentation/providers/file_download_provider.dart';
@@ -31,10 +32,10 @@ const _danger = AppTheme.error;
 /// connection through a URL would mean either a global lookup or a route
 /// that can be deep-linked into a session that no longer exists.
 ///
-/// This slice reads and DOWNLOADS. Tapping a file fetches it onto the
-/// device, files it in the folder the user chose, and hands it to whatever
-/// can view it; there is still no upload, no rename and no delete, and
-/// nothing is ever written to the host.
+/// This slice reads, DOWNLOADS, and WRITES: it can create a directory,
+/// rename an entry, and delete one. Upload — streaming bytes INTO the
+/// host — is still not offered; see `SftpSession`'s doc comment for why
+/// that boundary is deliberate rather than an oversight.
 ///
 /// Every download passes through a staging directory the app sweeps on a
 /// 24-hour retention ([SftpDownloadService.defaultDownloadDirectory]), and
@@ -145,6 +146,159 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
   Future<void> _chooseFolder() =>
       ref.read(downloadDestinationProvider.notifier).choose();
 
+  /// Reports a write outcome the way the sheet reports everything else
+  /// that is not rendered inline: a [SnackBar]. There is no strip for
+  /// these three operations the way there is for a download, so a toast is
+  /// the cheapest way to make a silent success or a silent failure
+  /// impossible — see the class's "delete must say so" rule.
+  void _report(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? _danger : null,
+      ),
+    );
+  }
+
+  /// Prompts for a folder name and creates it, reporting whatever happened.
+  ///
+  /// Name validation happens entirely inside
+  /// [FileBrowserNotifier.createFolder] — see [validateRemoteName] — so
+  /// this dialog has no local re-implementation of "is this name legal"
+  /// to drift out of sync with the service's own rule.
+  Future<void> _createFolder() async {
+    final name = await _promptForName(
+      title: 'New folder',
+      label: 'Folder name',
+      confirmLabel: 'Create',
+      confirmSemanticsId: FilesSemantics.createFolderConfirmButton,
+    );
+    if (name == null) return;
+
+    final outcome = await _browser.createFolder(name);
+    switch (outcome) {
+      case MkdirCreated():
+        _report('Created "$name".');
+      case MkdirInvalidName(:final reason):
+        _report(describeNameRejection(reason), isError: true);
+      case MkdirAlreadyExists():
+        _report('"$name" already exists here.', isError: true);
+      case MkdirFailed(:final reason):
+        _report(describeRemoteWriteFailure(reason), isError: true);
+    }
+  }
+
+  /// Prompts for a new name for [entry] and renames it.
+  Future<void> _rename(RemoteEntry entry) async {
+    final name = await _promptForName(
+      title: 'Rename',
+      label: 'New name',
+      initialValue: entry.name,
+      confirmLabel: 'Rename',
+      confirmSemanticsId: FilesSemantics.renameConfirmButton,
+    );
+    if (name == null) return;
+
+    final outcome = await _browser.renameEntry(entry, name);
+    switch (outcome) {
+      case RenameCompleted():
+        _report('Renamed to "$name".');
+      case RenameInvalidName(:final reason):
+        _report(describeNameRejection(reason), isError: true);
+      case RenameUnchanged():
+        // Nothing happened, and nothing needed to: the name the user
+        // typed is the name the entry already had.
+        break;
+      case RenameDestinationExists():
+        _report('"$name" already exists here.', isError: true);
+      case RenameFailed(:final reason):
+        _report(describeRemoteWriteFailure(reason), isError: true);
+    }
+  }
+
+  /// Shows a text-entry dialog and returns the trimmed name the user
+  /// confirmed, or null if they cancelled.
+  ///
+  /// Trimmed here rather than left to the caller: every caller immediately
+  /// hands the result to a service method that trims again internally, so
+  /// trimming once up front just means the confirmation label the dialog
+  /// shows matches what is actually sent.
+  Future<String?> _promptForName({
+    required String title,
+    required String label,
+    required String confirmLabel,
+    required String confirmSemanticsId,
+    String? initialValue,
+  }) {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => _NamePromptDialog(
+        title: title,
+        label: label,
+        confirmLabel: confirmLabel,
+        confirmSemanticsId: confirmSemanticsId,
+        initialValue: initialValue,
+      ),
+    );
+  }
+
+  /// Confirms, then deletes [entry].
+  ///
+  /// Confirmation names what is about to be destroyed INCLUDING whether it
+  /// is a folder — the two requirements the class-level warning on this
+  /// slice called out by name — and does not say the action is safe,
+  /// following the precedent `TrustedHostsScreen._confirmForget` set:
+  /// a confirmation whose copy reassures the user is a confirmation that
+  /// stops meaning anything.
+  Future<void> _delete(RemoteEntry entry) async {
+    final isDirectory = entry.kind == RemoteEntryKind.directory;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete this ${isDirectory ? 'folder' : 'file'}?'),
+        content: Text(
+          isDirectory
+              ? 'This will permanently delete the folder "${entry.name}" from '
+                    'the host. This cannot be undone.'
+              : 'This will permanently delete the file "${entry.name}" from '
+                    'the host. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          Semantics(
+            identifier: FilesSemantics.deleteConfirmButton,
+            child: TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              child: const Text('Delete'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _selected = null);
+    final outcome = await _browser.deleteEntry(entry);
+    switch (outcome) {
+      case DeleteCompleted():
+        _report('Deleted "${entry.name}".');
+      case DeleteDirectoryNotEmpty():
+        _report(
+          '"${entry.name}" is not empty. Remove its contents first.',
+          isError: true,
+        );
+      case DeleteFailed(:final reason):
+        _report(describeRemoteWriteFailure(reason), isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(fileBrowserProvider);
@@ -169,6 +323,12 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
                 canGoUp: state.canGoUp,
                 onUp: notifier.goUp,
                 onRefresh: notifier.refresh,
+                // Only offered once a directory is actually showing: a
+                // loading or failed listing has no known parent to create
+                // the folder in.
+                onCreateFolder: state.status == FileBrowserStatus.ready
+                    ? _createFolder
+                    : null,
               ),
               Expanded(
                 child: Semantics(
@@ -177,6 +337,8 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
                     state: state,
                     selected: _selected,
                     onRetry: notifier.refresh,
+                    onRename: _rename,
+                    onDelete: _delete,
                     onTap: (entry) async {
                       if (entry.isNavigable) {
                         setState(() => _selected = null);
@@ -209,6 +371,80 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A name-entry dialog, as its own [StatefulWidget] rather than a
+/// [TextEditingController] built inline by the sheet's method.
+///
+/// That inline shape was tried first and crashed under test: a controller
+/// created and `dispose()`d by a plain method raced the dialog route's own
+/// teardown animation, and `TextField` rebuilt against an already-disposed
+/// controller while the route was still closing — `ChangeNotifier` used
+/// after `dispose()`. Giving the dialog its own `State` makes the
+/// controller's lifecycle match the WIDGET that reads it, which is the
+/// ownership `TextEditingController`'s own contract assumes and the inline
+/// version violated.
+class _NamePromptDialog extends StatefulWidget {
+  const _NamePromptDialog({
+    required this.title,
+    required this.label,
+    required this.confirmLabel,
+    required this.confirmSemanticsId,
+    this.initialValue,
+  });
+
+  final String title;
+  final String label;
+  final String confirmLabel;
+  final String confirmSemanticsId;
+  final String? initialValue;
+
+  @override
+  State<_NamePromptDialog> createState() => _NamePromptDialogState();
+}
+
+class _NamePromptDialogState extends State<_NamePromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.of(context).pop(_controller.text.trim());
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(labelText: widget.label),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        Semantics(
+          identifier: widget.confirmSemanticsId,
+          child: TextButton(
+            onPressed: _submit,
+            child: Text(widget.confirmLabel),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -430,10 +666,7 @@ class _EndingLine extends StatelessWidget {
         Icon(icon, size: 18, color: color),
         const SizedBox(width: 10),
         Expanded(
-          child: Text(
-            message,
-            style: TextStyle(color: color, fontSize: 12),
-          ),
+          child: Text(message, style: TextStyle(color: color, fontSize: 12)),
         ),
       ],
     );
@@ -500,10 +733,7 @@ class _PublishLine extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  message,
-                  style: TextStyle(color: color, fontSize: 11),
-                ),
+                Text(message, style: TextStyle(color: color, fontSize: 11)),
                 if (offersFolder)
                   TextButton(
                     onPressed: onChooseFolder,
@@ -567,7 +797,9 @@ class _DestinationBar extends ConsumerWidget {
         child: Row(
           children: [
             Icon(
-              folder == null ? Icons.folder_off_outlined : Icons.folder_outlined,
+              folder == null
+                  ? Icons.folder_off_outlined
+                  : Icons.folder_outlined,
               size: 14,
               color: _mutedText,
             ),
@@ -598,12 +830,10 @@ class _DestinationBar extends ConsumerWidget {
                 color: _raised,
                 tooltip: 'Download folder',
                 onSelected: (action) => switch (action) {
-                  _DestinationAction.change => ref
-                      .read(downloadDestinationProvider.notifier)
-                      .choose(),
-                  _DestinationAction.forget => ref
-                      .read(downloadDestinationProvider.notifier)
-                      .forget(),
+                  _DestinationAction.change =>
+                    ref.read(downloadDestinationProvider.notifier).choose(),
+                  _DestinationAction.forget =>
+                    ref.read(downloadDestinationProvider.notifier).forget(),
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(
@@ -678,9 +908,33 @@ String describeDownloadFailure(DownloadFailure? failure) => switch (failure) {
     'The file arrived incomplete and was discarded.',
   DownloadFailure.storage =>
     'There was not enough room on this device to save the file.',
-  DownloadFailure.unknown || null =>
-    'The file could not be downloaded, and the host did not say why.',
+  DownloadFailure.unknown ||
+  null => 'The file could not be downloaded, and the host did not say why.',
 };
+
+/// One sentence per locally-rejected name, matching [describeDownloadFailure]
+/// in being written from the enum alone — there is no server round trip to
+/// carry a message, which is the whole point of validating locally.
+String describeNameRejection(NameRejection reason) => switch (reason) {
+  NameRejection.empty => 'Enter a name.',
+  NameRejection.containsSeparator => 'A name cannot contain "/".',
+  NameRejection.currentDirectory => '"." is not a usable name.',
+  NameRejection.parentDirectory => '".." is not a usable name.',
+};
+
+/// One sentence per reason a create, rename or delete was refused by the
+/// server, mirroring [describeDownloadFailure]: never built from the
+/// underlying message, only from the classified reason.
+String describeRemoteWriteFailure(RemoteWriteFailure reason) =>
+    switch (reason) {
+      RemoteWriteFailure.permissionDenied =>
+        'You do not have permission to do this.',
+      RemoteWriteFailure.notFound => 'This entry no longer exists on the host.',
+      RemoteWriteFailure.disconnected =>
+        'The connection dropped before this could finish.',
+      RemoteWriteFailure.unknown =>
+        'The host refused this, without saying why.',
+    };
 
 // ── Chrome ─────────────────────────────────────────────────────────────────
 
@@ -712,12 +966,18 @@ class _PathBar extends StatelessWidget {
     required this.canGoUp,
     required this.onUp,
     required this.onRefresh,
+    required this.onCreateFolder,
   });
 
   final String? path;
   final bool canGoUp;
   final Future<void> Function() onUp;
   final Future<void> Function() onRefresh;
+
+  /// Opens the "create a folder" prompt. Null while the browser is not
+  /// showing a readable directory — see `FileBrowserSheet.build` for why
+  /// a failed or still-loading listing has no directory to create one in.
+  final VoidCallback? onCreateFolder;
 
   @override
   Widget build(BuildContext context) {
@@ -756,6 +1016,17 @@ class _PathBar extends StatelessWidget {
               ),
             ),
           ),
+          Semantics(
+            identifier: FilesSemantics.createFolderButton,
+            child: IconButton(
+              icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+              color: onCreateFolder == null
+                  ? _mutedText.withValues(alpha: 0.4)
+                  : _mutedText,
+              tooltip: 'New folder',
+              onPressed: onCreateFolder,
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 18),
             color: _mutedText,
@@ -780,12 +1051,16 @@ class _Body extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onRetry,
+    required this.onRename,
+    required this.onDelete,
   });
 
   final FileBrowserState state;
   final RemoteEntry? selected;
   final Future<void> Function(RemoteEntry) onTap;
   final Future<void> Function() onRetry;
+  final void Function(RemoteEntry) onRename;
+  final void Function(RemoteEntry) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -818,6 +1093,8 @@ class _Body extends StatelessWidget {
               entry: entry,
               isSelected: entry == selected,
               onTap: () => onTap(entry),
+              onRename: () => onRename(entry),
+              onDelete: () => onDelete(entry),
             );
           },
         );
@@ -923,12 +1200,16 @@ class _EntryRow extends StatelessWidget {
     required this.entry,
     required this.isSelected,
     required this.onTap,
+    required this.onRename,
+    required this.onDelete,
     super.key,
   });
 
   final RemoteEntry entry;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -947,9 +1228,47 @@ class _EntryRow extends StatelessWidget {
         describeRemoteEntry(entry),
         style: const TextStyle(color: _mutedText, fontSize: 11),
       ),
-      trailing: entry.isNavigable
-          ? const Icon(Icons.chevron_right, size: 18, color: _mutedText)
-          : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (entry.isNavigable)
+            const Icon(Icons.chevron_right, size: 18, color: _mutedText),
+          Semantics(
+            identifier: FilesSemantics.entryMenuButton(entry.path),
+            child: PopupMenuButton<_EntryAction>(
+              icon: const Icon(Icons.more_vert, size: 18, color: _mutedText),
+              color: _raised,
+              tooltip: 'More actions',
+              onSelected: (action) => switch (action) {
+                _EntryAction.rename => onRename(),
+                _EntryAction.delete => onDelete(),
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: _EntryAction.rename,
+                  child: Semantics(
+                    identifier: FilesSemantics.renameMenuItem,
+                    child: const Text(
+                      'Rename',
+                      style: TextStyle(color: _primaryText, fontSize: 13),
+                    ),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _EntryAction.delete,
+                  child: Semantics(
+                    identifier: FilesSemantics.deleteMenuItem,
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(color: _danger, fontSize: 13),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       onTap: onTap,
     );
   }
@@ -964,6 +1283,13 @@ class _EntryRow extends StatelessWidget {
   static Color _colorFor(RemoteEntry entry) =>
       entry.isNavigable ? _accent : _mutedText;
 }
+
+/// The two destructive-adjacent actions every row offers through
+/// [FilesSemantics.entryMenuButton].
+///
+/// Rename and delete rather than a free-for-all menu, matching the scope
+/// this slice was built for — see `SftpSession`'s widened-seam doc comment.
+enum _EntryAction { rename, delete }
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 

@@ -584,4 +584,299 @@ void main() {
       );
     });
   });
+
+  group('creating a folder', () {
+    testWidgets('creates a folder, reports it, and the listing shows it', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(directories: {'/home/gian': const []});
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(find.byTooltip('New folder'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'new-folder');
+      await tester.tap(_byId(FilesSemantics.createFolderConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(find.text('new-folder'), findsOneWidget);
+      expect(find.textContaining('Created'), findsOneWidget);
+    });
+
+    testWidgets('cancelling the dialog creates nothing', (tester) async {
+      final session = FakeSftpSession(directories: {'/home/gian': const []});
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(find.byTooltip('New folder'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'new-folder');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(session.mkdirPaths, isEmpty);
+      expect(_byId(FilesSemantics.emptyDirectory), findsOneWidget);
+    });
+
+    testWidgets('rejects an invalid name without a round trip', (tester) async {
+      final session = FakeSftpSession(directories: {'/home/gian': const []});
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(find.byTooltip('New folder'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'a/b');
+      await tester.tap(_byId(FilesSemantics.createFolderConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(session.mkdirPaths, isEmpty);
+      expect(find.textContaining('cannot contain'), findsOneWidget);
+    });
+  });
+
+  group('renaming an entry', () {
+    testWidgets('renames, reports it, and the listing shows the new name', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('old.txt', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/old.txt')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.renameMenuItem));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'new.txt');
+      await tester.tap(_byId(FilesSemantics.renameConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(find.text('new.txt'), findsOneWidget);
+      expect(find.text('old.txt'), findsNothing);
+      expect(find.textContaining('Renamed'), findsOneWidget);
+    });
+
+    testWidgets('the rename field starts pre-filled with the current name', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('old.txt', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/old.txt')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.renameMenuItem));
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller!.text, 'old.txt');
+    });
+  });
+
+  group('deleting an entry', () {
+    testWidgets('requires confirmation before anything is deleted', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+
+      // The confirmation is on screen, and nothing was sent yet.
+      expect(_byId(FilesSemantics.deleteConfirmButton), findsOneWidget);
+      expect(session.removedPaths, isEmpty);
+    });
+
+    testWidgets('names the file being destroyed in the confirmation copy', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete this file?'), findsOneWidget);
+      expect(find.textContaining('"notes.md"'), findsOneWidget);
+    });
+
+    testWidgets('names the directory being destroyed, distinctly from a file', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [
+            fakeSftpName('empty-dir', mode: FakeSftpModes.directory),
+          ],
+          '/home/gian/empty-dir': const [],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/empty-dir')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete this folder?'), findsOneWidget);
+      expect(find.textContaining('"empty-dir"'), findsOneWidget);
+    });
+
+    testWidgets('cancelling the confirmation deletes nothing', (tester) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(session.removedPaths, isEmpty);
+      expect(find.text('notes.md'), findsOneWidget);
+    });
+
+    testWidgets('confirming deletes, reports it, and refreshes the listing', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [fakeSftpName('notes.md', mode: FakeSftpModes.file)],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/notes.md')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(session.removedPaths, ['/home/gian/notes.md']);
+      expect(find.text('notes.md'), findsNothing);
+      expect(_byId(FilesSemantics.emptyDirectory), findsOneWidget);
+      expect(find.textContaining('Deleted'), findsOneWidget);
+    });
+
+    testWidgets('a non-empty directory is refused, with its own message', (
+      tester,
+    ) async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [
+            fakeSftpName('full-dir', mode: FakeSftpModes.directory),
+          ],
+          '/home/gian/full-dir': [
+            fakeSftpName('child.txt', mode: FakeSftpModes.file),
+          ],
+        },
+      );
+      await _pumpSheet(
+        tester,
+        SftpFileService.withOpener(() async => session),
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: _byId(FilesSemantics.entryMenuButton('/home/gian/full-dir')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteMenuItem));
+      await tester.pumpAndSettle();
+      await tester.tap(_byId(FilesSemantics.deleteConfirmButton));
+      await tester.pumpAndSettle();
+
+      expect(session.rmdirPaths, isEmpty);
+      expect(find.text('full-dir'), findsOneWidget);
+      expect(find.textContaining('not empty'), findsOneWidget);
+    });
+  });
 }
