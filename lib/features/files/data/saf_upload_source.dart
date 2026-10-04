@@ -67,4 +67,17 @@ class UploadSourcePicker {
     if (picked == null) return null;
     return SafUploadSource(_gateway, picked);
   }
+
+  /// Opens the gallery for multiple photos and videos, adapted for upload.
+  ///
+  /// Like [pick], null means either unsupported platform or user decline:
+  /// both mean "there is nothing to upload", not a reportable failure.
+  /// Uses the same [supportsPicking] gate; older Android's document-picker
+  /// fallback is owned by the gateway, not a second platform check here.
+  Future<List<SafUploadSource>?> pickMedia() async {
+    if (!supportsPicking) return null;
+    final picked = await _gateway.pickMedia();
+    if (picked == null) return null;
+    return picked.map((file) => SafUploadSource(_gateway, file)).toList();
+  }
 }
