@@ -115,8 +115,12 @@ dev_dependencies:
 # three 1024px PNGs the app never opens.
 flutter_launcher_icons:
   android: true
-  # No Runner.xcodeproj in this repo — helm is Android-only today, and
-  # asking for iOS output makes the generator fail rather than skip.
+  # ios/Runner.xcodeproj has existed since March 2026 and the iOS target
+  # builds and installs on a physical device (089f30c). Still false
+  # because nobody has run the generator for iOS yet: flipping this to
+  # true without first adding the iOS icon assets would leave the app
+  # installing with Flutter's default white icon, which is worse than
+  # the generator simply not touching the iOS asset catalog at all.
   ios: false
   image_path: "assets/icon/helm_icon.png"
   # A flat colour rather than a background image: the layer is parallaxed

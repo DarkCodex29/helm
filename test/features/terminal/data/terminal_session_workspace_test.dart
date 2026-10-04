@@ -47,7 +47,12 @@ const _profile = ConnectionProfile(
 
 const _tree = MuxWorkspaceTreeAvailable(
   workspaces: [
-    (workspaceId: 'w1', label: 'EBIM', agentState: AgentState.working),
+    (
+      workspaceId: 'w1',
+      label: 'EBIM',
+      agentState: AgentState.working,
+      activeTabId: null,
+    ),
   ],
   tabs: [
     (
@@ -79,7 +84,10 @@ Future<TerminalSession> _session({
   );
   if (connect) {
     service.queueConnectSuccess(
-      SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
+      SSHConnectionResult(
+        client: _buildFakeClient(),
+        session: FakeSSHSession(),
+      ),
     );
     await session.connect('key');
     expect(session.status, ConnectionStatus.connected);
@@ -105,50 +113,42 @@ void main() {
       await session.dispose();
     });
 
-    test(
-      'a host that genuinely has no workspaces still reports AVAILABLE — '
-      'an empty tree is a measurement, and it must stay distinguishable '
-      'from every way of not knowing',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()
-          ..whenTree(
-            const MuxWorkspaceTreeAvailable(workspaces: [], tabs: []),
-          );
-        final session = await _session(adapter: adapter);
+    test('a host that genuinely has no workspaces still reports AVAILABLE — '
+        'an empty tree is a measurement, and it must stay distinguishable '
+        'from every way of not knowing', () async {
+      final adapter = FakeWorkspaceAwareAdapter()
+        ..whenTree(const MuxWorkspaceTreeAvailable(workspaces: [], tabs: []));
+      final session = await _session(adapter: adapter);
 
-        final result = await session.refreshWorkspaceTree();
+      final result = await session.refreshWorkspaceTree();
 
-        expect(result, isA<MuxWorkspaceTreeAvailable>());
-        expect((result as MuxWorkspaceTreeAvailable).workspaces, isEmpty);
+      expect(result, isA<MuxWorkspaceTreeAvailable>());
+      expect((result as MuxWorkspaceTreeAvailable).workspaces, isEmpty);
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 
   group('refreshWorkspaceTree — every refusal says it did not find out', () {
-    test(
-      'a multiplexer with no workspaces NAMES itself rather than reporting '
-      'an empty tree, and is never asked in the first place',
-      () async {
-        final adapter = FakeAgentlessAdapter(id: MultiplexerId.tmux);
-        final session = await _session(adapter: adapter);
+    test('a multiplexer with no workspaces NAMES itself rather than reporting '
+        'an empty tree, and is never asked in the first place', () async {
+      final adapter = FakeAgentlessAdapter(id: MultiplexerId.tmux);
+      final session = await _session(adapter: adapter);
 
-        final result = await session.refreshWorkspaceTree();
+      final result = await session.refreshWorkspaceTree();
 
-        expect(
-          result,
-          isA<MuxWorkspaceTreeUnsupported>().having(
-            (u) => u.muxId,
-            'muxId',
-            MultiplexerId.tmux,
-          ),
-        );
-        expect(result, isNot(isA<MuxWorkspaceTreeAvailable>()));
+      expect(
+        result,
+        isA<MuxWorkspaceTreeUnsupported>().having(
+          (u) => u.muxId,
+          'muxId',
+          MultiplexerId.tmux,
+        ),
+      );
+      expect(result, isNot(isA<MuxWorkspaceTreeAvailable>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test('a disconnected session never touches the host', () async {
       final adapter = FakeWorkspaceAwareAdapter()..whenTree(_tree);
@@ -173,119 +173,105 @@ void main() {
       expect(adapter.listTreeCalls, 0);
     });
 
-    test(
-      'an adapter that THREW — which is how herdr reports an error code '
-      'this app does not recognize — degrades to unreachable, never to an '
-      'empty tree',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()
-          ..whenTreeThrows(StateError('unrecognized herdr error'));
-        final session = await _session(adapter: adapter);
+    test('an adapter that THREW — which is how herdr reports an error code '
+        'this app does not recognize — degrades to unreachable, never to an '
+        'empty tree', () async {
+      final adapter = FakeWorkspaceAwareAdapter()
+        ..whenTreeThrows(StateError('unrecognized herdr error'));
+      final session = await _session(adapter: adapter);
 
-        final result = await session.refreshWorkspaceTree();
+      final result = await session.refreshWorkspaceTree();
 
-        expect(result, isA<MuxWorkspaceTreeUnreachable>());
-        expect(result, isNot(isA<MuxWorkspaceTreeAvailable>()));
+      expect(result, isA<MuxWorkspaceTreeUnreachable>());
+      expect(result, isNot(isA<MuxWorkspaceTreeAvailable>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 
   group('refreshWorkspaceTree — the channel budget', () {
-    test(
-      'a wedged host is abandoned at kWorkspaceTreeTimeout, so the drawer '
-      'is never left waiting on an answer that never comes',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
-        final session = await _session(adapter: adapter);
+    test('a wedged host is abandoned at kWorkspaceTreeTimeout, so the drawer '
+        'is never left waiting on an answer that never comes', () async {
+      final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
+      final session = await _session(adapter: adapter);
 
-        FakeAsync().run((async) {
-          MuxWorkspaceTreeResult? settled;
-          unawaited(
-            session.refreshWorkspaceTree().then((r) => settled = r),
-          );
+      FakeAsync().run((async) {
+        MuxWorkspaceTreeResult? settled;
+        unawaited(session.refreshWorkspaceTree().then((r) => settled = r));
 
-          async.elapse(
-            kWorkspaceTreeTimeout - const Duration(milliseconds: 1),
-          );
-          async.flushMicrotasks();
-          expect(
-            settled,
-            isNull,
-            reason: 'must not give up before the documented ceiling',
-          );
+        async.elapse(kWorkspaceTreeTimeout - const Duration(milliseconds: 1));
+        async.flushMicrotasks();
+        expect(
+          settled,
+          isNull,
+          reason: 'must not give up before the documented ceiling',
+        );
 
-          async.elapse(const Duration(milliseconds: 2));
-          async.flushMicrotasks();
+        async.elapse(const Duration(milliseconds: 2));
+        async.flushMicrotasks();
 
-          expect(settled, isA<MuxWorkspaceTreeUnreachable>());
-          expect(settled, isNot(isA<MuxWorkspaceTreeAvailable>()));
-        });
+        expect(settled, isA<MuxWorkspaceTreeUnreachable>());
+        expect(settled, isNot(isA<MuxWorkspaceTreeAvailable>()));
+      });
 
-        adapter.releaseTree();
-        await session.dispose();
-      },
-    );
+      adapter.releaseTree();
+      await session.dispose();
+    });
 
-    test(
-      'a query ABANDONED at the timeout still holds the guard, so a wedged '
-      'host leaks at most ONE remote invocation however often the drawer '
-      'is reopened',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
-        final session = await _session(adapter: adapter);
+    test('a query ABANDONED at the timeout still holds the guard, so a wedged '
+        'host leaks at most ONE remote invocation however often the drawer '
+        'is reopened', () async {
+      final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
+      final session = await _session(adapter: adapter);
 
-        FakeAsync().run((async) {
+      FakeAsync().run((async) {
+        unawaited(session.refreshWorkspaceTree());
+        async.flushMicrotasks();
+        expect(adapter.listTreeCalls, 1);
+
+        // The call site gives up here. The REMOTE command does not.
+        async.elapse(kWorkspaceTreeTimeout + const Duration(seconds: 1));
+        async.flushMicrotasks();
+
+        // Five more opens after the abandonment.
+        for (var i = 0; i < 5; i++) {
           unawaited(session.refreshWorkspaceTree());
+          async.elapse(const Duration(seconds: 1));
           async.flushMicrotasks();
-          expect(adapter.listTreeCalls, 1);
+        }
 
-          // The call site gives up here. The REMOTE command does not.
-          async.elapse(kWorkspaceTreeTimeout + const Duration(seconds: 1));
-          async.flushMicrotasks();
+        expect(
+          adapter.listTreeCalls,
+          1,
+          reason:
+              'the guard is released by the QUERY settling, never by '
+              'the caller giving up on it',
+        );
+      });
 
-          // Five more opens after the abandonment.
-          for (var i = 0; i < 5; i++) {
-            unawaited(session.refreshWorkspaceTree());
-            async.elapse(const Duration(seconds: 1));
-            async.flushMicrotasks();
-          }
+      adapter.releaseTree();
+      await session.dispose();
+    });
 
-          expect(
-            adapter.listTreeCalls,
-            1,
-            reason: 'the guard is released by the QUERY settling, never by '
-                'the caller giving up on it',
-          );
-        });
+    test('the guard is released once the host answers, so a slow-but-alive '
+        'host does not permanently blank the tree', () async {
+      final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
+      final session = await _session(adapter: adapter);
 
-        adapter.releaseTree();
-        await session.dispose();
-      },
-    );
+      final first = session.refreshWorkspaceTree();
+      await pumpEventQueue();
+      adapter.releaseTree();
+      expect(await first, isA<MuxWorkspaceTreeAvailable>());
 
-    test(
-      'the guard is released once the host answers, so a slow-but-alive '
-      'host does not permanently blank the tree',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()..whenTreeHangs();
-        final session = await _session(adapter: adapter);
+      adapter.whenTree(_tree);
+      expect(
+        await session.refreshWorkspaceTree(),
+        isA<MuxWorkspaceTreeAvailable>(),
+      );
+      expect(adapter.listTreeCalls, 2);
 
-        final first = session.refreshWorkspaceTree();
-        await pumpEventQueue();
-        adapter.releaseTree();
-        expect(await first, isA<MuxWorkspaceTreeAvailable>());
-
-        adapter.whenTree(_tree);
-        expect(await session.refreshWorkspaceTree(), isA<
-          MuxWorkspaceTreeAvailable
-        >());
-        expect(adapter.listTreeCalls, 2);
-
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 
   group('focusTab', () {
@@ -301,23 +287,20 @@ void main() {
       await session.dispose();
     });
 
-    test(
-      'a vanished tab is reported as such and NOT as a failure to reach '
-      'the host — the drawer showed a project that is gone, which is a '
-      'different thing to tell the user',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()
-          ..whenTabFocus(const MuxTabFocusTargetNotFound());
-        final session = await _session(adapter: adapter);
+    test('a vanished tab is reported as such and NOT as a failure to reach '
+        'the host — the drawer showed a project that is gone, which is a '
+        'different thing to tell the user', () async {
+      final adapter = FakeWorkspaceAwareAdapter()
+        ..whenTabFocus(const MuxTabFocusTargetNotFound());
+      final session = await _session(adapter: adapter);
 
-        final result = await session.focusTab('w9:t9');
+      final result = await session.focusTab('w9:t9');
 
-        expect(result, isA<MuxTabFocusTargetNotFound>());
-        expect(result, isNot(isA<MuxTabFocused>()));
+      expect(result, isA<MuxTabFocusTargetNotFound>());
+      expect(result, isNot(isA<MuxTabFocused>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test(
       'a multiplexer that cannot focus tabs FAILS rather than pretending',
@@ -357,41 +340,35 @@ void main() {
       expect(adapter.focusedTabs, isEmpty);
     });
 
-    test(
-      'an adapter that throws degrades to FAILED instead of blowing up '
-      'inside a button callback',
-      () async {
-        final adapter = _ThrowingTabFocusAdapter();
-        final session = await _session(adapter: adapter);
+    test('an adapter that throws degrades to FAILED instead of blowing up '
+        'inside a button callback', () async {
+      final adapter = _ThrowingTabFocusAdapter();
+      final session = await _session(adapter: adapter);
 
-        final result = await session.focusTab('w1:t1');
+      final result = await session.focusTab('w1:t1');
 
-        expect(result, isA<MuxTabFocusFailed>());
-        expect(result, isNot(isA<MuxTabFocused>()));
+      expect(result, isA<MuxTabFocusFailed>());
+      expect(result, isNot(isA<MuxTabFocused>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
-    test(
-      'a repeated tap on a wedged host opens NO second channel, and the '
-      'drop is never reported as success',
-      () async {
-        final adapter = FakeWorkspaceAwareAdapter()..whenTabFocusHangs();
-        final session = await _session(adapter: adapter);
+    test('a repeated tap on a wedged host opens NO second channel, and the '
+        'drop is never reported as success', () async {
+      final adapter = FakeWorkspaceAwareAdapter()..whenTabFocusHangs();
+      final session = await _session(adapter: adapter);
 
-        unawaited(session.focusTab('w1:t1'));
-        await pumpEventQueue();
-        final second = await session.focusTab('w1:t1');
+      unawaited(session.focusTab('w1:t1'));
+      await pumpEventQueue();
+      final second = await session.focusTab('w1:t1');
 
-        expect(adapter.focusedTabs, ['w1:t1']);
-        expect(second, isA<MuxTabFocusFailed>());
-        expect(second, isNot(isA<MuxTabFocused>()));
+      expect(adapter.focusedTabs, ['w1:t1']);
+      expect(second, isA<MuxTabFocusFailed>());
+      expect(second, isNot(isA<MuxTabFocused>()));
 
-        adapter.releaseTabFocus();
-        await session.dispose();
-      },
-    );
+      adapter.releaseTabFocus();
+      await session.dispose();
+    });
 
     test(
       'a wedged focus is abandoned at kTabFocusTimeout and reports FAILED',

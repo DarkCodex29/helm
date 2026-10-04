@@ -22,6 +22,12 @@ class HostAdvisor {
   /// Gathers advisories for [selection], asking [runner]'s host the
   /// diagnostic questions when one is available.
   ///
+  /// [connectHost] is the host string the profile actually dialed —
+  /// required so [HostDiagnostics.evaluateTailscaleAddressStability] can
+  /// compare it against the host's own Tailscale addresses. Only read
+  /// when [runner] is also supplied: with no runner there is no host to
+  /// ask, so there is nothing for this to compare against either.
+  ///
   /// Never throws. A caller reaches this while explaining a failure, so a
   /// transport that has already died must degrade to "the findings we
   /// could still get" instead of taking the explanation down with it.
@@ -31,11 +37,14 @@ class HostAdvisor {
   Future<List<HostAdvisory>> collect({
     required MultiplexerSelection? selection,
     HostCommandRunner? runner,
+    String? connectHost,
   }) async {
     final advisories = <HostAdvisory>[...advisoriesForSelection(selection)];
 
     if (runner != null) {
-      advisories.addAll(await _diagnosticAdvisories(runner));
+      advisories.addAll(
+        await _diagnosticAdvisories(runner, connectHost: connectHost),
+      );
     }
 
     // Warnings first: someone reading this is trying to find out what went
@@ -49,17 +58,28 @@ class HostAdvisor {
   }
 
   Future<List<HostAdvisory>> _diagnosticAdvisories(
-    HostCommandRunner runner,
-  ) async {
+    HostCommandRunner runner, {
+    String? connectHost,
+  }) async {
     final diagnostics = HostDiagnostics(runner);
     final advisories = <HostAdvisory>[];
 
     // Each check is guarded on its own so one dead command does not
     // discard the other's finding.
-    for (final evaluate in [
+    final checks = <Future<HostDiagnostic> Function()>[
       diagnostics.evaluateLogoutPersistence,
       diagnostics.evaluateTailscaleInterception,
-    ]) {
+    ];
+    // Only added when there is a host string to compare against — with
+    // none, there is nothing for the check to evaluate, and running it
+    // anyway would mean guessing what was dialed.
+    if (connectHost != null) {
+      checks.add(
+        () => diagnostics.evaluateTailscaleAddressStability(connectHost),
+      );
+    }
+
+    for (final evaluate in checks) {
       try {
         final advisory = advisoryForDiagnostic(await evaluate());
         if (advisory != null) advisories.add(advisory);

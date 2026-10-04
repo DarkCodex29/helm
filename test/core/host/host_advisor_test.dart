@@ -22,6 +22,7 @@ const _lingerCommand = 'loginctl show-user \$(id -un) --property=Linger';
 const _killUserProcessesCommand =
     "grep -E '^[[:space:]]*KillUserProcesses[[:space:]]*=' "
     '/etc/systemd/logind.conf';
+const _tailscaleStatusCommand = 'tailscale status --peers=false --json';
 
 /// A host where nothing is wrong: no Tailscale, and linger is on.
 FakeHostCommandRunner _healthyHost() {
@@ -30,7 +31,10 @@ FakeHostCommandRunner _healthyHost() {
     _tailscalePresenceCommand,
     const HostCommandResult(exitCode: 1),
   );
-  runner.whenRun(_loginctlPresenceCommand, const HostCommandResult(exitCode: 0));
+  runner.whenRun(
+    _loginctlPresenceCommand,
+    const HostCommandResult(exitCode: 0),
+  );
   runner.whenRun(
     _lingerCommand,
     const HostCommandResult(stdout: 'Linger=yes', exitCode: 0),
@@ -46,7 +50,10 @@ FakeHostCommandRunner _hostThatKillsOnLogout() {
     _tailscalePresenceCommand,
     const HostCommandResult(exitCode: 1),
   );
-  runner.whenRun(_loginctlPresenceCommand, const HostCommandResult(exitCode: 0));
+  runner.whenRun(
+    _loginctlPresenceCommand,
+    const HostCommandResult(exitCode: 0),
+  );
   runner.whenRun(
     _lingerCommand,
     const HostCommandResult(stdout: 'Linger=no', exitCode: 0),
@@ -152,6 +159,60 @@ void main() {
       expect(advisories, isNotEmpty);
     });
 
+    test('surfaces a raw-Tailscale-address warning only when connectHost is '
+        'supplied and matches', () async {
+      final runner = FakeHostCommandRunner();
+      runner.whenRun(
+        _tailscalePresenceCommand,
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        _tailscaleStatusCommand,
+        const HostCommandResult(
+          stdout:
+              '{"BackendState":"Running",'
+              '"TailscaleIPs":["100.64.0.1"],'
+              '"Self":{"DNSName":"example-host.tailnet-example.ts.net."},'
+              '"CurrentTailnet":{"MagicDNSSuffix":"tailnet-example.ts.net",'
+              '"MagicDNSEnabled":true}}',
+          exitCode: 0,
+        ),
+      );
+      runner.whenRun(
+        _loginctlPresenceCommand,
+        const HostCommandResult(exitCode: 0),
+      );
+      runner.whenRun(
+        _lingerCommand,
+        const HostCommandResult(stdout: 'Linger=yes', exitCode: 0),
+      );
+
+      final advisories = await const HostAdvisor().collect(
+        selection: _verifiedTmux,
+        runner: runner,
+        connectHost: '100.64.0.1',
+      );
+
+      expect(
+        advisories.map((a) => a.id),
+        contains(HostAdvisoryId.tailscaleAddressUnstable),
+      );
+    });
+
+    test('does not run the Tailscale-address check at all when no '
+        'connectHost is supplied, even on an otherwise live runner', () async {
+      // Deliberately NOT registering `tailscale status --peers=false
+      // --json`: if collect() ran the address-stability check anyway
+      // without a host to compare against, the fake throws for the
+      // unregistered command and this test fails loudly.
+      final advisories = await const HostAdvisor().collect(
+        selection: _verifiedTmux,
+        runner: _healthyHost(),
+      );
+
+      expect(advisories, isEmpty);
+    });
+
     test('orders warnings before information', () async {
       final advisories = await const HostAdvisor().collect(
         selection: const MultiplexerVerified(
@@ -167,29 +228,35 @@ void main() {
     });
   });
 
-  group('HostAdvisor.collect — a broken transport cannot break the surface', () {
-    test('a throwing runner still yields the probe-derived findings', () async {
-      // FakeHostCommandRunner with nothing registered throws on the first
-      // diagnostic command, standing in for a client that has already died.
-      final advisories = await const HostAdvisor().collect(
-        selection: const MultiplexerNoneFound(
-          requested: MultiplexerId.zellij,
-          id: MultiplexerId.zellij,
-        ),
-        runner: FakeHostCommandRunner(),
+  group(
+    'HostAdvisor.collect — a broken transport cannot break the surface',
+    () {
+      test(
+        'a throwing runner still yields the probe-derived findings',
+        () async {
+          // FakeHostCommandRunner with nothing registered throws on the first
+          // diagnostic command, standing in for a client that has already died.
+          final advisories = await const HostAdvisor().collect(
+            selection: const MultiplexerNoneFound(
+              requested: MultiplexerId.zellij,
+              id: MultiplexerId.zellij,
+            ),
+            runner: FakeHostCommandRunner(),
+          );
+
+          expect(advisories.single.id, HostAdvisoryId.multiplexerMissing);
+        },
       );
 
-      expect(advisories.single.id, HostAdvisoryId.multiplexerMissing);
-    });
-
-    test('a throwing runner never propagates its exception', () async {
-      await expectLater(
-        const HostAdvisor().collect(
-          selection: _verifiedTmux,
-          runner: FakeHostCommandRunner(),
-        ),
-        completion(isEmpty),
-      );
-    });
-  });
+      test('a throwing runner never propagates its exception', () async {
+        await expectLater(
+          const HostAdvisor().collect(
+            selection: _verifiedTmux,
+            runner: FakeHostCommandRunner(),
+          ),
+          completion(isEmpty),
+        );
+      });
+    },
+  );
 }

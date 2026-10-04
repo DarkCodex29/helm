@@ -77,6 +77,13 @@ class ShortcutsSemantics {
   /// explanation (unsupported / unreachable / genuinely none) rather than
   /// on the absence of rows, which all three would otherwise look like.
   static const agentsSection = 'helm.shortcuts.agents_section';
+
+  /// One tappable workspace header inside the WORKSPACES tree, addressed
+  /// by the host's own workspace id rather than by label — the pattern
+  /// [ProfileEditSemantics.fontSizeOption] already follows, for the same
+  /// reason: two clients can share a label, but never an id.
+  static String workspaceHeaderButton(String workspaceId) =>
+      'helm.shortcuts.workspace_header_button_$workspaceId';
 }
 
 /// Identifiers on `HelmTerminalView`.
@@ -238,4 +245,13 @@ class ProfileEditSemantics {
   /// got more honest.
   static const backgroundHoldSwitch =
       'helm.profile_edit.background_hold_switch';
+
+  /// The control picking [ConnectionProfile.fontSize] for this profile.
+  static const fontSizeControl = 'helm.profile_edit.font_size_control';
+
+  /// One selectable candidate point size inside [fontSizeControl].
+  /// Addressable per-size rather than by position, so a test can select
+  /// "the 9pt option" without caring which index it currently renders at.
+  static String fontSizeOption(int fontSize) =>
+      'helm.profile_edit.font_size_option_$fontSize';
 }

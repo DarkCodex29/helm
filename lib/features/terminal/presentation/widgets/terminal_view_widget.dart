@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
@@ -144,9 +145,23 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
           // Bundling the real face is a legitimate upgrade — it just has to
           // be an asset, so the metrics are right on the first frame rather
           // than the first successful download.
-          textStyle: const TerminalStyle(
-            fontFamilyFallback: ['Menlo', 'Monaco', 'Courier New', 'monospace'],
-            fontSize: 13,
+          //
+          // `fontSize` reads from the session's profile rather than a
+          // widget constructor parameter. `HelmTerminalView` has ~10
+          // existing call sites across the app and its tests, and the
+          // session already carries the profile this view is rendering
+          // — reading it here is honest, where adding a parameter would
+          // have meant touching every one of those call sites just to
+          // thread a value the view can already reach for itself.
+          //
+          // Changing this value resizes the Terminal, which resizes the
+          // column/row count TerminalView measures and reports to
+          // TerminalSession (see the comment above this widget) — so a
+          // font size change propagates to the remote PTY through the
+          // SAME single source of truth, never a second computed one.
+          textStyle: TerminalStyle(
+            fontFamilyFallback: AppConstants.terminalFontFamilyFallback,
+            fontSize: widget.session.profile.fontSize,
           ),
           hardwareKeyboardOnly: true,
           focusNode: _focusNode,

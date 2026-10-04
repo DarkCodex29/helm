@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:helm/core/host/host_command_runner.dart';
 
 /// Severity/state of one [HostDiagnostic].
@@ -26,6 +28,11 @@ enum DiagnosticId {
   /// Whether Tailscale SSH is intercepting port 22 on the connected host —
   /// see [HostDiagnostics.evaluateTailscaleInterception].
   tailscaleOwnsPort22,
+
+  /// Whether the profile connected by a raw Tailscale address rather than
+  /// the stable MagicDNS name — see
+  /// [HostDiagnostics.evaluateTailscaleAddressStability].
+  tailscaleAddressUnstable,
 }
 
 /// One diagnostic finding: what was found, and remediation copy for the
@@ -95,10 +102,11 @@ class HostDiagnostics {
 
   // ── Tailscale interception ──────────────────────────────────────────
   //
-  // No live sample of Tailscale SSH interception exists: `tailscale` is
-  // not installed on the real host used to gather every other piece of
-  // ground truth for this slice. Chosen signals, and what they cannot
-  // prove — full reasoning, including three rejected alternatives
+  // No live sample of Tailscale SSH interception ITSELF exists, and that
+  // is still true: capturing one needs a host with `RunSSH` turned ON,
+  // which no available host has. What HAS since been measured is the
+  // command and the parse — see point 2. Chosen signals, and what they
+  // cannot prove — full reasoning, including three rejected alternatives
   // (`ss -tlnp`, `pgrep tailscaled`, and inferring from "we're already
   // connected"), is in the apply report:
   //
@@ -107,12 +115,17 @@ class HostDiagnostics {
   //    whether the binary exists; absence alone is enough to report `ok`.
   //
   // 2. `tailscale debug prefs`, read for its `RunSSH` boolean — the
-  //    command design.md's sequence diagram names. UNVERIFIED against a
-  //    real host (disclosed plainly, same category as slice 4's initial
-  //    `herdr agent list` shape guess before correction). A non-zero exit
-  //    or unparseable output is treated as `unknown`, never silently as
-  //    `ok`/`warn` — this local-API socket is restricted on some hosts,
-  //    and "absence of a signal is never evidence of a negative answer".
+  //    command design.md's sequence diagram names. This was carried as
+  //    UNVERIFIED against a real host until 2026-10-03, when it was run
+  //    on the owner's Mac (Tailscale 1.102.4) and emitted the line
+  //    `"RunSSH": false,`, which [_runSshPattern] was then confirmed to
+  //    match, capturing `false`. So the command name, its output shape
+  //    and this regex are now measured fact; what remains unmeasured is
+  //    only the `true` branch, for the reason in the paragraph above.
+  //    A non-zero exit or unparseable output is treated as `unknown`,
+  //    never silently as `ok`/`warn` — this local-API socket is
+  //    restricted on some hosts, and "absence of a signal is never
+  //    evidence of a negative answer".
   static const _tailscalePresenceCommand =
       'command -v tailscale >/dev/null 2>&1';
   static const _tailscaleDebugPrefsCommand = 'tailscale debug prefs';
@@ -120,6 +133,54 @@ class HostDiagnostics {
     r'"RunSSH"\s*:\s*(true|false)',
     caseSensitive: false,
   );
+
+  // ── Tailscale raw-address stability ─────────────────────────────────
+  //
+  // The paid-for failure this check exists for: a profile held
+  // `100.64.0.9` while the real host answered on `100.64.0.1` —
+  // a dead node-registration address read as a network problem. The
+  // MagicDNS name follows the node across a reinstall or a
+  // logout/login; the address does not. See README.md (corrected in
+  // commit 2f12b55) for the user-facing version of this same warning.
+  //
+  // Measured against the owner's real Mac (Tailscale 1.102.4). The
+  // addresses and names quoted anywhere below are REDACTED to
+  // documentation placeholders - this repository is public, and a real
+  // tailnet suffix and machine name document someone's live network for
+  // no benefit. Every SHAPE, size, field name and trailing dot is
+  // verbatim from that measurement; only the identifiers were swapped:
+  //
+  // 1. `tailscale status --peers=false --json` — `--peers=false` OMITS
+  //    the `Peer` map, so this command's output size does NOT grow with
+  //    tailnet size (measured: 3142 bytes vs. 4456 for the unflagged
+  //    status on a two-node tailnet). `--self --json` was tried and
+  //    rejected: it does NOT drop peers.
+  //
+  // 2. `Self.DNSName` carries a TRAILING DOT (`"host.ts.net."`). It is
+  //    stripped before being shown or suggested — an un-stripped dot
+  //    would make the suggested name wrong.
+  //
+  // 3. `CurrentTailnet.MagicDNSEnabled` is present in this same bounded
+  //    output, so "MagicDNS is off for this tailnet" (nothing to
+  //    suggest) is distinguishable from "the name could not be read"
+  //    (might still have a name, just couldn't see it).
+  //
+  // 4. The PARSE, not just the command, was exercised end to end: the
+  //    real 2635-byte status body was fed through
+  //    [evaluateTailscaleAddressStability] on 2026-10-03 and produced
+  //    `warn` for the IPv4 address, `warn` for the IPv6 one, and `ok`
+  //    for the MagicDNS name, with the trailing dot stripped. That
+  //    throwaway check was NOT kept as a fixture: a real status body
+  //    carries node keys and the owner's account email, which do not
+  //    belong in a repository. The scripted cases below encode the same
+  //    shapes without the secrets.
+  //
+  // The comparison against `TailscaleIPs` is EXACT STRING membership,
+  // never a `100.64.0.0/10` CGNAT range check: that block is shared with
+  // NetBird and some ISPs' carrier-grade NAT, so a range check would
+  // mislabel a connection that has nothing to do with Tailscale.
+  static const _tailscaleStatusCommand =
+      'tailscale status --peers=false --json';
 
   /// Post-connect-only call site (spec.md "Tailscale SSH Detected
   /// Post-Connect"): the ONLY place in this class that reads Tailscale's
@@ -193,6 +254,137 @@ class HostDiagnostics {
     );
   }
 
+  /// Checks whether [connectHost] — the host string the profile actually
+  /// dialed, verbatim — is one of this host's raw Tailscale addresses
+  /// rather than its stable MagicDNS name.
+  ///
+  /// See the class-level section comment above
+  /// [_tailscaleStatusCommand] for the measured command choice, the
+  /// `--peers=false` size proof, the `Self.DNSName` trailing-dot trap,
+  /// and why the comparison against `TailscaleIPs` is exact-string, never
+  /// a CGNAT range check.
+  ///
+  /// Deliberately a SEPARATE post-connect call site from
+  /// [evaluateTailscaleInterception], for the same reason that one has
+  /// its own: both need an already-live connection (here, the host string
+  /// that was actually dialed) rather than data available before connect.
+  Future<HostDiagnostic> evaluateTailscaleAddressStability(
+    String connectHost,
+  ) async {
+    final presence = await _runner.run(_tailscalePresenceCommand);
+    if (presence.exitCode != 0) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.ok,
+        detail:
+            'Tailscale is not installed on this host, so this connection '
+            'cannot be using a Tailscale address.',
+      );
+    }
+
+    final status = await _runner.run(_tailscaleStatusCommand);
+    if (status.exitCode != 0) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.unknown,
+        detail:
+            'Tailscale is installed, but its status could not be read, so '
+            'whether this connection uses a stable address is unknown.',
+      );
+    }
+
+    final Map<String, dynamic> parsed;
+    try {
+      final decoded = jsonDecode(status.stdout);
+      if (decoded is! Map<String, dynamic>) throw const FormatException();
+      parsed = decoded;
+    } on FormatException {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.unknown,
+        detail:
+            "Tailscale's status output could not be parsed, so whether "
+            'this connection uses a stable address is unknown.',
+      );
+    }
+
+    final rawIps = parsed['TailscaleIPs'];
+    if (rawIps is! List) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.unknown,
+        detail:
+            "Tailscale's status output did not list this host's own "
+            'addresses, so whether this connection uses a stable address '
+            'is unknown.',
+      );
+    }
+    final tailscaleIps = rawIps.whereType<String>().toSet();
+
+    // EXACT match only. See the section comment above
+    // _tailscaleStatusCommand for why a 100.64.0.0/10 CGNAT range check
+    // was rejected — that block is shared with NetBird and some ISPs.
+    if (!tailscaleIps.contains(connectHost)) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.ok,
+        detail: 'This connection is not using a raw Tailscale address.',
+      );
+    }
+
+    final magicDnsEnabled = parsed['CurrentTailnet']?['MagicDNSEnabled'];
+    if (magicDnsEnabled == false) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.warn,
+        detail:
+            'This profile connects by a raw Tailscale address, which is '
+            'reissued on a reinstall or a logout/login and will leave the '
+            'profile pointing at a dead address. This tailnet has '
+            'MagicDNS turned off, so there is no stable name to switch to '
+            'yet.',
+        // TEXT ONLY — never executed. See the class doc comment above.
+        remediationCopy:
+            'Ask a tailnet administrator to enable MagicDNS (in the '
+            'Tailscale admin console, under DNS settings), then update '
+            "this profile to use the host's MagicDNS name instead of its "
+            'raw address.',
+      );
+    }
+
+    final dnsName = parsed['Self']?['DNSName'];
+    if (dnsName is! String || dnsName.isEmpty) {
+      return const HostDiagnostic(
+        id: DiagnosticId.tailscaleAddressUnstable,
+        status: DiagnosticStatus.unknown,
+        detail:
+            'This connection uses a raw Tailscale address, but this '
+            "host's MagicDNS name could not be read, so no stable "
+            'alternative could be determined.',
+      );
+    }
+    // Self.DNSName carries a trailing dot ("host.ts.net.") — measured on
+    // the owner's real host. Stripped here so it is never shown or
+    // suggested with one.
+    final stableName = dnsName.endsWith('.')
+        ? dnsName.substring(0, dnsName.length - 1)
+        : dnsName;
+
+    return HostDiagnostic(
+      id: DiagnosticId.tailscaleAddressUnstable,
+      status: DiagnosticStatus.warn,
+      detail:
+          'This profile connects by a raw Tailscale address ($connectHost), '
+          'which is reissued on a reinstall or a logout/login. The stable '
+          'name for this host is $stableName.',
+      // TEXT ONLY — never executed. See the class doc comment above.
+      remediationCopy:
+          'Update this profile to connect by $stableName instead of '
+          '$connectHost — the MagicDNS name follows this host across a '
+          'reinstall or a re-login; the raw address does not.',
+    );
+  }
+
   // ── Logout persistence (linger + KillUserProcesses) ────────────────
   //
   // Ground truth captured on a real, live Ubuntu 24.04.4 host over SSH as
@@ -217,16 +409,13 @@ class HostDiagnostics {
   // Governing discipline for both signals: "absence of a signal is never
   // evidence of a negative answer." A missing/unparseable/non-zero result
   // always becomes [_TriState.unknown], never [_TriState.no].
-  static const _loginctlPresenceCommand =
-      'command -v loginctl >/dev/null 2>&1';
-  static const _lingerCommand = r'loginctl show-user $(id -un) --property=Linger';
+  static const _loginctlPresenceCommand = 'command -v loginctl >/dev/null 2>&1';
+  static const _lingerCommand =
+      r'loginctl show-user $(id -un) --property=Linger';
   static const _killUserProcessesCommand =
       "grep -E '^[[:space:]]*KillUserProcesses[[:space:]]*=' "
       '/etc/systemd/logind.conf';
-  static final _lingerPattern = RegExp(
-    r'^Linger=(yes|no)$',
-    multiLine: true,
-  );
+  static final _lingerPattern = RegExp(r'^Linger=(yes|no)$', multiLine: true);
   static final _killUserProcessesPattern = RegExp(
     r'KillUserProcesses\s*=\s*(yes|no)',
     caseSensitive: false,

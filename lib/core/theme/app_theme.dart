@@ -30,9 +30,16 @@ class AppTheme {
   /// on a warning is how a red stops meaning anything.
   static const Color warning = Color(0xFFD29922);
 
-  /// Wash painted over live content behind a modal overlay. Carries alpha,
-  /// so the terminal underneath stays legible as context.
-  static const Color scrim = Color(0xCC0D1117);
+  /// Backdrop painted behind the disconnection overlay. Fully opaque on
+  /// purpose: this is the only consumer in the codebase, and it was
+  /// introduced at 80% alpha for a single-line overlay where the dimmed
+  /// terminal still read fine behind it. The overlay now renders an icon
+  /// plus three lines of text, and the terminal bleeding through at 20%
+  /// opacity made that copy visually collide with the icon instead of
+  /// sitting on a clean backdrop. If a second, genuinely translucent wash
+  /// is ever needed elsewhere, give it its own token rather than
+  /// reintroducing alpha here.
+  static const Color scrim = Color(0xFF0D1117);
 
   /// The star on the profile the app dials by default. Not [warning]: this
   /// marks a user's own choice and must never read as something wrong,

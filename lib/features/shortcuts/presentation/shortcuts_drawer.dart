@@ -150,6 +150,7 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
                       tree: _workspaceTree,
                       focusError: _tabFocusError,
                       onFocus: _focusTab,
+                      onFocusWorkspace: _focusWorkspace,
                     ),
 
                     const SizedBox(height: 8),
@@ -325,6 +326,35 @@ class _ShortcutsDrawerState extends ConsumerState<ShortcutsDrawer> {
     });
 
     if (result is MuxTabFocused) navigator.pop();
+  }
+
+  /// Switches the host to the tab [workspace] was last looking at, resolved
+  /// from [tabsInWorkspace] by [resolveWorkspaceFocusTarget].
+  ///
+  /// Routed through [_focusTab] rather than duplicating its body: once a
+  /// target tab is resolved, focusing it is EXACTLY the gesture a tab row
+  /// already performs, including the same success-closes-the-drawer order
+  /// and the same two failure wordings. Inventing a second path here would
+  /// let a header failure read differently from a row failure for no
+  /// reason a user could point to.
+  ///
+  /// The one case [_focusTab] cannot cover is a workspace with NO tabs at
+  /// all to resolve to — [resolveWorkspaceFocusTarget] returns null, and
+  /// that is reported through the SAME [_tabFocusError] state and the same
+  /// [_FocusError] row the tab-focus failures use, rather than a silent
+  /// no-op or a second error surface the user would have to learn.
+  Future<void> _focusWorkspace(
+    MuxWorkspace workspace,
+    List<MuxTab> tabsInWorkspace,
+  ) async {
+    final target = resolveWorkspaceFocusTarget(workspace, tabsInWorkspace);
+    if (target == null) {
+      setState(() {
+        _tabFocusError = '${workspace.label} has no tabs to focus';
+      });
+      return;
+    }
+    await _focusTab(target);
   }
 
   void _showProjectForm(BuildContext context, ProjectShortcut? existing) {
@@ -616,6 +646,7 @@ class _WorkspaceTreeSection extends StatelessWidget {
     required this.tree,
     required this.focusError,
     required this.onFocus,
+    required this.onFocusWorkspace,
   });
 
   final TerminalSession? session;
@@ -630,6 +661,12 @@ class _WorkspaceTreeSection extends StatelessWidget {
   final String? focusError;
 
   final Future<void> Function(MuxTab) onFocus;
+
+  /// Tapped from a workspace HEADER rather than a tab row. Takes the
+  /// workspace's own tabs alongside it because the header has no tab of
+  /// its own — the target must be resolved from the tree, and this widget
+  /// already holds the tree this call needs to resolve it from.
+  final Future<void> Function(MuxWorkspace, List<MuxTab>) onFocusWorkspace;
 
   @override
   Widget build(BuildContext context) {
@@ -682,7 +719,13 @@ class _WorkspaceTreeSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final workspace in workspaces) ...[
-            _WorkspaceHeader(workspace: workspace),
+            () {
+              final tabsInWorkspace = _tabsOf(tabs, workspace.workspaceId);
+              return _WorkspaceHeader(
+                workspace: workspace,
+                onTap: () => onFocusWorkspace(workspace, tabsInWorkspace),
+              );
+            }(),
             for (final tab in _tabsOf(tabs, workspace.workspaceId))
               _TabRow(
                 key: ValueKey(tab.tabId),
@@ -710,36 +753,84 @@ class _WorkspaceTreeSection extends StatelessWidget {
         ..sort((a, b) => a.number.compareTo(b.number));
 }
 
-/// One workspace's name and its agent roll-up.
+/// Resolves which tab a tap on [workspace]'s HEADER should focus, from
+/// [tabsInWorkspace] — that workspace's own tabs, already in tab-bar order
+/// (see `_WorkspaceTreeSection._tabsOf`).
 ///
-/// A header, not a row: workspaces are not tappable in this slice, and a
-/// surface with nothing to act on must not look pressable — the rule
-/// [AgentRow] states for its own null [AgentRow.onTap].
+/// Tries [MuxWorkspace.activeTabId] first: it is the host's own answer to
+/// "which of this client's projects was I last looking at", and a header
+/// that always landed on the first tab would be no better than the inert
+/// text it replaces for a client whose first tab is never the one anyone
+/// wants. See [MuxWorkspace]'s doc for what is and is not verified about
+/// that field's trustworthiness.
+///
+/// Falls back to the first tab BY NUMBER when [MuxWorkspace.activeTabId]
+/// is null or names a tab [tabsInWorkspace] does not carry — the exact race
+/// [MuxWorkspaceTreeAvailable]'s own doc names: the two host commands are
+/// not atomic, so a tab can close, or a workspace's tree can simply be
+/// read before `active_tab_id` and after a tab vanished, between the two
+/// queries that built this tree. A miss here must degrade to the most
+/// reasonable guess rather than refuse to act.
+///
+/// Returns null only when [tabsInWorkspace] is empty — nothing exists to
+/// focus, and the caller must say so rather than invent a target.
+MuxTab? resolveWorkspaceFocusTarget(
+  MuxWorkspace workspace,
+  List<MuxTab> tabsInWorkspace,
+) {
+  final activeTabId = workspace.activeTabId;
+  if (activeTabId != null) {
+    for (final tab in tabsInWorkspace) {
+      if (tab.tabId == activeTabId) return tab;
+    }
+  }
+  return tabsInWorkspace.isEmpty ? null : tabsInWorkspace.first;
+}
+
+/// One workspace's name and its agent roll-up, tappable to focus the tab it
+/// was last looking at — see [resolveWorkspaceFocusTarget] for which one
+/// that is.
+///
+/// Built like [_TabRow]'s own InkWell rather than a bare [GestureDetector]:
+/// the drawer already has one way to say "this is pressable", and a header
+/// that looked identical to the dead rows above it (the SECTION headers,
+/// which genuinely have nothing to tap) would teach the user the wrong
+/// lesson about which text in this drawer responds to a touch.
 class _WorkspaceHeader extends StatelessWidget {
-  const _WorkspaceHeader({required this.workspace});
+  const _WorkspaceHeader({required this.workspace, required this.onTap});
 
   final MuxWorkspace workspace;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              workspace.label,
-              style: const TextStyle(
-                color: AppTheme.onSurface,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+    return Semantics(
+      identifier: ShortcutsSemantics.workspaceHeaderButton(
+        workspace.workspaceId,
+      ),
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  workspace.label,
+                  style: const TextStyle(
+                    color: AppTheme.onSurface,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+              _StateGlyph(state: workspace.agentState),
+            ],
           ),
-          _StateGlyph(state: workspace.agentState),
-        ],
+        ),
       ),
     );
   }

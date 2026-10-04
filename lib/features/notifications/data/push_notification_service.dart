@@ -120,20 +120,53 @@ class PushNotificationService {
     if (_started) return;
     _started = true;
 
+    // Separately fallible on purpose: `_gateway.initialize()` prepares
+    // Firebase, `_presenter.initialize(...)` prepares the LOCAL
+    // `flutter_local_notifications` plugin, and the two share no
+    // dependency. A device with no Play Services (or, as measured on a
+    // physical iPhone, an iOS target `flutterfire configure` was never
+    // run for) can fail the first while the second works perfectly, and
+    // the reverse is just as possible. Collapsing both into one try/catch
+    // would survive either failure but could not tell `firebaseAvailable`
+    // apart from "everything is fine", which is exactly the gate the
+    // subscriptions below need.
+    var firebaseAvailable = true;
     try {
       await _gateway.initialize();
-      await _presenter.initialize(onTap: _onLocalNotificationTapped);
     } catch (e) {
-      // A channel that failed to register means notifications will not
-      // draw. It does not mean the app should not run.
-      _log.w('Notification plugins did not fully initialize: $e');
+      firebaseAvailable = false;
+      // Matches the WARN `resolveLaunchAlert` already logs for the same
+      // failure: a device with no Play Services, or
+      // `DefaultFirebaseOptions` throwing `UnsupportedError` for a
+      // platform `flutterfire configure` was never run for (see
+      // `FirebasePushMessagingGateway`'s doc comment). Neither is a
+      // reason to fail the launch.
+      _log.w('Firebase messaging did not initialize: $e');
     }
 
-    _subscriptions.addAll([
-      _gateway.tokenRefreshes.listen(_onTokenRefreshed),
-      _gateway.foregroundMessages.listen(_onForegroundMessage),
-      _gateway.notificationTaps.listen(_onNotificationTapped),
-    ]);
+    try {
+      await _presenter.initialize(onTap: _onLocalNotificationTapped);
+    } catch (e) {
+      // A channel that failed to register means local notifications will
+      // not draw. It does not mean the app should not run, and it says
+      // nothing about whether Firebase initialized above.
+      _log.w('Local notification presenter did not initialize: $e');
+    }
+
+    // Gated on Firebase alone: all three subscriptions come from
+    // `_gateway`, so none of them is meaningful when Firebase failed to
+    // initialize. Subscribing anyway is the exact defect this guards —
+    // `FirebaseMessaging.instance` (reached inside each of these getters)
+    // re-resolves on every access and throws `[core/no-app]` for as long
+    // as `initializeApp` never ran, which is unconditionally true once
+    // the catch above has already fired.
+    if (firebaseAvailable) {
+      _subscriptions.addAll([
+        _gateway.tokenRefreshes.listen(_onTokenRefreshed),
+        _gateway.foregroundMessages.listen(_onForegroundMessage),
+        _gateway.notificationTaps.listen(_onNotificationTapped),
+      ]);
+    }
   }
 
   /// Called the moment a session starts tracking agents on [runner]'s host.

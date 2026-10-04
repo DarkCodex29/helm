@@ -24,7 +24,7 @@ TerminalSession _session() {
     profile: const ConnectionProfile(
       id: 'p1',
       name: 'My Server',
-      host: 'gian-macbook-pro',
+      host: 'example-host',
       port: 22,
       username: 'gian',
     ),
@@ -61,7 +61,7 @@ void main() {
     // The single fact that separates "my server is down" from "this
     // profile points somewhere that stopped existing". Both render an
     // identical overlay without it.
-    expect(find.text('gian@gian-macbook-pro:22'), findsOneWidget);
+    expect(find.text('gian@example-host:22'), findsOneWidget);
   });
 
   testWidgets('the overlay shows the reason the session failed', (
@@ -69,11 +69,11 @@ void main() {
   ) async {
     final session = _session();
     session.lastFailureNotifier.value =
-        'Could not reach 100.100.133.42 — nothing answered';
+        'Could not reach 100.64.0.9 — nothing answered';
     await _pump(tester, session);
 
     expect(
-      find.text('Could not reach 100.100.133.42 — nothing answered'),
+      find.text('Could not reach 100.64.0.9 — nothing answered'),
       findsOneWidget,
     );
     // The generic line stays: it is the title, and the reason sits under

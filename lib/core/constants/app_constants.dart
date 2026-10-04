@@ -65,4 +65,37 @@ class AppConstants {
 
   static const int defaultTerminalColumns = 80;
   static const int defaultTerminalRows = 24;
+
+  /// The terminal font size every profile had before
+  /// [ConnectionProfile.fontSize] existed, back when it was the single
+  /// hardcoded `fontSize: 13` literal in `terminal_view_widget.dart`.
+  ///
+  /// Named here so that literal has exactly one owner: both the
+  /// `@Default` on the new field and the measurement preview in the
+  /// profile editor read it from this constant rather than each carrying
+  /// their own copy of `13.0` that could silently drift apart.
+  static const double defaultTerminalFontSize = 13.0;
+
+  /// The exact fallback chain [HelmTerminalView] renders its terminal
+  /// with, shared with the profile editor's font-size preview so both
+  /// measure the same glyphs. Two independent copies of this list is how
+  /// the preview's column count would quietly stop matching what the
+  /// terminal actually renders.
+  static const List<String> terminalFontFamilyFallback = [
+    'Menlo',
+    'Monaco',
+    'Courier New',
+    'monospace',
+  ];
+
+  /// Candidate point sizes offered by the profile editor's font-size
+  /// control, largest first.
+  ///
+  /// Not an arbitrary range: these are the five sizes actually measured
+  /// against a live `herdr` session on an iPhone 17 Pro at 391.9dp —
+  /// 13pt painted 50 columns into a remote that wanted 80, and 8pt was
+  /// the smallest size that measurement run still called legible.
+  /// [defaultTerminalFontSize] (13) stays first in the list so it reads
+  /// as the default, not merely the largest option.
+  static const List<double> terminalFontSizeOptions = [13, 11, 10, 9, 8];
 }

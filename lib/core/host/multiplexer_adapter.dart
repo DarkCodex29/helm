@@ -439,13 +439,33 @@ abstract interface class AgentAwareMultiplexer {
 
 /// One workspace reported by [WorkspaceAwareMultiplexer.listWorkspaceTree].
 ///
-/// THREE fields out of the eight herdr sends, for the reason [MuxPane]
+/// FOUR fields out of the eight herdr sends, for the reason [MuxPane]
 /// drops nine of twelve: this type answers one question — which of the
 /// user's clients is this, and is anything happening in it — and only
-/// these three answer it. `number`, `pane_count`, `tab_count`, `focused`
-/// and `active_tab_id` are all real fields on the wire and all deliberately
-/// unread, because a stored field is a field a future reader has to work
-/// out whether they may trust.
+/// these four answer it. `number`, `pane_count`, `tab_count` and `focused`
+/// are real fields on the wire and still deliberately unread, because a
+/// stored field is a field a future reader has to work out whether they
+/// may trust.
+///
+/// [activeTabId] was in that unread set until the shortcuts drawer grew a
+/// reader. A tap on a workspace HEADER (`_WorkspaceHeader` in
+/// `shortcuts_drawer.dart`) has no tab of its own to focus — the drawer
+/// must pick one on the user's behalf — and this is the host's own answer
+/// to "which one was this client last looking at", which beats guessing
+/// "the first tab" the way [MuxTab.focused] beats guessing for the tab
+/// strip. MEASURED against the owner's live herdr 0.8.2
+/// (`herdr_adapter_workspace_test.dart`): in the one capture available,
+/// `w1`'s `active_tab_id` named a tab that existed in that SAME capture's
+/// tab list, and `w2`'s named the tab that list separately marked
+/// `focused: true` — so the field read consistently with the rest of the
+/// tree every place it could be cross-checked. What is NOT verified from
+/// here is whether it stays consistent once a tab is closed or renumbered
+/// on a live host; this type does not assume so. The reader in
+/// `shortcuts_drawer.dart` treats an [activeTabId] the tree does not carry
+/// as the SAME race [MuxWorkspaceTreeAvailable]'s own doc already names for
+/// tabs created between the two commands, and falls back to the
+/// workspace's first tab by [MuxTab.number] rather than trusting the id
+/// blindly or refusing to act.
 ///
 /// [agentState] is herdr's own per-workspace roll-up, MEASURED to use the
 /// same `agent_status` vocabulary as `agent list` — so it is parsed by the
@@ -454,6 +474,7 @@ typedef MuxWorkspace = ({
   String workspaceId,
   String label,
   AgentState agentState,
+  String? activeTabId,
 });
 
 /// One tab reported by [WorkspaceAwareMultiplexer.listWorkspaceTree].

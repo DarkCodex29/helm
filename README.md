@@ -118,12 +118,38 @@ android/app/src/main/kotlin/com/darkcodex/helm/
    ```bash
    echo "<public-key>" >> ~/.ssh/authorized_keys
    ```
-4. Creá el perfil con la **IP de Tailscale** de tu Mac (`tailscale ip -4`), tu usuario y el puerto 22
+4. Creá el perfil con el **nombre MagicDNS** de tu Mac, tu usuario y el puerto 22
 
-   Usá la IP de Tailscale, no la de la LAN: funciona en los dos lados. En casa el túnel va
-   directo por la red local, y afuera sale por internet. Con la IP de la LAN el perfil
-   deja de conectar en cuanto salís de tu WiFi.
+   ```bash
+   tailscale status --peers=false --json | grep -o '"DNSName": "[^"]*"'
+   # → "DNSName": "tu-maquina.tailXXXXXX.ts.net."
+   # --peers=false para que no liste también el nombre de los otros equipos
+   ```
+
+   Pegá ese nombre sin el punto final. También funciona el nombre corto
+   (`tu-maquina`), pero el completo resuelve aunque el teléfono no esté aceptando
+   el DNS de Tailscale.
+
+   **No uses la IP de la LAN**: deja de conectar en cuanto salís de tu WiFi.
+   **Y no uses tampoco la IP de Tailscale** (`tailscale ip -4`), aunque la
+   documentación de Tailscale diga que no cambia. Es estable por *registro de
+   nodo*, no por máquina: una reinstalación, un logout/login o una entrada nueva
+   en el tailnet le asigna una IP distinta, y el perfil queda apuntando a una
+   dirección muerta. El síntoma es un "Connection lost" que parece un problema
+   de red y no lo es. El nombre MagicDNS sigue al nodo; la IP no.
+
+   Con cualquiera de las dos opciones el túnel va directo por la red local
+   cuando estás en casa, y sale por internet cuando no.
 5. Probá con **Test Connection** antes de guardar
+
+   Si venías usando la IP y cambiás el perfil al nombre, Helm lo trata como un
+   host nuevo: va a fijar la clave del servidor en silencio, sin avisarte de
+   ningún cambio, porque las claves se guardan por nombre de host. Aprovechá para
+   comparar la huella contra la que imprime la Mac:
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
 
 ### Notificaciones (opcional)
 

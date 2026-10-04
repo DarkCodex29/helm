@@ -52,3 +52,29 @@ app.*.map.json
 
 # CodeGraph index — per-checkout, must never be shared between working copies
 .codegraph/
+
+# Release signing material. Added BEFORE the release keystore exists, which
+# is the only moment this is free: android/app/build.gradle.kts still signs
+# release builds with the shared public debug keystore, so a real one has to
+# be created before helm can be handed to anyone. A key.jks or a
+# key.properties committed once stays in the history of a PUBLIC repository
+# forever, and unlike the Firebase client config - which Google documents as
+# non-secret - these DO authorize: whoever holds them can ship an update
+# Android accepts as this same app, on a device that stores SSH private keys.
+*.jks
+*.keystore
+key.properties
+android/key.properties
+android/app/key.properties
+
+# Apple signing material, for the same reason.
+*.p12
+*.mobileprovision
+ios/Runner/GoogleService-Info.plist
+
+# Credentials of any shape.
+.env
+.env.*
+!.env.example
+*service-account*.json
+*serviceaccount*.json

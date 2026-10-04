@@ -68,9 +68,14 @@ void main() {
     });
 
     test('spreads a realistic set of panes without collisions', () {
-      final ids = ['%0', '%1', '%7', '%9', '%13', '%42']
-          .map(notificationIdForKey)
-          .toSet();
+      final ids = [
+        '%0',
+        '%1',
+        '%7',
+        '%9',
+        '%13',
+        '%42',
+      ].map(notificationIdForKey).toSet();
 
       expect(ids, hasLength(6));
     });
@@ -138,7 +143,9 @@ void main() {
 
     test('the manifest points Firebase at the icon Dart also names', () {
       expect(
-        metaDataResource('com.google.firebase.messaging.default_notification_icon'),
+        metaDataResource(
+          'com.google.firebase.messaging.default_notification_icon',
+        ),
         '@drawable/$kAgentAlertIconResource',
       );
     });
@@ -154,8 +161,9 @@ void main() {
 
     test('the icon drawable the manifest names actually exists', () {
       expect(
-        File('android/app/src/main/res/drawable/$kAgentAlertIconResource.xml')
-            .existsSync(),
+        File(
+          'android/app/src/main/res/drawable/$kAgentAlertIconResource.xml',
+        ).existsSync(),
         isTrue,
       );
     });
@@ -169,23 +177,61 @@ void main() {
         'android/app/src/main/res/drawable/$kAgentAlertIconResource.xml',
       ).readAsStringSync();
 
-      final fills = RegExp('android:fillColor="([^"]+)"')
-          .allMatches(icon)
-          .map((m) => m.group(1)!.toUpperCase());
-      final strokes = RegExp('android:strokeColor="([^"]+)"')
-          .allMatches(icon)
-          .map((m) => m.group(1)!.toUpperCase());
+      final fills = RegExp(
+        'android:fillColor="([^"]+)"',
+      ).allMatches(icon).map((m) => m.group(1)!.toUpperCase());
+      final strokes = RegExp(
+        'android:strokeColor="([^"]+)"',
+      ).allMatches(icon).map((m) => m.group(1)!.toUpperCase());
 
       expect(fills, isNotEmpty);
       expect(fills, everyElement('#00000000'), reason: 'fills must be clear');
       expect(strokes, isNotEmpty);
-      expect(strokes, everyElement('#FFFFFFFF'), reason: 'strokes must be white');
+      expect(
+        strokes,
+        everyElement('#FFFFFFFF'),
+        reason: 'strokes must be white',
+      );
     });
 
     test('the alert channel id is the one the manifest hands Firebase', () {
       // Pre-existing contract, re-asserted here because this group is now
       // the one place that checks the Dart/manifest pair at all.
       expect(manifest, contains('android:value="$kAgentAlertChannelId"'));
+    });
+  });
+
+  group('iOS initialization asks for no permission at launch', () {
+    // What this CAN prove: the shape of the object this code hands the
+    // plugin. `_plugin.initialize(...)` crosses a platform channel, and
+    // nothing running under `flutter_test` can observe what iOS does with
+    // it — these assertions stop at the Dart side of that boundary.
+    //
+    // What it proves anyway: the one thing a future edit is most likely to
+    // undo by accident. `DarwinInitializationSettings` defaults all three
+    // request* flags to true, and accepting that default would ask for
+    // notification permission at app launch — exactly the launch-time ask
+    // `PushNotificationService.onAgentTrackingStarted`'s doc comment argues
+    // against, on a supply of prompts it calls "small and non-renewable".
+    test('iOS settings are present, so initialize does not throw', () {
+      expect(kAgentAlertInitializationSettings.iOS, isNotNull);
+    });
+
+    test(
+      'no permission is requested — the ask stays at onAgentTrackingStarted',
+      () {
+        final ios = kAgentAlertInitializationSettings.iOS!;
+        expect(ios.requestAlertPermission, isFalse);
+        expect(ios.requestSoundPermission, isFalse);
+        expect(ios.requestBadgePermission, isFalse);
+      },
+    );
+
+    test('Android settings are unchanged by the iOS addition', () {
+      expect(
+        kAgentAlertInitializationSettings.android?.defaultIcon,
+        '@drawable/$kAgentAlertIconResource',
+      );
     });
   });
 }

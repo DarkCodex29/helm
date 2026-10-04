@@ -113,6 +113,70 @@ const String kAgentAlertChannelName = 'Agent alerts';
 const String kAgentAlertChannelDescription =
     'An agent on your Mac is waiting for you.';
 
+/// Everything [FlutterLocalNotificationPresenter.initialize] hands the
+/// plugin, pulled out to a constant so a test can inspect the OBJECT this
+/// code builds without crossing the platform channel the plugin call
+/// itself requires.
+///
+/// ## Why iOS needs a branch at all
+///
+/// `InitializationSettings(android: ...)` with no `iOS:` argument is what
+/// this file shipped with, and `flutter_local_notifications` REJECTS it
+/// outright on iOS: "iOS settings must be set when targeting iOS
+/// platform." Measured on a physical iPhone 16 (iOS 26.7.1), that
+/// rejection was the `catch` in `PushNotificationService.start` quietly
+/// swallowing every local notification on that platform — invisible until
+/// commit `9d9b42a` split one combined WARN into two, because until then
+/// it was masked by the Firebase failure it was logged alongside.
+///
+/// ## Why every `request*Permission` flag below is explicitly false
+///
+/// `DarwinInitializationSettings` DEFAULTS all three to true, and
+/// accepting that default would make `initialize()` itself trigger the
+/// system permission prompt, at app launch. That is precisely the
+/// launch-time ask `PushNotificationService.onAgentTrackingStarted`'s doc
+/// comment argues against at length for Android's `POST_NOTIFICATIONS` —
+/// "the permission's earliest honest moment", because asking at launch
+/// "spends a prompt on someone who has not yet seen helm connect to
+/// anything, where the rational answer is no", on a supply of prompts
+/// that is "small and non-renewable". iOS's prompt is exactly as
+/// non-renewable (a denied `UNAuthorizationOptions` request cannot be
+/// re-asked by the app at all — only the user's own Settings app can
+/// undo a refusal), so the same reasoning applies at least as strongly
+/// here, and the ask stays where that method puts it: at the first
+/// moment there is something to notify about.
+///
+/// Setting these three false does not disable local notifications on
+/// iOS — it only disables the AUTHORIZATION REQUEST this call would
+/// otherwise make. `show()` below still draws notifications once the
+/// user has granted permission some other way (including the explicit
+/// request `onAgentTrackingStarted` issues through `PushMessagingGateway`,
+/// which on iOS covers both FCM and local alerts under one system
+/// prompt).
+const InitializationSettings kAgentAlertInitializationSettings =
+    InitializationSettings(
+      // `@drawable/`, not `@mipmap/`, and not the launcher icon.
+      //
+      // Android discards every channel of a small icon except alpha, so the
+      // colour launcher icon this used to name arrived as a solid white
+      // square — the shape of its own canvas rather than of anything in it.
+      // `ic_stat_helm` is drawn white-on-transparent for that reason.
+      //
+      // This is only HALF the wiring. The Firebase SDK draws the
+      // backgrounded and killed cases from its own service, with no Dart
+      // running, and reads its icon from the manifest instead. Both were
+      // changed together; changing one alone gives the same feature two
+      // different icons depending on where the phone was when it arrived.
+      android: AndroidInitializationSettings(
+        '@drawable/$kAgentAlertIconResource',
+      ),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestSoundPermission: false,
+        requestBadgePermission: false,
+      ),
+    );
+
 /// Everything helm asks of the local notification plugin.
 ///
 /// A seam for the same reason as `external_viewer.dart`: nothing outside
@@ -167,24 +231,10 @@ class FlutterLocalNotificationPresenter implements LocalNotificationPresenter {
   Future<void> initialize({
     required void Function(String? payload) onTap,
   }) async {
-    // `@drawable/`, not `@mipmap/`, and not the launcher icon.
-    //
-    // Android discards every channel of a small icon except alpha, so the
-    // colour launcher icon this used to name arrived as a solid white
-    // square — the shape of its own canvas rather than of anything in it.
-    // `ic_stat_helm` is drawn white-on-transparent for that reason.
-    //
-    // This is only HALF the wiring. The Firebase SDK draws the
-    // backgrounded and killed cases from its own service, with no Dart
-    // running, and reads its icon from the manifest instead. Both were
-    // changed together; changing one alone gives the same feature two
-    // different icons depending on where the phone was when it arrived.
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@drawable/$kAgentAlertIconResource'),
-    );
-
+    // See [kAgentAlertInitializationSettings] for why iOS needs its own
+    // branch and why every permission-request flag in it is false.
     await _plugin.initialize(
-      settings: settings,
+      settings: kAgentAlertInitializationSettings,
       onDidReceiveNotificationResponse: (response) => onTap(response.payload),
     );
 

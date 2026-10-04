@@ -100,19 +100,13 @@ FakeHostCommandRunner _healthyRunner() => FakeHostCommandRunner()
 
 void main() {
   group('capability', () {
-    test(
-      'herdr advertises the workspace tree, and exposes it through the '
-      'typed accessor rather than a flag a caller can forget to read',
-      () {
-        final adapter = HerdrAdapter(FakeHostCommandRunner());
+    test('herdr advertises the workspace tree, and exposes it through the '
+        'typed accessor rather than a flag a caller can forget to read', () {
+      final adapter = HerdrAdapter(FakeHostCommandRunner());
 
-        expect(
-          adapter.capabilities,
-          contains(MuxCapability.workspaceTree),
-        );
-        expect(adapter.workspaces, isNotNull);
-      },
-    );
+      expect(adapter.capabilities, contains(MuxCapability.workspaceTree));
+      expect(adapter.workspaces, isNotNull);
+    });
   });
 
   group('listWorkspaceTree', () {
@@ -124,31 +118,28 @@ void main() {
       expect(runner.runCalls, [_workspaceListCommand, _tabListCommand]);
     });
 
-    test(
-      'scopes both queries to the session, because a socket-backed query '
-      "answers only for the socket it connects to — the same MEASURED trap "
-      'that made an unscoped `agent list` report zero agents',
-      () async {
-        // The session ref is shell-quoted, like every other host-supplied
-        // string that reaches a remote shell (AD-3).
-        final runner = FakeHostCommandRunner()
-          ..whenRun(
-            "herdr --session 'helm-0' workspace list",
-            _ok(_workspaceListJson),
-          )
-          ..whenRun("herdr --session 'helm-0' tab list", _ok(_tabListJson));
-
-        await HerdrAdapter(
-          runner,
-          sessionRef: 'helm-0',
-        ).workspaces!.listWorkspaceTree();
-
-        expect(runner.runCalls, [
+    test('scopes both queries to the session, because a socket-backed query '
+        "answers only for the socket it connects to — the same MEASURED trap "
+        'that made an unscoped `agent list` report zero agents', () async {
+      // The session ref is shell-quoted, like every other host-supplied
+      // string that reaches a remote shell (AD-3).
+      final runner = FakeHostCommandRunner()
+        ..whenRun(
           "herdr --session 'helm-0' workspace list",
-          "herdr --session 'helm-0' tab list",
-        ]);
-      },
-    );
+          _ok(_workspaceListJson),
+        )
+        ..whenRun("herdr --session 'helm-0' tab list", _ok(_tabListJson));
+
+      await HerdrAdapter(
+        runner,
+        sessionRef: 'helm-0',
+      ).workspaces!.listWorkspaceTree();
+
+      expect(runner.runCalls, [
+        "herdr --session 'helm-0' workspace list",
+        "herdr --session 'helm-0' tab list",
+      ]);
+    });
 
     test('parses the workspaces the host reported', () async {
       final result = await HerdrAdapter(
@@ -161,10 +152,44 @@ void main() {
           workspaceId: 'w1',
           label: 'EBIM',
           agentState: AgentState.working,
+          activeTabId: 'w1:t1',
         ),
-        (workspaceId: 'w2', label: 'Go Nexa', agentState: AgentState.idle),
+        (
+          workspaceId: 'w2',
+          label: 'Go Nexa',
+          agentState: AgentState.idle,
+          activeTabId: 'w2:t5',
+        ),
       ]);
     });
+
+    test(
+      'a workspace missing active_tab_id parses with a null, rather than '
+      'throwing on a field this adapter has only ever seen present',
+      () async {
+        final runner = FakeHostCommandRunner()
+          ..whenRun(
+            _workspaceListCommand,
+            _ok(
+              '{"id":"cli:workspace:list","result":{"type":"workspace_list",'
+              '"workspaces":[{"agent_status":"idle","focused":false,'
+              '"label":"EBIM","number":1,"pane_count":0,"tab_count":0,'
+              '"workspace_id":"w1"}]}}',
+            ),
+          )
+          ..whenRun(
+            _tabListCommand,
+            _ok('{"id":"cli:tab:list","result":{"tabs":[]}}'),
+          );
+
+        final result = await HerdrAdapter(
+          runner,
+        ).workspaces!.listWorkspaceTree();
+
+        final tree = result as MuxWorkspaceTreeAvailable;
+        expect(tree.workspaces.single.activeTabId, isNull);
+      },
+    );
 
     test('parses the tabs, keeping the host\'s own order', () async {
       final result = await HerdrAdapter(
@@ -183,77 +208,62 @@ void main() {
       ));
     });
 
-    test(
-      'reuses the agent-status vocabulary rather than parsing it a second '
-      'time — the host sends one enum, helm must read one enum',
-      () async {
-        final result = await HerdrAdapter(
-          _healthyRunner(),
-        ).workspaces!.listWorkspaceTree();
+    test('reuses the agent-status vocabulary rather than parsing it a second '
+        'time — the host sends one enum, helm must read one enum', () async {
+      final result = await HerdrAdapter(
+        _healthyRunner(),
+      ).workspaces!.listWorkspaceTree();
 
-        final tree = result as MuxWorkspaceTreeAvailable;
-        expect(
-          tree.tabs.map((t) => t.agentState),
-          [AgentState.working, AgentState.idle, AgentState.unknown],
+      final tree = result as MuxWorkspaceTreeAvailable;
+      expect(tree.tabs.map((t) => t.agentState), [
+        AgentState.working,
+        AgentState.idle,
+        AgentState.unknown,
+      ]);
+    });
+
+    test('a dead server is a TYPED state, never an empty tree — an empty tree '
+        'reads as "this host has no workspaces", which is a different claim '
+        'from "we could not ask"', () async {
+      final runner = FakeHostCommandRunner()
+        ..whenRun(_workspaceListCommand, _failed(_serverDownStderr));
+
+      final result = await HerdrAdapter(runner).workspaces!.listWorkspaceTree();
+
+      expect(result, isA<MuxWorkspaceTreeUnreachable>());
+    });
+
+    test('a tab query that failed cannot be published as workspaces with no '
+        'tabs — that would compose a LIE out of one truth and one failure, '
+        'and it would read as "every client has no projects"', () async {
+      final runner = FakeHostCommandRunner()
+        ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
+        ..whenRun(_tabListCommand, _failed(_serverDownStderr));
+
+      final result = await HerdrAdapter(runner).workspaces!.listWorkspaceTree();
+
+      expect(result, isA<MuxWorkspaceTreeUnreachable>());
+    });
+
+    test('an unrecognized error code is surfaced, never collapsed into the '
+        'common "server not running" state', () async {
+      final runner = FakeHostCommandRunner()
+        ..whenRun(
+          _workspaceListCommand,
+          _failed('{"error":{"code":"something_new"}}'),
         );
-      },
-    );
 
-    test(
-      'a dead server is a TYPED state, never an empty tree — an empty tree '
-      'reads as "this host has no workspaces", which is a different claim '
-      'from "we could not ask"',
-      () async {
-        final runner = FakeHostCommandRunner()
-          ..whenRun(_workspaceListCommand, _failed(_serverDownStderr));
-
-        final result = await HerdrAdapter(
-          runner,
-        ).workspaces!.listWorkspaceTree();
-
-        expect(result, isA<MuxWorkspaceTreeUnreachable>());
-      },
-    );
-
-    test(
-      'a tab query that failed cannot be published as workspaces with no '
-      'tabs — that would compose a LIE out of one truth and one failure, '
-      'and it would read as "every client has no projects"',
-      () async {
-        final runner = FakeHostCommandRunner()
-          ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
-          ..whenRun(_tabListCommand, _failed(_serverDownStderr));
-
-        final result = await HerdrAdapter(
-          runner,
-        ).workspaces!.listWorkspaceTree();
-
-        expect(result, isA<MuxWorkspaceTreeUnreachable>());
-      },
-    );
-
-    test(
-      'an unrecognized error code is surfaced, never collapsed into the '
-      'common "server not running" state',
-      () async {
-        final runner = FakeHostCommandRunner()
-          ..whenRun(
-            _workspaceListCommand,
-            _failed('{"error":{"code":"something_new"}}'),
-          );
-
-        await expectLater(
-          HerdrAdapter(runner).workspaces!.listWorkspaceTree(),
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              contains('something_new'),
-            ),
+      await expectLater(
+        HerdrAdapter(runner).workspaces!.listWorkspaceTree(),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('something_new'),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
 
     test('stderr that is not the JSON envelope at all is also loud', () async {
       final runner = FakeHostCommandRunner()
@@ -277,8 +287,9 @@ void main() {
             const HostCommandResult(timedOut: true),
           );
 
-        final result = await HerdrAdapter(runner).workspaces!
-            .listWorkspaceTree();
+        final result = await HerdrAdapter(
+          runner,
+        ).workspaces!.listWorkspaceTree();
 
         expect(result, isA<MuxWorkspaceTreeUnreachable>());
       },
@@ -292,8 +303,9 @@ void main() {
           ..whenRun(_workspaceListCommand, _ok(_workspaceListJson))
           ..whenRun(_tabListCommand, const HostCommandResult(timedOut: true));
 
-        final result = await HerdrAdapter(runner).workspaces!
-            .listWorkspaceTree();
+        final result = await HerdrAdapter(
+          runner,
+        ).workspaces!.listWorkspaceTree();
 
         expect(result, isA<MuxWorkspaceTreeUnreachable>());
       },
@@ -363,60 +375,57 @@ void main() {
       },
     );
 
-    test(
-      'a transport that never reported an exit status is a failure, never '
-      'a success — nothing is known about whether the tab moved',
-      () async {
-        final runner = FakeHostCommandRunner()
-          ..whenRun(
-            "herdr tab focus 'w1:t1'",
-            const HostCommandResult(timedOut: true),
-          );
-
-        expect(
-          await HerdrAdapter(runner).workspaces!.focusTab('w1:t1'),
-          isA<MuxTabFocusFailed>().having(
-            (f) => f.code,
-            'code',
-            'transport_incomplete',
-          ),
-        );
-      },
-    );
-
-    test('an unrecognized code is carried, never mapped onto a known one', () async {
+    test('a transport that never reported an exit status is a failure, never '
+        'a success — nothing is known about whether the tab moved', () async {
       final runner = FakeHostCommandRunner()
         ..whenRun(
           "herdr tab focus 'w1:t1'",
-          _failed('{"error":{"code":"ui_busy"}}'),
+          const HostCommandResult(timedOut: true),
         );
 
       expect(
         await HerdrAdapter(runner).workspaces!.focusTab('w1:t1'),
-        isA<MuxTabFocusFailed>().having((f) => f.code, 'code', 'ui_busy'),
+        isA<MuxTabFocusFailed>().having(
+          (f) => f.code,
+          'code',
+          'transport_incomplete',
+        ),
       );
     });
+
+    test(
+      'an unrecognized code is carried, never mapped onto a known one',
+      () async {
+        final runner = FakeHostCommandRunner()
+          ..whenRun(
+            "herdr tab focus 'w1:t1'",
+            _failed('{"error":{"code":"ui_busy"}}'),
+          );
+
+        expect(
+          await HerdrAdapter(runner).workspaces!.focusTab('w1:t1'),
+          isA<MuxTabFocusFailed>().having((f) => f.code, 'code', 'ui_busy'),
+        );
+      },
+    );
   });
 
   group('multiplexers that have no workspaces', () {
-    test(
-      'tmux and zellij decline the capability THROUGH THE TYPE, so a '
-      'caller cannot reach the tree without first admitting they have '
-      'none — "this multiplexer has no workspaces" can never be read as '
-      '"this multiplexer reported no workspaces"',
-      () {
-        for (final adapter in [
-          TmuxAdapter(FakeHostCommandRunner()),
-          ZellijAdapter(FakeHostCommandRunner()),
-        ]) {
-          expect(adapter.workspaces, isNull, reason: '${adapter.id}');
-          expect(
-            adapter.capabilities,
-            isNot(contains(MuxCapability.workspaceTree)),
-            reason: '${adapter.id}',
-          );
-        }
-      },
-    );
+    test('tmux and zellij decline the capability THROUGH THE TYPE, so a '
+        'caller cannot reach the tree without first admitting they have '
+        'none — "this multiplexer has no workspaces" can never be read as '
+        '"this multiplexer reported no workspaces"', () {
+      for (final adapter in [
+        TmuxAdapter(FakeHostCommandRunner()),
+        ZellijAdapter(FakeHostCommandRunner()),
+      ]) {
+        expect(adapter.workspaces, isNull, reason: '${adapter.id}');
+        expect(
+          adapter.capabilities,
+          isNot(contains(MuxCapability.workspaceTree)),
+          reason: '${adapter.id}',
+        );
+      }
+    });
   });
 }

@@ -18,7 +18,10 @@ class _Runner implements HostCommandRunner {
       const HostCommandResult(exitCode: 0);
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     scripts.add(script);
     return const HostCommandResult(exitCode: 0);
   }
@@ -104,24 +107,28 @@ void main() {
       expect(opened, isEmpty, reason: 'no stream event was required');
     });
 
-    test('falls back to the local plugin when FCM reports no launch message',
-        () async {
-      // A notification helm drew itself, while in the foreground, that the
-      // user then backgrounded the app and tapped. FCM knows nothing about
-      // it; only flutter_local_notifications does.
-      gateway.launch = null;
-      presenter.launchPayloadValue =
-          const SessionAlert(sessionName: 'from-local').toPayload();
+    test(
+      'falls back to the local plugin when FCM reports no launch message',
+      () async {
+        // A notification helm drew itself, while in the foreground, that the
+        // user then backgrounded the app and tapped. FCM knows nothing about
+        // it; only flutter_local_notifications does.
+        gateway.launch = null;
+        presenter.launchPayloadValue = const SessionAlert(
+          sessionName: 'from-local',
+        ).toPayload();
 
-      final alert = await service.resolveLaunchAlert();
+        final alert = await service.resolveLaunchAlert();
 
-      expect(alert?.sessionName, 'from-local');
-    });
+        expect(alert?.sessionName, 'from-local');
+      },
+    );
 
     test('prefers the FCM launch message over the local one', () async {
       gateway.launch = alertMessage(session: 'from-fcm');
-      presenter.launchPayloadValue =
-          const SessionAlert(sessionName: 'from-local').toPayload();
+      presenter.launchPayloadValue = const SessionAlert(
+        sessionName: 'from-local',
+      ).toPayload();
 
       final alert = await service.resolveLaunchAlert();
 
@@ -152,45 +159,51 @@ void main() {
       expect(await service.resolveLaunchAlert(), isNull);
     });
 
-    test('a gateway that throws still yields null rather than propagating',
-        () async {
-      // Firebase can fail at launch on a device with no Play Services.
-      // Taking the whole app down before the router is built would turn a
-      // missing notification into a phone that cannot open helm at all.
-      gateway.initializeError = StateError('no play services');
-      gateway.launch = alertMessage();
+    test(
+      'a gateway that throws still yields null rather than propagating',
+      () async {
+        // Firebase can fail at launch on a device with no Play Services.
+        // Taking the whole app down before the router is built would turn a
+        // missing notification into a phone that cannot open helm at all.
+        gateway.initializeError = StateError('no play services');
+        gateway.launch = alertMessage();
 
-      expect(await service.resolveLaunchAlert(), isNull);
-    });
+        expect(await service.resolveLaunchAlert(), isNull);
+      },
+    );
 
-    test('a start() on a device where Firebase cannot start still completes',
-        () async {
-      gateway.initializeError = StateError('no play services');
+    test(
+      'a start() on a device where Firebase cannot start still completes',
+      () async {
+        gateway.initializeError = StateError('no play services');
 
-      await expectLater(service.start(), completes);
-    });
+        await expectLater(service.start(), completes);
+      },
+    );
 
-    test('a platform channel that never answers does not block the launch',
-        () async {
-      // resolveLaunchAlert is awaited BEFORE runApp. An unbounded wait on
-      // a wedged channel is not a missed deep link, it is a white screen
-      // for as long as the user is willing to stare at one.
-      final wedged = _WedgedGateway();
-      final bounded = PushNotificationService(
-        gateway: wedged,
-        presenter: presenter,
-        onAlertOpened: opened.add,
-        launchTimeout: const Duration(milliseconds: 50),
-      );
-      addTearDown(bounded.dispose);
+    test(
+      'a platform channel that never answers does not block the launch',
+      () async {
+        // resolveLaunchAlert is awaited BEFORE runApp. An unbounded wait on
+        // a wedged channel is not a missed deep link, it is a white screen
+        // for as long as the user is willing to stare at one.
+        final wedged = _WedgedGateway();
+        final bounded = PushNotificationService(
+          gateway: wedged,
+          presenter: presenter,
+          onAlertOpened: opened.add,
+          launchTimeout: const Duration(milliseconds: 50),
+        );
+        addTearDown(bounded.dispose);
 
-      final stopwatch = Stopwatch()..start();
-      final alert = await bounded.resolveLaunchAlert();
-      stopwatch.stop();
+        final stopwatch = Stopwatch()..start();
+        final alert = await bounded.resolveLaunchAlert();
+        stopwatch.stop();
 
-      expect(alert, isNull);
-      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 2)));
-    });
+        expect(alert, isNull);
+        expect(stopwatch.elapsed, lessThan(const Duration(seconds: 2)));
+      },
+    );
 
     test('a tap carrying no session opens nothing', () async {
       await service.start();
@@ -243,18 +256,20 @@ void main() {
       expect(runner.scripts.single, contains('device-tokens.json'));
     });
 
-    test('registers again on reconnect, because the file may be gone',
-        () async {
-      await service.start();
-      final first = _Runner();
-      final second = _Runner();
+    test(
+      'registers again on reconnect, because the file may be gone',
+      () async {
+        await service.start();
+        final first = _Runner();
+        final second = _Runner();
 
-      await service.onAgentTrackingStarted(first);
-      await service.onAgentTrackingStarted(second);
+        await service.onAgentTrackingStarted(first);
+        await service.onAgentTrackingStarted(second);
 
-      expect(first.scripts, hasLength(1));
-      expect(second.scripts, hasLength(1));
-    });
+        expect(first.scripts, hasLength(1));
+        expect(second.scripts, hasLength(1));
+      },
+    );
 
     test('re-registers when FCM mints a new token', () async {
       final runner = _Runner();
@@ -268,17 +283,19 @@ void main() {
       expect(runner.scripts.last, contains('token-after-reinstall'));
     });
 
-    test('a refresh before any connection registers nothing, and does not throw',
-        () async {
-      await service.start();
+    test(
+      'a refresh before any connection registers nothing, and does not throw',
+      () async {
+        await service.start();
 
-      gateway.emitTokenRefresh('token-with-no-host');
-      await pumpEventQueue();
+        gateway.emitTokenRefresh('token-with-no-host');
+        await pumpEventQueue();
 
-      // Nothing to assert but the absence of a crash: there is no runner
-      // to send it over, and the next attach re-reads the current token.
-      expect(opened, isEmpty);
-    });
+        // Nothing to assert but the absence of a crash: there is no runner
+        // to send it over, and the next attach re-reads the current token.
+        expect(opened, isEmpty);
+      },
+    );
 
     test('registers even when the user denied the permission', () async {
       // The token stays valid, and a user who later enables notifications
@@ -308,10 +325,7 @@ void main() {
       gateway.tokenError = StateError('no play services');
       await service.start();
 
-      await expectLater(
-        service.onAgentTrackingStarted(_Runner()),
-        completes,
-      );
+      await expectLater(service.onAgentTrackingStarted(_Runner()), completes);
     });
 
     test('a dead transport is swallowed', () async {
@@ -328,6 +342,83 @@ void main() {
 
       await expectLater(service.start(), completes);
     });
+  });
+
+  group('start() on a device where Firebase failed to initialize', () {
+    // Reproduces the measured defect: on a physical iPhone, with iOS
+    // unconfigured in `firebase_options.dart`, `_gateway.initialize()`
+    // threw and was swallowed, but `start()` went on to read
+    // `_gateway.tokenRefreshes` anyway. The real getter re-resolves
+    // `FirebaseMessaging.instance`, which throws `[core/no-app]` because
+    // the `initializeApp` call the swallowed exception skipped never ran.
+    // `streamAccessError` is what makes the fake fail the same way the
+    // real gateway does, rather than quietly handing back an empty stream.
+    setUp(() {
+      gateway.initializeError = UnsupportedError(
+        'DefaultFirebaseOptions have not been configured for ios',
+      );
+      gateway.streamAccessError = StateError(
+        "[core/no-app] No Firebase App '[DEFAULT]' has been created - "
+        'call Firebase.initializeApp()',
+      );
+    });
+
+    test('completes without the stream-access exception escaping', () async {
+      await expectLater(service.start(), completes);
+    });
+
+    test(
+      'creates no FCM subscription, so dispose has nothing to cancel',
+      () async {
+        await service.start();
+        await service.dispose();
+
+        // Passes trivially if start() never reached the getters, and would
+        // have thrown out of start() itself if it had — there is nothing
+        // further to assert without reaching into private state.
+      },
+    );
+
+    test(
+      'the local presenter still initializes and its tap still routes',
+      () async {
+        // Firebase and flutter_local_notifications are independent plugins.
+        // One failing must not take the other down with it.
+        await service.start();
+
+        expect(presenter.onTap, isNotNull);
+
+        presenter.onTap!(
+          const SessionAlert(sessionName: 'drawn-locally').toPayload(),
+        );
+        await pumpEventQueue();
+
+        expect(opened.single.sessionName, 'drawn-locally');
+      },
+    );
+
+    test(
+      'the presenter failing alone does not block the FCM subscriptions',
+      () async {
+        // The opposite pairing: Firebase is fine, only the local plugin is
+        // broken. The FCM-backed streams must still be live.
+        final healthyGateway = FakePushMessagingGateway();
+        addTearDown(healthyGateway.close);
+        presenter.initializeError = StateError('channel registration failed');
+        final mixed = PushNotificationService(
+          gateway: healthyGateway,
+          presenter: presenter,
+          onAlertOpened: opened.add,
+        );
+        addTearDown(mixed.dispose);
+
+        await mixed.start();
+        healthyGateway.emitTap(alertMessage());
+        await pumpEventQueue();
+
+        expect(opened.single.sessionName, 'helm-a1b2c3d4');
+      },
+    );
   });
 
   group('foreground messages are drawn by this app', () {
@@ -350,8 +441,7 @@ void main() {
       gateway.emitForeground(alertMessage());
       await pumpEventQueue();
 
-      final restored =
-          SessionAlert.fromPayload(presenter.shown.single.payload);
+      final restored = SessionAlert.fromPayload(presenter.shown.single.payload);
       expect(restored?.sessionName, 'helm-a1b2c3d4');
       expect(restored?.agent, 'claude');
     });
@@ -370,9 +460,7 @@ void main() {
     test('a message with neither title nor body draws nothing', () async {
       await service.start();
 
-      gateway.emitForeground(
-        const PushMessage(data: {'session': 'quiet'}),
-      );
+      gateway.emitForeground(const PushMessage(data: {'session': 'quiet'}));
       await pumpEventQueue();
 
       expect(presenter.shown, isEmpty);
@@ -387,45 +475,49 @@ void main() {
           body: 'OC | something',
         );
 
-    test('two agents produce two notifications, not one that erased the other',
-        () async {
-      // The bug: a single constant notification id meant the second agent
-      // to speak silently replaced the first. Two agents blocked at once
-      // is the exact situation this feature exists to report, and it was
-      // the one situation it could not report.
-      await service.start();
+    test(
+      'two agents produce two notifications, not one that erased the other',
+      () async {
+        // The bug: a single constant notification id meant the second agent
+        // to speak silently replaced the first. Two agents blocked at once
+        // is the exact situation this feature exists to report, and it was
+        // the one situation it could not report.
+        await service.start();
 
-      gateway.emitForeground(forPane('%7'));
-      gateway.emitForeground(forPane('%9'));
-      await pumpEventQueue();
+        gateway.emitForeground(forPane('%7'));
+        gateway.emitForeground(forPane('%9'));
+        await pumpEventQueue();
 
-      expect(presenter.shown, hasLength(2));
-      expect(
-        presenter.shown.map((n) => n.groupingKey).toSet(),
-        hasLength(2),
-        reason: 'two panes must not share a slot',
-      );
-    });
+        expect(presenter.shown, hasLength(2));
+        expect(
+          presenter.shown.map((n) => n.groupingKey).toSet(),
+          hasLength(2),
+          reason: 'two panes must not share a slot',
+        );
+      },
+    );
 
-    test('the same agent speaking twice reuses its slot, so it replaces',
-        () async {
-      // The original behaviour was right about ONE thing: a phone away
-      // from a laptop for an hour should show the current situation, not
-      // forty stale rows. That is preserved per agent rather than across
-      // all of them.
-      await service.start();
+    test(
+      'the same agent speaking twice reuses its slot, so it replaces',
+      () async {
+        // The original behaviour was right about ONE thing: a phone away
+        // from a laptop for an hour should show the current situation, not
+        // forty stale rows. That is preserved per agent rather than across
+        // all of them.
+        await service.start();
 
-      gateway.emitForeground(forPane('%7'));
-      gateway.emitForeground(forPane('%7'));
-      await pumpEventQueue();
+        gateway.emitForeground(forPane('%7'));
+        gateway.emitForeground(forPane('%7'));
+        await pumpEventQueue();
 
-      expect(presenter.shown, hasLength(2), reason: 'both were drawn');
-      expect(
-        presenter.shown.first.groupingKey,
-        presenter.shown.last.groupingKey,
-        reason: 'onto the same slot, so the tray shows one row',
-      );
-    });
+        expect(presenter.shown, hasLength(2), reason: 'both were drawn');
+        expect(
+          presenter.shown.first.groupingKey,
+          presenter.shown.last.groupingKey,
+          reason: 'onto the same slot, so the tray shows one row',
+        );
+      },
+    );
 
     test('falls back to the session when the sender named no pane', () async {
       // pane_id is optional in the wire contract. A session name is not,
@@ -448,10 +540,7 @@ void main() {
       );
       await pumpEventQueue();
 
-      expect(
-        presenter.shown.map((n) => n.groupingKey).toSet(),
-        hasLength(2),
-      );
+      expect(presenter.shown.map((n) => n.groupingKey).toSet(), hasLength(2));
     });
 
     test('two panes in different sessions never share a slot either', () async {
@@ -463,10 +552,7 @@ void main() {
       gateway.emitForeground(forPane('%7', session: 'beta'));
       await pumpEventQueue();
 
-      expect(
-        presenter.shown.map((n) => n.groupingKey).toSet(),
-        hasLength(2),
-      );
+      expect(presenter.shown.map((n) => n.groupingKey).toSet(), hasLength(2));
     });
 
     test('a notification naming no session at all still draws', () async {
@@ -613,17 +699,19 @@ void main() {
       expect(opened.single.sessionName, 'helm-a1b2c3d4');
     });
 
-    test('opens the session from a tap on a locally drawn notification',
-        () async {
-      await service.start();
+    test(
+      'opens the session from a tap on a locally drawn notification',
+      () async {
+        await service.start();
 
-      presenter.onTap!(
-        const SessionAlert(sessionName: 'drawn-locally').toPayload(),
-      );
-      await pumpEventQueue();
+        presenter.onTap!(
+          const SessionAlert(sessionName: 'drawn-locally').toPayload(),
+        );
+        await pumpEventQueue();
 
-      expect(opened.single.sessionName, 'drawn-locally');
-    });
+        expect(opened.single.sessionName, 'drawn-locally');
+      },
+    );
 
     test('a local tap with a null payload opens nothing', () async {
       await service.start();
