@@ -61,7 +61,6 @@ import android.util.Log
  * prompt.
  */
 class SessionHoldService : Service() {
-
     /** Set by the STOP action, so the plugin can tell Dart who ended it. */
     interface StopListener {
         fun onStopRequested()
@@ -89,6 +88,29 @@ class SessionHoldService : Service() {
          * one thing the platform does not allow.
          */
         private const val NOTIFICATION_ID = 42
+
+        /**
+         * The file Flutter's `shared_preferences` opens, and the prefix
+         * its Dart half puts on every key before the write reaches that
+         * file. A key written here without the prefix is invisible to
+         * `SharedPreferences.getInstance()`.
+         *
+         * Both verified by reading `shared_preferences_android` 2.4.21 at
+         * the version pubspec.lock resolves:
+         * `LegacySharedPreferencesPlugin.java` names the same literal
+         * `SHARED_PREFERENCES_NAME`, and
+         * `SharedPreferencesAndroid._defaultPrefix` is `"flutter."`.
+         */
+        private const val FLUTTER_PREFS_FILE = "FlutterSharedPreferences"
+        private const val FLUTTER_PREFS_KEY_PREFIX = "flutter."
+
+        /**
+         * Mirrors `AppConstants.sessionDismissedKey`. Duplicated as a
+         * literal because Kotlin and Dart share no build-time constant
+         * here; `session_snapshot_repository_user_dismissed_test.dart`
+         * pins the Dart side of the pair.
+         */
+        private const val KEY_SESSION_DISMISSED = "helm_session_dismissed"
 
         /**
          * Whether a hold is running, for `isRunning`.
@@ -137,7 +159,11 @@ class SessionHoldService : Service() {
         Log.i(TAG, "SessionHoldService created in pid=${Process.myPid()}")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.i(TAG, "STOP tapped in the notification")
@@ -148,6 +174,7 @@ class SessionHoldService : Service() {
                 stopSelfAndDismiss()
                 return START_NOT_STICKY
             }
+
             else -> {
                 val sessionName =
                     intent?.getStringExtra(EXTRA_SESSION_NAME) ?: "a session"
@@ -202,11 +229,42 @@ class SessionHoldService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.i(TAG, "Task removed; the hold cannot outlive it")
+        writeUserDismissedFlag()
         stopSelfAndDismiss()
         super.onTaskRemoved(rootIntent)
     }
 
-    private fun startInForeground(sessionName: String, hostName: String?) {
+    /**
+     * Records that this exit was a deliberate swipe, for
+     * `SessionSnapshotRepository` to read on the next launch.
+     *
+     * WHY FROM KOTLIN. The Dart isolate is being destroyed in the same
+     * breath as this process, so it cannot be relied on to record that
+     * its own exit was deliberate. This callback is the last code that
+     * still runs and still knows.
+     *
+     * WHY `commit()` AND NEVER `apply()`. `apply()` queues the write and
+     * returns; the process hosting this service is torn down right after.
+     * A queued write that has not reached disk by then simply never
+     * happens, and the next launch would read a crash. `commit()` blocks
+     * until it is durable, which is the only guarantee worth having here.
+     *
+     * NOT called from [onDestroy] or the `ACTION_STOP` path. Both also
+     * end this service, and neither is the user dismissing the app: STOP
+     * ends the HOLD while `MainActivity` is still alive, and that launch
+     * must keep behaving as it does today.
+     */
+    private fun writeUserDismissedFlag() {
+        getSharedPreferences(FLUTTER_PREFS_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(FLUTTER_PREFS_KEY_PREFIX + KEY_SESSION_DISMISSED, true)
+            .commit()
+    }
+
+    private fun startInForeground(
+        sessionName: String,
+        hostName: String?,
+    ) {
         createChannel()
 
         // Only a DIFFERENT session restarts the clock. See
@@ -270,8 +328,9 @@ class SessionHoldService : Service() {
         //
         // `cancel` removes the notification outright, whatever the service's
         // state, which is the only property this teardown can rely on.
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE)
-            as? NotificationManager
+        val manager =
+            getSystemService(Context.NOTIFICATION_SERVICE)
+                as? NotificationManager
         manager?.cancel(NOTIFICATION_ID)
     }
 
@@ -281,14 +340,15 @@ class SessionHoldService : Service() {
         // IMPORTANCE_LOW, unlike the agent-alert channel's HIGH. This one
         // is a status line that will sit there for hours; a channel that
         // buzzed would punish the user for using the feature.
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = CHANNEL_DESCRIPTION
-            setShowBadge(false)
-        }
+        val channel =
+            NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = CHANNEL_DESCRIPTION
+                setShowBadge(false)
+            }
 
         getSystemService(NotificationManager::class.java)
             ?.createNotificationChannel(channel)
@@ -304,31 +364,37 @@ class SessionHoldService : Service() {
      * foreground service the user cannot end from its own notification is
      * a foreground service they can only end by force-stopping the app.
      */
-    private fun buildNotification(sessionName: String, hostName: String?): Notification {
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+    private fun buildNotification(
+        sessionName: String,
+        hostName: String?,
+    ): Notification {
+        val contentIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
-        val stopIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, SessionHoldService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val stopIntent =
+            PendingIntent.getService(
+                this,
+                1,
+                Intent(this, SessionHoldService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
         val where = if (hostName.isNullOrBlank()) "" else " on $hostName"
 
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        val builder =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
 
         return builder
             .setContentTitle("Holding $sessionName")
@@ -367,13 +433,13 @@ class SessionHoldService : Service() {
             .setWhen(holdStartedAtMillis)
             .setUsesChronometer(true)
             .addAction(
-                Notification.Action.Builder(
-                    null,
-                    "Stop",
-                    stopIntent,
-                ).build(),
-            )
-            .build()
+                Notification.Action
+                    .Builder(
+                        null,
+                        "Stop",
+                        stopIntent,
+                    ).build(),
+            ).build()
     }
 
     /**
@@ -381,11 +447,16 @@ class SessionHoldService : Service() {
      * plugin never has to construct one.
      */
     object Launcher {
-        fun start(context: Context, sessionName: String, hostName: String) {
-            val intent = Intent(context, SessionHoldService::class.java)
-                .setAction(ACTION_START)
-                .putExtra(EXTRA_SESSION_NAME, sessionName)
-                .putExtra(EXTRA_HOST_NAME, hostName)
+        fun start(
+            context: Context,
+            sessionName: String,
+            hostName: String,
+        ) {
+            val intent =
+                Intent(context, SessionHoldService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_SESSION_NAME, sessionName)
+                    .putExtra(EXTRA_HOST_NAME, hostName)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

@@ -447,25 +447,31 @@ abstract interface class AgentAwareMultiplexer {
 /// stored field is a field a future reader has to work out whether they
 /// may trust.
 ///
-/// [activeTabId] was in that unread set until the shortcuts drawer grew a
-/// reader. A tap on a workspace HEADER (`_WorkspaceHeader` in
-/// `shortcuts_drawer.dart`) has no tab of its own to focus — the drawer
-/// must pick one on the user's behalf — and this is the host's own answer
-/// to "which one was this client last looking at", which beats guessing
-/// "the first tab" the way [MuxTab.focused] beats guessing for the tab
-/// strip. MEASURED against the owner's live herdr 0.8.2
+/// [activeTabId] is BACK IN that unread set. It briefly had a reader: the
+/// shortcuts drawer let a user tap a workspace HEADER, which has no tab of
+/// its own to focus, so the drawer picked one on the user's behalf and this
+/// field was the host's own answer to "which one was this client last
+/// looking at" — better than guessing "the first tab", the way
+/// [MuxTab.focused] beats guessing for the tab strip. That drawer was
+/// retired once herdr's own sidebar was confirmed to cover the same
+/// navigation, so no reader remains.
+///
+/// The field is kept parsed rather than dropped because the measurement
+/// below was expensive and is still the answer for the next reader who
+/// needs it. MEASURED against the owner's live herdr 0.8.2
 /// (`herdr_adapter_workspace_test.dart`): in the one capture available,
 /// `w1`'s `active_tab_id` named a tab that existed in that SAME capture's
 /// tab list, and `w2`'s named the tab that list separately marked
 /// `focused: true` — so the field read consistently with the rest of the
 /// tree every place it could be cross-checked. What is NOT verified from
 /// here is whether it stays consistent once a tab is closed or renumbered
-/// on a live host; this type does not assume so. The reader in
-/// `shortcuts_drawer.dart` treats an [activeTabId] the tree does not carry
-/// as the SAME race [MuxWorkspaceTreeAvailable]'s own doc already names for
-/// tabs created between the two commands, and falls back to the
-/// workspace's first tab by [MuxTab.number] rather than trusting the id
-/// blindly or refusing to act.
+/// on a live host; this type does not assume so. The retired drawer's
+/// reader treated an [activeTabId] the tree does not carry as the SAME
+/// race [MuxWorkspaceTreeAvailable]'s own doc already names for tabs
+/// created between the two commands, and fell back to the workspace's
+/// first tab by [MuxTab.number] rather than trusting the id blindly or
+/// refusing to act. A future reader should do the same: an id naming a tab
+/// this tree does not carry is that race, not corruption.
 ///
 /// [agentState] is herdr's own per-workspace roll-up, MEASURED to use the
 /// same `agent_status` vocabulary as `agent list` — so it is parsed by the

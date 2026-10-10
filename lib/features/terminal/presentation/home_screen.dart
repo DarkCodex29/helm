@@ -13,7 +13,6 @@ import 'package:helm/features/notifications/presentation/pending_session_alert.d
 import 'package:helm/features/session_hold/domain/hold_labels.dart';
 import 'package:helm/features/session_hold/presentation/session_hold_action.dart';
 import 'package:helm/features/session_hold/presentation/session_hold_provider.dart';
-import 'package:helm/features/shortcuts/presentation/shortcuts_drawer.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
@@ -44,15 +43,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   List<TabSnapshot>? _pendingRecovery;
 
-  /// Owns the [Scaffold] so the back handler can close the drawer.
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  /// Mirrors the drawer's open state, kept in sync by
-  /// [Scaffold.onDrawerChanged]. It drives [PopScope.canPop]: an open
-  /// drawer is a dismissible layer, so Android back has to close it
-  /// rather than pop this route, which is the whole app.
-  bool _isDrawerOpen = false;
-
   @override
   void initState() {
     super.initState();
@@ -62,6 +52,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final repo = ref.read(sessionSnapshotRepoProvider);
       final pending = await repo.getPendingRecovery();
       final recoveryPending = pending != null && pending.isNotEmpty;
+
+      // A deliberate swipe-from-Recents is not a crash: the native flag
+      // SessionHoldService.onTaskRemoved writes (Kotlin, commit()-ed
+      // before the process dies) says so, and that distinction is the
+      // whole point of odd/tasks/user-dismissed-is-not-a-crash.md. Apply
+      // the snapshot immediately rather than offering it, and clear the
+      // flag the same way every other dirty-session key is cleared -
+      // recoverSession's own markClean call does that. A real crash
+      // takes the branch below unchanged and keeps its prompt.
+      if (recoveryPending && await repo.wasUserDismissed()) {
+        await ref.read(tabsProvider.notifier).recoverSession(pending);
+        if (!mounted) return;
+        // Auto-connect must not also dial the default profile next to
+        // the tabs just recovered - same reasoning as the requested-
+        // session early return just below.
+        return;
+      }
 
       if (recoveryPending && mounted) {
         setState(() => _pendingRecovery = pending);
@@ -135,148 +142,128 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final kbVisible = ref.watch(keyboardProvider.select((s) => s.visible));
     final theme = Theme.of(context);
 
-    return PopScope(
-      // HomeScreen is the only route on the stack, so an unhandled back
-      // closes the app. While the drawer is open that is wrong: back
-      // should dismiss the drawer and leave the app in the foreground.
-      canPop: !_isDrawerOpen,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        _scaffoldKey.currentState?.closeDrawer();
-      },
-      child: Scaffold(
-        key: _scaffoldKey,
-        onDrawerChanged: (isOpen) {
-          if (mounted) setState(() => _isDrawerOpen = isOpen);
-        },
-        // Matches the terminal's own background, not the app's: this
-        // scaffold sits directly behind the terminal view, and any other
-        // value draws a visible seam around it during resize and scroll.
-        backgroundColor: HelmTerminalTheme.background,
-        drawer: const ShortcutsDrawer(),
-        // NO reserved shelf. This used to be a
-        // `bottomNavigationBar: SizedBox(height: 80)`, chosen to keep the
-        // FAB off the terminal's last output row in both states.
-        //
-        // The Scaffold subtracts that from the body, so it cost 80dp of
-        // terminal height in EVERY frame — keyboard open or closed — to
-        // avoid a corner overlay that costs nothing most of the time.
-        // Reported on a real S22 as "al poner el FAB, se recorta esa
-        // parte", and the report is right: trading permanent output for
-        // an occasional overlap is the trade backwards. A floating action
-        // button overlays by definition; reserving space for one defeats
-        // what it is.
-        //
-        // Toggling the keyboard still never resizes the PTY. Removing the
-        // shelf changes the terminal's height ONCE, upward, which is the
-        // direction that gives rows back.
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        // Present ONLY while the keyboard is hidden. It floats over the
-        // terminal, so leaving it up alongside the panel put it on top of
-        // the panel's resize grip — the one control a user needs to undo
-        // a bad size. Dismissing now lives in the panel's own footer, so
-        // each control sits where the thing it acts on is, and neither
-        // reserves space from the terminal.
-        floatingActionButton: tabsState.hasTabs && !kbVisible
-            ? Semantics(
-                identifier: TerminalSemantics.keyboardToggle,
-                child: FloatingActionButton(
-                  tooltip: 'Show keyboard',
-                  onPressed: () =>
-                      ref.read(keyboardProvider.notifier).toggleVisibility(),
-                  child: const Icon(Icons.keyboard),
-                ),
+    return Scaffold(
+      // Matches the terminal's own background, not the app's: this
+      // scaffold sits directly behind the terminal view, and any other
+      // value draws a visible seam around it during resize and scroll.
+      backgroundColor: HelmTerminalTheme.background,
+      // NO reserved shelf. This used to be a
+      // `bottomNavigationBar: SizedBox(height: 80)`, chosen to keep the
+      // FAB off the terminal's last output row in both states.
+      //
+      // The Scaffold subtracts that from the body, so it cost 80dp of
+      // terminal height in EVERY frame — keyboard open or closed — to
+      // avoid a corner overlay that costs nothing most of the time.
+      // Reported on a real S22 as "al poner el FAB, se recorta esa
+      // parte", and the report is right: trading permanent output for
+      // an occasional overlap is the trade backwards. A floating action
+      // button overlays by definition; reserving space for one defeats
+      // what it is.
+      //
+      // Toggling the keyboard still never resizes the PTY. Removing the
+      // shelf changes the terminal's height ONCE, upward, which is the
+      // direction that gives rows back.
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      // Present ONLY while the keyboard is hidden. It floats over the
+      // terminal, so leaving it up alongside the panel put it on top of
+      // the panel's resize grip — the one control a user needs to undo
+      // a bad size. Dismissing now lives in the panel's own footer, so
+      // each control sits where the thing it acts on is, and neither
+      // reserves space from the terminal.
+      floatingActionButton: tabsState.hasTabs && !kbVisible
+          ? Semantics(
+              identifier: TerminalSemantics.keyboardToggle,
+              child: FloatingActionButton(
+                tooltip: 'Show keyboard',
+                onPressed: () =>
+                    ref.read(keyboardProvider.notifier).toggleVisibility(),
+                child: const Icon(Icons.keyboard),
+              ),
+            )
+          : null,
+      appBar: AppBar(
+        backgroundColor: AppTheme.surface,
+        elevation: 0,
+        titleSpacing: 0,
+        title: tabsState.hasTabs
+            ? TerminalTabBar(
+                tabs: tabsState.tabs,
+                activeIndex: tabsState.activeIndex,
+                onTabTap: (index) =>
+                    ref.read(tabsProvider.notifier).setActiveTab(index),
+                onTabClose: (id) =>
+                    ref.read(tabsProvider.notifier).removeTab(id),
+                onAddTab: () => _showNewTabDialog(context),
               )
-            : null,
-        appBar: AppBar(
-          backgroundColor: AppTheme.surface,
-          elevation: 0,
-          titleSpacing: 0,
-          leading: Builder(
-            builder: (ctx) => Semantics(
-              identifier: HomeSemantics.drawerButton,
+            : Text(
+                'Helm',
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                ),
+              ),
+        actions: [
+          if (!tabsState.hasTabs)
+            Semantics(
+              identifier: HomeSemantics.appBarNewSessionButton,
               child: IconButton(
-                icon: Icon(
-                  Icons.menu,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
-                tooltip: 'Projects',
-                onPressed: () => Scaffold.of(ctx).openDrawer(),
+                icon: const Icon(Icons.add),
+                tooltip: 'New terminal',
+                onPressed: () => _showNewTabDialog(context),
               ),
             ),
-          ),
-          title: tabsState.hasTabs
-              ? TerminalTabBar(
-                  tabs: tabsState.tabs,
-                  activeIndex: tabsState.activeIndex,
-                  onTabTap: (index) =>
-                      ref.read(tabsProvider.notifier).setActiveTab(index),
-                  onTabClose: (id) =>
-                      ref.read(tabsProvider.notifier).removeTab(id),
-                  onAddTab: () => _showNewTabDialog(context),
-                )
-              : Text(
-                  'Helm',
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 18,
-                  ),
-                ),
-          actions: [
-            if (!tabsState.hasTabs)
-              Semantics(
-                identifier: HomeSemantics.appBarNewSessionButton,
-                child: IconButton(
-                  icon: const Icon(Icons.add),
-                  tooltip: 'New terminal',
-                  onPressed: () => _showNewTabDialog(context),
-                ),
-              ),
-            // ONE button instead of three loose icons.
-            //
-            // Each icon was paying permanent width out of the tab strip's
-            // pocket — the one element on this bar that is actually
-            // starved, with twenty tabs behind it. An overflow menu also
-            // NAMES these actions; as icons, a circular arrow and a pin
-            // were asking the user to remember what they meant.
-            //
-            // The cost is honest: hold is the one action here decided in
-            // a moment, and it now takes two taps instead of one. Still
-            // on this bar rather than in the drawer, though, because the
-            // drawer is the surface that CHANGES which tab is active, and
-            // both hold and browse are scoped to the active one.
-            if (tabsState.hasTabs)
-              _buildOverflowMenu(context, ref, tabsState.activeTab?.session),
-          ],
-        ),
-        body: Column(
-          children: [
-            if (_pendingRecovery != null)
-              SessionRecoveryBanner(
-                snapshots: _pendingRecovery!,
-                onRecover: () async {
-                  final snapshots = _pendingRecovery!;
-                  try {
-                    await ref
-                        .read(tabsProvider.notifier)
-                        .recoverSession(snapshots);
-                  } finally {
-                    if (mounted) setState(() => _pendingRecovery = null);
-                  }
-                },
-                onDiscard: () async {
-                  await ref.read(sessionSnapshotRepoProvider).markClean();
+          // ONE button instead of three loose icons.
+          //
+          // Each icon was paying permanent width out of the tab strip's
+          // pocket — the one element on this bar that is actually
+          // starved, with twenty tabs behind it. An overflow menu also
+          // NAMES these actions; as icons, a circular arrow and a pin
+          // were asking the user to remember what they meant.
+          //
+          // The cost is honest: hold is the one action here decided in
+          // a moment, and it now takes two taps instead of one. It stays
+          // on this bar rather than beside the tab strip because hold and
+          // browse are scoped to the ACTIVE tab, while the strip is the
+          // surface that changes which tab that is.
+          //
+          // UNCONDITIONAL, and that is load-bearing. This used to be
+          // `if (tabsState.hasTabs)`, which was harmless while every entry
+          // acted on a session. It stopped being harmless when Settings
+          // moved in here: gating the button on having a tab would make
+          // Settings unreachable from an empty Home, which is exactly
+          // where a user whose only profile cannot connect ends up. The
+          // session-scoped entries already filter themselves — see
+          // `_overflowSessionItems`.
+          _buildOverflowMenu(context, ref, tabsState.activeTab?.session),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_pendingRecovery != null)
+            SessionRecoveryBanner(
+              snapshots: _pendingRecovery!,
+              onRecover: () async {
+                final snapshots = _pendingRecovery!;
+                try {
+                  await ref
+                      .read(tabsProvider.notifier)
+                      .recoverSession(snapshots);
+                } finally {
                   if (mounted) setState(() => _pendingRecovery = null);
-                },
-              ),
-            Expanded(
-              child: tabsState.hasTabs
-                  ? _buildTerminalArea(tabsState)
-                  : _buildEmptyState(context),
+                }
+              },
+              onDiscard: () async {
+                await ref.read(sessionSnapshotRepoProvider).markClean();
+                if (mounted) setState(() => _pendingRecovery = null);
+              },
             ),
-          ],
-        ),
+          Expanded(
+            child: tabsState.hasTabs
+                ? _buildTerminalArea(tabsState)
+                : _buildEmptyState(context),
+          ),
+        ],
       ),
     );
   }
@@ -359,6 +346,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ),
           ..._overflowSessionItems(session),
+          // LAST, and ALWAYS present: every other item here acts on the
+          // active tab, but this one leaves the screen entirely, so it
+          // belongs after everything that stays.
+          //
+          // Deliberately OUTSIDE `_overflowSessionItems`, which returns an
+          // empty list without a connected session. Settings is where you
+          // go to fix a profile that cannot connect, so gating it on a
+          // connection would hide it exactly when it is needed.
+          //
+          // This duplicates the drawer's footer entry for one commit only.
+          // The duplication is the point: the footer is currently the only
+          // reachable route to `/settings`, and removing the drawer before
+          // this exists would strand the route.
+          PopupMenuItem<VoidCallback>(
+            value: () => context.push('/settings'),
+            child: Semantics(
+              identifier: HomeSemantics.settingsButton,
+              child: const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.settings_outlined),
+                title: Text('Settings'),
+              ),
+            ),
+          ),
         ],
       ),
     );

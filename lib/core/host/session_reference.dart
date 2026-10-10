@@ -3,7 +3,8 @@ import 'multiplexer_adapter.dart';
 /// Mirrors [value] into both fields a persisted model's write path must
 /// set identically: the neutral session reference and the model's legacy
 /// session-name field ([ConnectionProfile.tmuxSession],
-/// [ProjectShortcut.tmuxSession], [TabSnapshot.tmuxSessionName]).
+/// [TabSnapshot.tmuxSessionName], and the equivalent legacy field on any
+/// other persisted model with a session override).
 ///
 /// This is the single implementation of host-session-contract slice 6's
 /// mirroring decision: whenever a write sets a session reference, the
@@ -43,7 +44,8 @@ import 'multiplexer_adapter.dart';
 
 /// Resolves raw text input into the mirrored pair for a model whose
 /// legacy field is required and non-nullable
-/// ([ProjectShortcut.tmuxSession], [TabSnapshot.tmuxSessionName]).
+/// ([TabSnapshot.tmuxSessionName] and equivalent fields on other
+/// persisted models with a required session override).
 ///
 /// Empty or whitespace-only input falls back to [fallback] for BOTH
 /// fields. Leaving `sessionRef` null while only the legacy field
@@ -60,7 +62,8 @@ import 'multiplexer_adapter.dart';
 }
 
 /// Encodes [multiplexer] for storage in [ConnectionProfile.multiplexer] /
-/// [ProjectShortcut.multiplexer] / [TabSnapshot.multiplexer].
+/// [TabSnapshot.multiplexer] (and equivalent fields on other persisted
+/// models that record a multiplexer choice).
 ///
 /// Uses [MultiplexerId.name] (`'herdr'` / `'tmux'` / `'zellij'`),
 /// deliberately chosen over `toString()` — which would persist the

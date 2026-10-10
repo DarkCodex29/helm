@@ -33,8 +33,8 @@ final class FocusOpenTab extends SessionNameResolution {
 ///
 /// ### Precedence
 ///
-/// 1. [requestedSessionName], when the caller supplied one. Crash
-///    recovery and project shortcuts both name a specific session, and an
+/// 1. [requestedSessionName], when the caller supplied one. Crash recovery
+///    and push-notification opens both name a specific session, and an
 ///    explicit instruction outranks a stored preference.
 /// 2. [ConnectionProfile.sessionRef], falling back to the legacy
 ///    [ConnectionProfile.tmuxSession]. This is the "Session reference
@@ -99,10 +99,7 @@ SessionNameResolution resolveSessionName({
 
   // Checked against the names in use rather than trusted to be unique, so
   // the guarantee is structural and does not rest on a random draw.
-  final taken = openTabs
-      .map((t) => t.sessionName)
-      .whereType<String>()
-      .toSet();
+  final taken = openTabs.map((t) => t.sessionName).whereType<String>().toSet();
   var candidate = '${AppConstants.defaultSessionRef}-${mintSuffix()}';
   while (taken.contains(candidate)) {
     candidate = '${AppConstants.defaultSessionRef}-${mintSuffix()}';

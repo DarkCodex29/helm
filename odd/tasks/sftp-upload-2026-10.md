@@ -43,19 +43,19 @@ starts. Relying on rename to fail would destroy a file the user never named.
 
 ## Tasks
 
-- [ ] 1. Widen the seam and add an upload service
+- [x] 1. Widen the seam and add an upload service
   - Surfaces: `lib/features/files/data/sftp_session.dart`,
     `lib/features/files/data/sftp_upload_service.dart`,
     `lib/features/files/domain/`, `test/`
   - Mirror `sftp_download_service.dart`: progress, cancellation, a partial file
     that is renamed into place only on success, and a sealed outcome type.
   - NEVER THROWS, like every other method in this feature.
-  - Commit: pending
+  - Commit: `029badb`
 
-- [ ] 2. Pick a local file and upload it from the browser
+- [x] 2. Pick a local file and upload it from the browser
   - Surfaces: `lib/features/files/presentation/`, `pubspec.yaml` if needed
   - `saf_util` already exposes `pickFile`/`pickFiles`
     (`saf_util_platform_interface.dart:71-90`), so no new dependency is
     expected.
   - NOT part of slice 1.
-  - Commit: pending
+  - Commit: `eb10285`

@@ -77,7 +77,12 @@ env:
 - extendedWaitUntil:
     visible: "No active sessions"
     timeout: 15000
+# The overflow button, not the hamburger that used to sit here: the
+# shortcuts drawer was retired once herdr's own sidebar was confirmed to
+# cover the navigation it duplicated, and `helm.home.drawer_button` no
+# longer exists. This asserts the same thing it always did — Home came up
+# with its app bar intact.
 - assertVisible:
-    id: "helm.home.drawer_button"
+    id: "helm.home.app_bar_overflow_button"
 - assertVisible:
     id: "helm.home.new_session_button"

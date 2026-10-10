@@ -12,8 +12,8 @@
 // The naming rule itself is unit-tested in
 // `test/features/terminal/domain/session_name_test.dart`. What is pinned
 // here is that `addTab` actually applies it — including the paths that
-// were already passing an explicit name, so crash recovery and shortcuts
-// are proven not to regress.
+// were already passing an explicit name, so crash recovery and
+// push-notification opens are proven not to regress.
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -74,11 +74,8 @@ Future<void> _open(
   await opening;
 }
 
-List<String?> _names(ProviderContainer c) => c
-    .read(tabsProvider)
-    .tabs
-    .map((t) => t.session.tmuxSessionName)
-    .toList();
+List<String?> _names(ProviderContainer c) =>
+    c.read(tabsProvider).tabs.map((t) => t.session.tmuxSessionName).toList();
 
 void main() {
   late FakeSSHService ssh;
@@ -120,28 +117,25 @@ void main() {
   });
 
   group('two tabs never collide on one session', () {
-    test(
-      'the reported sequence - open, open, close the first, open - no '
-      'longer duplicates a name',
-      () async {
-        await _open(container, _plain);
-        await _open(container, _plain);
-        expect(_names(container), hasLength(2));
+    test('the reported sequence - open, open, close the first, open - no '
+        'longer duplicates a name', () async {
+      await _open(container, _plain);
+      await _open(container, _plain);
+      expect(_names(container), hasLength(2));
 
-        final first = container.read(tabsProvider).tabs.first;
-        await container.read(tabsProvider.notifier).removeTab(first.id);
+      final first = container.read(tabsProvider).tabs.first;
+      await container.read(tabsProvider.notifier).removeTab(first.id);
 
-        await _open(container, _plain);
+      await _open(container, _plain);
 
-        final names = _names(container);
-        expect(names, hasLength(2));
-        expect(
-          names.toSet(),
-          hasLength(2),
-          reason: 'two tabs attached to the same herdr session',
-        );
-      },
-    );
+      final names = _names(container);
+      expect(names, hasLength(2));
+      expect(
+        names.toSet(),
+        hasLength(2),
+        reason: 'two tabs attached to the same herdr session',
+      );
+    });
 
     test('many opens and closes never repeat a live name', () async {
       for (var i = 0; i < 4; i++) {
@@ -157,27 +151,24 @@ void main() {
       expect(names.toSet(), hasLength(names.length));
     });
 
-    test(
-      'opening a NAMED profile that is already open focuses its tab '
-      'instead of dialing again',
-      () async {
-        await _open(container, _named);
-        final dialsAfterFirst = ssh.connectCalls.length;
+    test('opening a NAMED profile that is already open focuses its tab '
+        'instead of dialing again', () async {
+      await _open(container, _named);
+      final dialsAfterFirst = ssh.connectCalls.length;
 
-        await _open(container, _named);
+      await _open(container, _named);
 
-        expect(
-          container.read(tabsProvider).tabs,
-          hasLength(1),
-          reason: 'a second tab on one herdr session is the defect',
-        );
-        expect(
-          ssh.connectCalls.length,
-          dialsAfterFirst,
-          reason: 'focusing an open tab must not open a second connection',
-        );
-      },
-    );
+      expect(
+        container.read(tabsProvider).tabs,
+        hasLength(1),
+        reason: 'a second tab on one herdr session is the defect',
+      );
+      expect(
+        ssh.connectCalls.length,
+        dialsAfterFirst,
+        reason: 'focusing an open tab must not open a second connection',
+      );
+    });
 
     test('focusing makes that tab the active one', () async {
       await _open(container, _named);
@@ -223,26 +214,23 @@ void main() {
       expect(_names(container), ['helm-2']);
     });
 
-    test(
-      'recovery beats the profile - the snapshot names the session that '
-      'was actually running',
-      () async {
-        await container.read(tabsProvider.notifier).recoverSession(const [
-          TabSnapshot(
-            profileId: 'p-named',
-            profileName: 'VPS Work',
-            tmuxSessionName: 'helm-9',
-            sessionRef: 'helm-9',
-          ),
-        ]);
-        for (final t in container.read(tabsProvider).tabs) {
-          t.session.onResize(51, 29);
-        }
-        await Future<void>.delayed(Duration.zero);
+    test('recovery beats the profile - the snapshot names the session that '
+        'was actually running', () async {
+      await container.read(tabsProvider.notifier).recoverSession(const [
+        TabSnapshot(
+          profileId: 'p-named',
+          profileName: 'VPS Work',
+          tmuxSessionName: 'helm-9',
+          sessionRef: 'helm-9',
+        ),
+      ]);
+      for (final t in container.read(tabsProvider).tabs) {
+        t.session.onResize(51, 29);
+      }
+      await Future<void>.delayed(Duration.zero);
 
-        expect(_names(container), ['helm-9']);
-      },
-    );
+      expect(_names(container), ['helm-9']);
+    });
 
     test('an explicit name is honored over a generated one', () async {
       await _open(container, _plain, sessionName: 'metalpren');
@@ -297,9 +285,9 @@ void main() {
       await container.read(tabsProvider.notifier).saveSnapshot();
       final stored = await storedSnapshots();
 
-      await container.read(tabsProvider.notifier).removeTab(
-            container.read(tabsProvider).tabs.single.id,
-          );
+      await container
+          .read(tabsProvider.notifier)
+          .removeTab(container.read(tabsProvider).tabs.single.id);
       expect(container.read(tabsProvider).tabs, isEmpty);
 
       await container.read(tabsProvider.notifier).recoverSession(stored);

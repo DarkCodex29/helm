@@ -7,11 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Resolves [TabSnapshot.sessionRef] from a persisted JSON map, falling
 /// back to the legacy `tmuxSessionName` key when the neutral key is
 /// absent or null (spec.md: session-reference-storage). Same precedence
-/// rule as `ConnectionProfile._readSessionRef` and
-/// `ProjectShortcut._readSessionRef`, but written as a plain hand-written
-/// function rather than a `@JsonKey(readValue:)` callback — [TabSnapshot]
-/// has no freezed/json_serializable codegen at all, so none of the
-/// codegen constraints those two models work around apply here.
+/// rule as other persisted models with a session override field, but
+/// written as a plain hand-written function rather than a
+/// `@JsonKey(readValue:)` callback — [TabSnapshot] has no
+/// freezed/json_serializable codegen at all, so none of the codegen
+/// constraints those models work around apply here.
 ///
 /// - Only `tmuxSessionName` present → its value is returned (Requirement:
 ///   Legacy Field Still Readable).
@@ -19,12 +19,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - Both present → `sessionRef`'s own value wins, unconditionally
 ///   (Requirement: Neutral Field Takes Precedence When Both Are Present).
 /// - Neither present → `null`; never invented. Note: since
-///   [TabSnapshot.tmuxSessionName] is a required, non-nullable field
-///   (matching [ProjectShortcut.tmuxSession]'s nullability, not
-///   [ConnectionProfile.tmuxSession]'s), a record missing the
-///   `tmuxSessionName` key entirely already fails to load before this
-///   function ever runs — that is pre-existing behavior, unchanged by
-///   this migration.
+///   [TabSnapshot.tmuxSessionName] is a required, non-nullable field, a
+///   record missing the `tmuxSessionName` key entirely already fails to
+///   load before this function ever runs — that is pre-existing
+///   behavior, unchanged by this migration.
 String? _readSessionRef(Map<String, dynamic> json) {
   final neutral = json['sessionRef'] as String?;
   if (neutral != null) return neutral;
@@ -116,35 +114,70 @@ class SessionSnapshotRepository {
     }
   }
 
-  /// Clears the dirty flag, the snapshot and the timestamp.
+  /// Clears the dirty flag, the snapshot, the timestamp and the native
+  /// dismissal flag - all four together, so [sessionDismissedKey] can
+  /// never leak into a later launch once this pending snapshot has been
+  /// consumed (either answered or auto-applied).
   Future<void> markClean() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(AppConstants.sessionDirtyKey);
       await prefs.remove(AppConstants.sessionSnapshotKey);
       await prefs.remove(_timestampKey);
+      await prefs.remove(AppConstants.sessionDismissedKey);
       _log.i('Session marked clean');
     } catch (e) {
       _log.e('Failed to mark session clean', e);
     }
   }
 
+  /// Whether the pending snapshot - if any - came from a deliberate
+  /// swipe from Recents rather than a crash.
+  ///
+  /// The flag this reads ([AppConstants.sessionDismissedKey]) is written
+  /// natively by `SessionHoldService.onTaskRemoved` using `commit()`,
+  /// because the Dart isolate is already being destroyed by the time
+  /// that callback runs and could not write it reliably itself. Reading
+  /// it does not require [sessionDirtyKey] to also be true - callers
+  /// that care about a PENDING recovery already check that separately
+  /// (see [getPendingRecovery]) - but in practice the native side only
+  /// ever writes this flag alongside a dirty snapshot.
+  Future<bool> wasUserDismissed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(AppConstants.sessionDismissedKey) ?? false;
+    } catch (e) {
+      _log.e('Failed to read user-dismissed flag', e);
+      return false;
+    }
+  }
+
   /// Returns `null` when no dirty session is waiting to be recovered, or
-  /// the list of [TabSnapshot] when a real crash is pending.
+  /// the list of [TabSnapshot] when a real crash OR a deliberate
+  /// dismissal is pending.
   ///
   /// A crash counts as real once the snapshot is older than
   /// [_crashThresholdMs]. More recent ones are ignored to avoid false
   /// positives when Flutter emits `paused` + `resumed` in quick succession.
+  /// A DISMISSED snapshot (see [wasUserDismissed]) bypasses that age
+  /// check entirely: it is not a flicker the threshold needs to filter,
+  /// it is a native signal that the exit was deliberate, and a swipe
+  /// followed by an immediate relaunch must not be mistaken for the fast
+  /// resume the threshold exists to catch.
   Future<List<TabSnapshot>?> getPendingRecovery() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final isDirty = prefs.getBool(AppConstants.sessionDirtyKey) ?? false;
       if (!isDirty) return null;
 
-      // Check the snapshot's age to rule out fast resumes.
+      final dismissed =
+          prefs.getBool(AppConstants.sessionDismissedKey) ?? false;
+
+      // Check the snapshot's age to rule out fast resumes. Skipped for a
+      // dismissal: see the method doc.
       final ts = prefs.getInt(_timestampKey) ?? 0;
       final age = DateTime.now().millisecondsSinceEpoch - ts;
-      if (age < _crashThresholdMs) {
+      if (!dismissed && age < _crashThresholdMs) {
         _log.i(
           'Snapshot too recent (${age}ms) - likely a fast resume, ignoring',
         );

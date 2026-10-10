@@ -12,10 +12,14 @@ import 'package:helm/features/session_hold/presentation/session_hold_provider.da
 /// ## Why it lives on the AppBar
 ///
 /// The same reason `HomeScreen._buildBrowseAction` does, and by the same
-/// rule: the shortcuts drawer navigates BETWEEN sessions — workspaces,
-/// tabs, agents, project shortcuts — while this acts on ONE. A control
-/// whose meaning depends on which tab is active does not belong in the
-/// surface used to change which tab is active.
+/// rule: the tab strip navigates BETWEEN sessions while this acts on ONE.
+/// A control whose meaning depends on which tab is active does not belong
+/// in the surface used to change which tab is active.
+///
+/// The rule was written against a shortcuts drawer that held workspaces,
+/// tabs, agents and project shortcuts. That drawer is retired — herdr's
+/// own sidebar covers that navigation — but the rule outlived it, because
+/// the tab strip still changes which session this toggle would act on.
 ///
 /// ## Why this toggle still exists now that a profile can ask for a hold
 ///
