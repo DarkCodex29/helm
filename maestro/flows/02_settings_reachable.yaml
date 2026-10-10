@@ -1,10 +1,16 @@
 # Regression guard: Settings must be reachable from Home at all times.
 #
-# Before the fix, the only navigation to /settings lived inside a
-# `if (profiles.isEmpty)` branch in _showNewTabDialog. Setup always
-# creates a profile, so that branch never fired and Settings was
-# unreachable from the UI. This flow fails on that build and passes once
-# the AppBar carries a persistent settings action.
+# Before the original fix, the only navigation to /settings lived inside a
+# `if (profiles.isEmpty)` branch in _showNewTabDialog. Setup always creates
+# a profile, so that branch never fired and Settings was unreachable from
+# the UI. That dead branch is STILL THERE, so this flow still has a real
+# defect to catch.
+#
+# The route has moved twice. It was an AppBar action, then the shortcuts
+# drawer's footer, and now it is an entry in the app bar's overflow menu —
+# the drawer was retired once herdr's own sidebar was confirmed to cover
+# the navigation it duplicated. This flow follows the control; what it
+# asserts has never changed.
 appId: com.darkcodex.helm
 tags:
   - smoke
@@ -26,27 +32,29 @@ env:
 # A profile exists, which is exactly the state that used to hide every
 # route into Settings.
 #
-# Settings moved off the AppBar and into the drawer's footer, so the
-# route now runs through the hamburger. Asserting the drawer opened
-# BEFORE tapping the row keeps a failure readable: a drawer that never
-# opened and a Settings row that vanished are different bugs.
+# This host never connects, so the overflow menu here holds only its
+# unconditional entries. That is deliberate: Settings is where you go to
+# fix a profile that cannot connect, so the one state in which it must
+# never hide is this one.
 - tapOn:
-    id: "helm.home.drawer_button"
+    id: "helm.home.app_bar_overflow_button"
+
+# Assert the menu opened BEFORE tapping the row. A menu that never opened
+# and a Settings entry that vanished are different bugs, and a single
+# failing tap would not tell them apart.
 - extendedWaitUntil:
     visible:
-      id: "helm.shortcuts.drawer"
+      id: "helm.home.settings_button"
     timeout: 10000
 
-- assertVisible:
-    id: "helm.shortcuts.settings_button"
-
 - tapOn:
-    id: "helm.shortcuts.settings_button"
+    id: "helm.home.settings_button"
 
 # ── The Settings screen renders ─────────────────────────────────────────
-# Do not assert the bare text "Settings" here: the AppBar button's
-# tooltip is also "Settings", so that assertion passes on Home and would
-# hide a broken navigation. Anchor on something only this screen has.
+# Do not assert the bare text "Settings" here: the menu row itself reads
+# "Settings", and Maestro matches text as a full-string regex, so that
+# assertion would pass on the still-open menu and hide a dead route.
+# Anchor on something only this screen has.
 - extendedWaitUntil:
     visible:
       id: "helm.settings.add_profile_button"
@@ -61,14 +69,19 @@ env:
 # this element reads "<name>\n<user>@<host>:<port>". Maestro matches text
 # as a full-string regex, so the title alone never matches: (?s) turns on
 # DOTALL so `.*` can cross the embedded newline.
-- assertVisible: "(?s)${HELM_PROFILE_NAME}.*invalid-user@${HELM_HOST}:${HELM_PORT}"
+# The trailing backslash is YAML's double-quoted line continuation: it
+# suppresses the newline, so this is ONE regex, byte-identical to the
+# single-line form it replaces.
+- assertVisible: "(?s)${HELM_PROFILE_NAME}.*\
+    invalid-user@${HELM_HOST}:${HELM_PORT}"
 
 # ── Back returns to Home, it does not leave the app ─────────────────────
 - back
 - extendedWaitUntil:
     visible: "No active sessions"
     timeout: 10000
-# Back lands on Home, not on the drawer: the drawer closes when the row
-# is tapped, so there is nothing between Settings and Home to return to.
+# Back lands on Home, not on the open menu: tapping the row dismissed the
+# menu before pushing the route, so there is nothing between Settings and
+# Home to return to.
 - assertVisible:
-    id: "helm.home.drawer_button"
+    id: "helm.home.app_bar_overflow_button"

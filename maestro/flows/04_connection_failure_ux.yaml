@@ -56,6 +56,14 @@ env:
 
 # The app is still alive and still navigable after a failed retry.
 #
-# One assertion, not two: Settings moved into the drawer's footer, and
-# the hamburger is now the only persistent AppBar control that proves
-# Home survived. Reaching Settings is 02's job, not this flow's.
+# One assertion, not two: the overflow button is the only persistent app
+# bar control, so it is what proves Home survived. Actually REACHING
+# Settings through it is 02's job, not this flow's.
+#
+# This assertion was described in a comment here but never written, so
+# the flow ended without checking anything after the retry — the one
+# thing it exists to check. It also named the hamburger, which no longer
+# exists: the shortcuts drawer was retired once herdr's own sidebar was
+# confirmed to cover the navigation it duplicated.
+- assertVisible:
+    id: "helm.home.app_bar_overflow_button"

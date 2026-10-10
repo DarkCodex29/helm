@@ -17,5 +17,4 @@ executionOrder:
   flowsOrder:
     - 01_first_launch_setup
     - 02_settings_reachable
-    - 03_drawer_back_navigation
     - 04_connection_failure_ux
