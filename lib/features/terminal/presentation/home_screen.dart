@@ -53,6 +53,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final pending = await repo.getPendingRecovery();
       final recoveryPending = pending != null && pending.isNotEmpty;
 
+      // A deliberate swipe-from-Recents is not a crash: the native flag
+      // SessionHoldService.onTaskRemoved writes (Kotlin, commit()-ed
+      // before the process dies) says so, and that distinction is the
+      // whole point of odd/tasks/user-dismissed-is-not-a-crash.md. Apply
+      // the snapshot immediately rather than offering it, and clear the
+      // flag the same way every other dirty-session key is cleared -
+      // recoverSession's own markClean call does that. A real crash
+      // takes the branch below unchanged and keeps its prompt.
+      if (recoveryPending && await repo.wasUserDismissed()) {
+        await ref.read(tabsProvider.notifier).recoverSession(pending);
+        if (!mounted) return;
+        // Auto-connect must not also dial the default profile next to
+        // the tabs just recovered - same reasoning as the requested-
+        // session early return just below.
+        return;
+      }
+
       if (recoveryPending && mounted) {
         setState(() => _pendingRecovery = pending);
       }

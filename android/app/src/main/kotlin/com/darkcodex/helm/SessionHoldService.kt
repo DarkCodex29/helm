@@ -90,6 +90,29 @@ class SessionHoldService : Service() {
         private const val NOTIFICATION_ID = 42
 
         /**
+         * The file Flutter's `shared_preferences` opens, and the prefix
+         * its Dart half puts on every key before the write reaches that
+         * file. A key written here without the prefix is invisible to
+         * `SharedPreferences.getInstance()`.
+         *
+         * Both verified by reading `shared_preferences_android` 2.4.21 at
+         * the version pubspec.lock resolves:
+         * `LegacySharedPreferencesPlugin.java` names the same literal
+         * `SHARED_PREFERENCES_NAME`, and
+         * `SharedPreferencesAndroid._defaultPrefix` is `"flutter."`.
+         */
+        private const val FLUTTER_PREFS_FILE = "FlutterSharedPreferences"
+        private const val FLUTTER_PREFS_KEY_PREFIX = "flutter."
+
+        /**
+         * Mirrors `AppConstants.sessionDismissedKey`. Duplicated as a
+         * literal because Kotlin and Dart share no build-time constant
+         * here; `session_snapshot_repository_user_dismissed_test.dart`
+         * pins the Dart side of the pair.
+         */
+        private const val KEY_SESSION_DISMISSED = "helm_session_dismissed"
+
+        /**
          * Whether a hold is running, for `isRunning`.
          *
          * Read across the process by the plugin. Kept here rather than in
@@ -206,8 +229,36 @@ class SessionHoldService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.i(TAG, "Task removed; the hold cannot outlive it")
+        writeUserDismissedFlag()
         stopSelfAndDismiss()
         super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * Records that this exit was a deliberate swipe, for
+     * `SessionSnapshotRepository` to read on the next launch.
+     *
+     * WHY FROM KOTLIN. The Dart isolate is being destroyed in the same
+     * breath as this process, so it cannot be relied on to record that
+     * its own exit was deliberate. This callback is the last code that
+     * still runs and still knows.
+     *
+     * WHY `commit()` AND NEVER `apply()`. `apply()` queues the write and
+     * returns; the process hosting this service is torn down right after.
+     * A queued write that has not reached disk by then simply never
+     * happens, and the next launch would read a crash. `commit()` blocks
+     * until it is durable, which is the only guarantee worth having here.
+     *
+     * NOT called from [onDestroy] or the `ACTION_STOP` path. Both also
+     * end this service, and neither is the user dismissing the app: STOP
+     * ends the HOLD while `MainActivity` is still alive, and that launch
+     * must keep behaving as it does today.
+     */
+    private fun writeUserDismissedFlag() {
+        getSharedPreferences(FLUTTER_PREFS_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(FLUTTER_PREFS_KEY_PREFIX + KEY_SESSION_DISMISSED, true)
+            .commit()
     }
 
     private fun startInForeground(

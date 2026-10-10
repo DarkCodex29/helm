@@ -66,6 +66,14 @@ class AppConstants {
   static const String sessionDirtyKey = 'helm_session_dirty';
   static const String sessionSnapshotKey = 'helm_session_snapshot';
 
+  /// Written natively by `SessionHoldService.onTaskRemoved` (Kotlin),
+  /// using `commit()` into the SAME SharedPreferences file/key prefix
+  /// Flutter's `shared_preferences` plugin reads, before the dying
+  /// process is torn down. Its presence alongside [sessionDirtyKey]
+  /// means the pending snapshot came from a deliberate swipe from
+  /// Recents, not a crash - see odd/tasks/user-dismissed-is-not-a-crash.md.
+  static const String sessionDismissedKey = 'helm_session_dismissed';
+
   static const int defaultTerminalColumns = 80;
   static const int defaultTerminalRows = 24;
 
