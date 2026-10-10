@@ -1099,6 +1099,53 @@ class TerminalSession {
     }
   }
 
+  /// Writes [text] to the remote WITHOUT a trailing newline, so it lands at
+  /// the prompt exactly as if the owner had typed it himself: he reads it
+  /// there, edits it with the shell's or the agent's own keys, and presses
+  /// enter on his own.
+  ///
+  /// This is the ENTIRE review surface the design in
+  /// `odd/tasks/voice-and-share-input.md` relies on. The drawer's deleted
+  /// QUICK ACTIONS section did
+  /// `session.terminal.onOutput?.call('${action.command}\n')` — WITH a
+  /// trailing newline — so a tap executed on the host immediately. The
+  /// one-character absence of that `\n` here is the whole difference
+  /// between typing something at a prompt and running it: text handed to
+  /// this method can be inspected and corrected before it does anything.
+  ///
+  /// Text arriving from outside helm — a shared message, a dictated clip —
+  /// is frequently multi-line (a pasted WhatsApp message, a sentence
+  /// Whisper split across newlines). Sending embedded newlines straight
+  /// through would execute every line but the last the instant it typed
+  /// them, which defeats the entire point of not sending the final one.
+  /// So every `\n` and `\r` INSIDE the text is collapsed to a single
+  /// space rather than stripped outright — stripping would silently glue
+  /// unrelated words together (`"git\nstatus"` -> `"gitstatus"`), which is
+  /// a worse failure for the owner to catch by eye at the prompt than an
+  /// extra space would be. Leading/trailing whitespace (including
+  /// newlines) is trimmed, since it contributes nothing at a prompt.
+  ///
+  /// A no-op while not connected, consistent with the guard
+  /// [onResize]/`terminal.onOutput` already apply: there is no host to
+  /// type into, and queuing text for a session that may never reconnect
+  /// would mean the first thing a reconnect delivers is TEXT, decided by
+  /// the moment it happened to come in rather than by the owner.
+  ///
+  /// Also a no-op for empty or whitespace-only text — nothing worth
+  /// reviewing at a prompt.
+  void typeAtPrompt(String text) {
+    final sessionRef = _session;
+    if (sessionRef == null ||
+        statusNotifier.value != ConnectionStatus.connected) {
+      return;
+    }
+
+    final flattened = text.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+    if (flattened.isEmpty) return;
+
+    sessionRef.write(utf8.encode(flattened));
+  }
+
   Future<void> dispose() async {
     _log.i('Disposing session for ${profile.name}');
     // Set BEFORE awaiting anything: an advisory collect or an agent poll

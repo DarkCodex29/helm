@@ -70,6 +70,18 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Lets helm appear in the Android share sheet for plain text:
+                 a WhatsApp message, a snippet from any other app. Handled
+                 by SharedTextPlugin.kt: see MainActivity.configureFlutterEngine
+                 for the cold-start path (captureFromIntent, read off the
+                 Activity's own getIntent()) and MainActivity.onNewIntent for
+                 the already-running path (deliverLiveShare), which depends
+                 on this Activity's launchMode="singleTop" declared above. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
         </activity>
         <!-- Keeps helm's process alive so the SSH connection it already
              holds survives being backgrounded.
