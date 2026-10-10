@@ -49,15 +49,15 @@ is byte-comparable since `44e4622`.
 
 ## Tasks
 
-- [ ] 1. Teach MagicDNS instead of the IP in the README
+- [x] 1. Teach MagicDNS instead of the IP in the README
   - Surfaces: `README.md`
   - Keep the existing Spanish voseo style of the file.
   - Must keep the real reason the IP advice existed: a LAN IP stops working off
     the home WiFi. MagicDNS keeps that benefit and adds stability.
   - Must disclose the silent re-pin above.
-  - Commit: pending
+  - Commit: `2f12b55`
 
-- [ ] 2. Advise when a profile connects by Tailscale IP instead of MagicDNS
+- [x] 2. Advise when a profile connects by Tailscale IP instead of MagicDNS
   - Surfaces: `lib/core/host/host_diagnostics.dart`,
     `lib/core/host/host_advisory.dart`, `lib/core/host/host_advisor.dart`,
     `lib/features/terminal/data/terminal_session.dart`, `test/core/host/**`
@@ -68,9 +68,9 @@ is byte-comparable since `44e4622`.
     closures.
   - Same pass updates the Tailscale comments this audit turned from
     UNVERIFIED into measured fact (see task 3's note).
-  - Commit: pending
+  - Commit: `d543602`
 
-- [ ] 3. Retire stale claims that outlived their evidence
+- [x] 3. Retire stale claims that outlived their evidence
   - Surfaces: `lib/core/host/host_diagnostics.dart`, `lib/features/**`,
     `pubspec.yaml`
   - `host_diagnostics.dart:~96` states "tailscale is not installed on the real
@@ -82,7 +82,7 @@ is byte-comparable since `44e4622`.
     old version and must be re-verified or re-worded. Audit, do not sweep.
   - `pubspec.yaml:118` justifies `flutter_launcher_icons: ios: false` with "No
     Runner.xcodeproj in this repo", untrue since March.
-  - Commit: pending
+  - Commit: `557d712`, `9d5bbf9`, `faeba48`
 
 ## Out of scope, recorded deliberately
 
