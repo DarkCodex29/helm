@@ -359,6 +359,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ),
           ..._overflowSessionItems(session),
+          // LAST, and ALWAYS present: every other item here acts on the
+          // active tab, but this one leaves the screen entirely, so it
+          // belongs after everything that stays.
+          //
+          // Deliberately OUTSIDE `_overflowSessionItems`, which returns an
+          // empty list without a connected session. Settings is where you
+          // go to fix a profile that cannot connect, so gating it on a
+          // connection would hide it exactly when it is needed.
+          //
+          // This duplicates the drawer's footer entry for one commit only.
+          // The duplication is the point: the footer is currently the only
+          // reachable route to `/settings`, and removing the drawer before
+          // this exists would strand the route.
+          PopupMenuItem<VoidCallback>(
+            value: () => context.push('/settings'),
+            child: Semantics(
+              identifier: HomeSemantics.settingsButton,
+              child: const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.settings_outlined),
+                title: Text('Settings'),
+              ),
+            ),
+          ),
         ],
       ),
     );

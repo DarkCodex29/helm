@@ -53,6 +53,16 @@ class HomeSemantics {
 
   /// The large call to action in the empty state.
   static const newSessionButton = 'helm.home.new_session_button';
+
+  /// The Settings item inside [appBarOverflowButton]'s menu.
+  ///
+  /// Reuses the EXACT string [ShortcutsSemantics.settingsButton] carried
+  /// before Settings moved into the drawer footer. That is deliberate,
+  /// not a collision: this is a SECOND, additive route to `/settings`,
+  /// restored here because the drawer's footer is the only reachable one
+  /// and a later task removes the drawer. Both ids coexist until that
+  /// happens, each naming the control it currently sits on.
+  static const settingsButton = 'helm.home.settings_button';
 }
 
 /// Identifiers on `ShortcutsDrawer`.
