@@ -67,16 +67,16 @@ only from the drawer.
 
 ## Tasks
 
-- [ ] 1. Put Settings in the overflow menu, before anything is removed
+- [x] 1. Put Settings in the overflow menu, before anything is removed
   - Surfaces: `lib/features/terminal/presentation/home_screen.dart`,
     `lib/core/testing/semantic_ids.dart`, `test/features/terminal/**`
   - Always present, beside `Reset keyboard layout`, never inside
     `_overflowSessionItems`.
   - Test first: a widget test that opens the overflow and reaches `/settings`
     must fail before the entry exists.
-  - Commit: pending
+  - Commit: `156e29e`
 
-- [ ] 2. Remove the drawer and everything only it reached
+- [x] 2. Remove the drawer and everything only it reached
   - Surfaces: `lib/features/terminal/presentation/home_screen.dart`,
     `lib/features/shortcuts/**`, `lib/core/testing/semantic_ids.dart`,
     `lib/features/terminal/presentation/providers/tabs_provider.dart`,
@@ -86,9 +86,9 @@ only from the drawer.
     only to dismiss the drawer.
   - `canPop` becomes unconditional: Home is the only route on the stack, so
     back closes the app again, which is the behaviour from before the drawer.
-  - Commit: pending
+  - Commit: `098fc09`
 
-- [ ] 3. Realign the e2e flows to the surface that now exists
+- [x] 3. Realign the e2e flows to the surface that now exists
   - Surfaces: `maestro/flows/02_settings_reachable.yaml`,
     `maestro/flows/03_drawer_back_navigation.yaml`, `maestro/config.yaml`
   - `02` keeps its purpose — Settings must be reachable from Home — and is
@@ -97,7 +97,25 @@ only from the drawer.
     still reachable and is exactly what this change risks.
   - `03` is deleted with its entry in `executionOrder`: it guards back-closes-
     the-drawer, and there is no drawer.
-  - Commit: pending
+  - Commit: `bf90ad0`
+
+## Defect found while closing, and fixed here
+
+The overflow button was built behind `if (tabsState.hasTabs)`. Harmless while
+every entry acted on a session; not harmless once Settings moved in, because
+with no tab there is no button and Settings became unreachable from an empty
+Home — the exact state task 3's flow drives, and where a user whose only
+profile cannot connect lands.
+
+Task 1's test missed it by pumping a tab. The guard is gone, the menu is
+unconditional, and a second test covers the no-tabs case. It was proven to have
+teeth rather than assumed: with the guard restored it fails (`+1 -1`) while the
+with-tab case still passes.
+
+Two pre-existing e2e defects surfaced on the way, both recorded in `bf90ad0`:
+`01_first_launch_setup` asserted the deleted `helm.home.drawer_button`, and
+`04_connection_failure_ux` promised an assertion in a comment and then ended
+without writing one.
 
 ## Device validation, deferred by standing preference
 
