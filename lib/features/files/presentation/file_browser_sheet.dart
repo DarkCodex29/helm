@@ -450,74 +450,96 @@ class _FileBrowserSheetState extends ConsumerState<FileBrowserSheet> {
       identifier: FilesSemantics.sheet,
       child: FractionallySizedBox(
         heightFactor: 0.85,
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            border: Border(top: BorderSide(color: _border)),
-          ),
-          child: Column(
-            children: [
-              const _Grabber(),
-              _PathBar(
-                path: state.path,
-                canGoUp: state.canGoUp,
-                onUp: notifier.goUp,
-                onRefresh: notifier.refresh,
-                // Only offered once a directory is actually showing: a
-                // loading or failed listing has no known parent to create
-                // the folder in.
-                onCreateFolder: state.status == FileBrowserStatus.ready
-                    ? _createFolder
-                    : null,
-                showUpload: picker.supportsPicking,
-                onUpload: state.status == FileBrowserStatus.ready
-                    ? _upload
-                    : null,
-              ),
-              Expanded(
-                child: Semantics(
-                  identifier: FilesSemantics.listing,
-                  child: _Body(
-                    state: state,
-                    selected: _selected,
-                    onRetry: notifier.refresh,
-                    onRename: _rename,
-                    onDelete: _delete,
-                    onTap: (entry) async {
-                      if (entry.isNavigable) {
-                        setState(() => _selected = null);
-                        await notifier.enter(entry);
-                        return;
-                      }
-                      if (entry.isDownloadable) {
-                        await _download(entry);
-                        return;
-                      }
-                      // Everything left is something this app can neither
-                      // enter nor fetch — a socket, a device, a broken
-                      // link. Tapping selects it so its description is
-                      // readable, which is all there is to offer.
-                      setState(
-                        () => _selected = _selected == entry ? null : entry,
-                      );
-                    },
+        // Material, not a coloured DecoratedBox, and that is a
+        // correctness fix rather than a style preference.
+        //
+        // `ListTile` paints its `tileColor` and its ink splashes on the
+        // NEAREST MATERIAL ANCESTOR. With the surface colour living on a
+        // DecoratedBox between the rows and the sheet's Material, both
+        // were painted UNDERNEATH that colour and never seen: tapping a
+        // file row gave no feedback, and `_EntryRow`'s selected-row
+        // `tileColor` did nothing at all.
+        //
+        // Flutter asserts on exactly this shape now, which is how it
+        // surfaced: 28 tests in `file_browser_sheet_test.dart` fail on an
+        // "ink splashes may be invisible" assertion. The tests were right
+        // and the widget was wrong.
+        //
+        // The border stays on a DecoratedBox INSIDE the Material. The
+        // assertion fires on an intermediate background COLOUR, not on a
+        // border, and `Material.shape` cannot express a top-only border
+        // together with a corner radius.
+        child: Material(
+          color: _surface,
+          clipBehavior: Clip.antiAlias,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: _border)),
+            ),
+            child: Column(
+              children: [
+                const _Grabber(),
+                _PathBar(
+                  path: state.path,
+                  canGoUp: state.canGoUp,
+                  onUp: notifier.goUp,
+                  onRefresh: notifier.refresh,
+                  // Only offered once a directory is actually showing: a
+                  // loading or failed listing has no known parent to create
+                  // the folder in.
+                  onCreateFolder: state.status == FileBrowserStatus.ready
+                      ? _createFolder
+                      : null,
+                  showUpload: picker.supportsPicking,
+                  onUpload: state.status == FileBrowserStatus.ready
+                      ? _upload
+                      : null,
+                ),
+                Expanded(
+                  child: Semantics(
+                    identifier: FilesSemantics.listing,
+                    child: _Body(
+                      state: state,
+                      selected: _selected,
+                      onRetry: notifier.refresh,
+                      onRename: _rename,
+                      onDelete: _delete,
+                      onTap: (entry) async {
+                        if (entry.isNavigable) {
+                          setState(() => _selected = null);
+                          await notifier.enter(entry);
+                          return;
+                        }
+                        if (entry.isDownloadable) {
+                          await _download(entry);
+                          return;
+                        }
+                        // Everything left is something this app can neither
+                        // enter nor fetch — a socket, a device, a broken
+                        // link. Tapping selects it so its description is
+                        // readable, which is all there is to offer.
+                        setState(
+                          () => _selected = _selected == entry ? null : entry,
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
-              const _DestinationBar(),
-              _UploadStatusBar(
-                state: upload,
-                onCancel: _uploads.cancelAll,
-                onDismiss: _uploads.dismiss,
-              ),
-              _DownloadStatusBar(
-                state: download,
-                onCancel: _downloads.cancel,
-                onDismiss: _downloads.dismiss,
-                onChooseFolder: _chooseFolder,
-              ),
-            ],
+                const _DestinationBar(),
+                _UploadStatusBar(
+                  state: upload,
+                  onCancel: _uploads.cancelAll,
+                  onDismiss: _uploads.dismiss,
+                ),
+                _DownloadStatusBar(
+                  state: download,
+                  onCancel: _downloads.cancel,
+                  onDismiss: _downloads.dismiss,
+                  onChooseFolder: _chooseFolder,
+                ),
+              ],
+            ),
           ),
         ),
       ),

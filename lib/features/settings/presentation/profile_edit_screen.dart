@@ -199,11 +199,16 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
               onChanged: (id) => setState(() => _selectedMultiplexer = id),
             ),
             const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+            // Material, not a coloured Container, for the reason spelled
+            // out on its twin below: a `Container(decoration:)` builds a
+            // DecoratedBox, and a DecoratedBox with a colour between this
+            // tile and the nearest Material swallows the tile's ink.
+            Material(
+              color: theme.colorScheme.surfaceContainerHighest,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: theme.colorScheme.outline),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: theme.colorScheme.outline),
               ),
               child: SwitchListTile(
                 title: Text(
@@ -228,11 +233,28 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
             // machine?", and both are things the user sets once. A second
             // pattern for the same kind of setting would only make the
             // pair harder to read.
-            Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+            // Material rather than a coloured Container, and the switches
+            // are the reason: `SwitchListTile` paints its ink on the
+            // NEAREST MATERIAL ANCESTOR, and a `Container(decoration:)`
+            // builds a DecoratedBox whose colour sat between the two. The
+            // ripple was painted underneath that colour and never seen, so
+            // these two switches gave no touch feedback at all.
+            //
+            // Flutter asserts on this shape now, which is how it surfaced:
+            // the three tests in `profile_edit_font_size_test.dart` fail on
+            // "ink splashes may be invisible". The same defect, in the same
+            // shape, was in `file_browser_sheet.dart` — one class of bug in
+            // two places, fixed together rather than one at a time.
+            //
+            // `Material.shape` can express this one because the border is
+            // uniform; the sheet's top-only border needed a bare
+            // DecoratedBox nested inside its Material instead.
+            Material(
+              color: theme.colorScheme.surfaceContainerHighest,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: theme.colorScheme.outline),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: theme.colorScheme.outline),
               ),
               child: Semantics(
                 identifier: ProfileEditSemantics.backgroundHoldSwitch,
