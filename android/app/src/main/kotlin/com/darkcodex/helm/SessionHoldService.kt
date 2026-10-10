@@ -61,7 +61,6 @@ import android.util.Log
  * prompt.
  */
 class SessionHoldService : Service() {
-
     /** Set by the STOP action, so the plugin can tell Dart who ended it. */
     interface StopListener {
         fun onStopRequested()
@@ -137,7 +136,11 @@ class SessionHoldService : Service() {
         Log.i(TAG, "SessionHoldService created in pid=${Process.myPid()}")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.i(TAG, "STOP tapped in the notification")
@@ -148,6 +151,7 @@ class SessionHoldService : Service() {
                 stopSelfAndDismiss()
                 return START_NOT_STICKY
             }
+
             else -> {
                 val sessionName =
                     intent?.getStringExtra(EXTRA_SESSION_NAME) ?: "a session"
@@ -206,7 +210,10 @@ class SessionHoldService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private fun startInForeground(sessionName: String, hostName: String?) {
+    private fun startInForeground(
+        sessionName: String,
+        hostName: String?,
+    ) {
         createChannel()
 
         // Only a DIFFERENT session restarts the clock. See
@@ -270,8 +277,9 @@ class SessionHoldService : Service() {
         //
         // `cancel` removes the notification outright, whatever the service's
         // state, which is the only property this teardown can rely on.
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE)
-            as? NotificationManager
+        val manager =
+            getSystemService(Context.NOTIFICATION_SERVICE)
+                as? NotificationManager
         manager?.cancel(NOTIFICATION_ID)
     }
 
@@ -281,14 +289,15 @@ class SessionHoldService : Service() {
         // IMPORTANCE_LOW, unlike the agent-alert channel's HIGH. This one
         // is a status line that will sit there for hours; a channel that
         // buzzed would punish the user for using the feature.
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = CHANNEL_DESCRIPTION
-            setShowBadge(false)
-        }
+        val channel =
+            NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = CHANNEL_DESCRIPTION
+                setShowBadge(false)
+            }
 
         getSystemService(NotificationManager::class.java)
             ?.createNotificationChannel(channel)
@@ -304,31 +313,37 @@ class SessionHoldService : Service() {
      * foreground service the user cannot end from its own notification is
      * a foreground service they can only end by force-stopping the app.
      */
-    private fun buildNotification(sessionName: String, hostName: String?): Notification {
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+    private fun buildNotification(
+        sessionName: String,
+        hostName: String?,
+    ): Notification {
+        val contentIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
-        val stopIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, SessionHoldService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val stopIntent =
+            PendingIntent.getService(
+                this,
+                1,
+                Intent(this, SessionHoldService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
         val where = if (hostName.isNullOrBlank()) "" else " on $hostName"
 
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
+        val builder =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
 
         return builder
             .setContentTitle("Holding $sessionName")
@@ -367,13 +382,13 @@ class SessionHoldService : Service() {
             .setWhen(holdStartedAtMillis)
             .setUsesChronometer(true)
             .addAction(
-                Notification.Action.Builder(
-                    null,
-                    "Stop",
-                    stopIntent,
-                ).build(),
-            )
-            .build()
+                Notification.Action
+                    .Builder(
+                        null,
+                        "Stop",
+                        stopIntent,
+                    ).build(),
+            ).build()
     }
 
     /**
@@ -381,11 +396,16 @@ class SessionHoldService : Service() {
      * plugin never has to construct one.
      */
     object Launcher {
-        fun start(context: Context, sessionName: String, hostName: String) {
-            val intent = Intent(context, SessionHoldService::class.java)
-                .setAction(ACTION_START)
-                .putExtra(EXTRA_SESSION_NAME, sessionName)
-                .putExtra(EXTRA_HOST_NAME, hostName)
+        fun start(
+            context: Context,
+            sessionName: String,
+            hostName: String,
+        ) {
+            val intent =
+                Intent(context, SessionHoldService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_SESSION_NAME, sessionName)
+                    .putExtra(EXTRA_HOST_NAME, hostName)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
