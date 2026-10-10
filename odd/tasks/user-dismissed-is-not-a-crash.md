@@ -64,7 +64,7 @@ is auto-APPLIED, not discarded.
 
 ## Tasks
 
-- [ ] 1. Record that the exit was user-initiated, from the dying process
+- [x] 1. Record that the exit was user-initiated, from the dying process
   - Surfaces: `android/app/src/main/kotlin/com/darkcodex/helm/SessionHoldService.kt`
   - In `onTaskRemoved`, before stopping, write a flag into the same
     SharedPreferences file Flutter uses.
@@ -73,22 +73,22 @@ is auto-APPLIED, not discarded.
     from Kotlin rather than Dart — the isolate is already going.
   - Verify the file name and key prefix Flutter actually uses on this version
     rather than trusting the brief; read it off the device or the plugin source.
-  - Commit: pending
+  - Commit: `7a32075` (formatting split into `e337302`)
 
-- [ ] 2. Teach the repository that a dismissal is not a crash
+- [x] 2. Teach the repository that a dismissal is not a crash
   - Surfaces: `lib/features/terminal/data/session_snapshot_repository.dart`,
     `lib/core/constants/app_constants.dart`, `test/features/terminal/data/**`
   - Expose whether the pending snapshot came from a user dismissal, and clear
     that flag wherever the other three are cleared, so it cannot leak into a
     later launch.
   - Test first.
-  - Commit: pending
+  - Commit: `7a32075`
 
-- [ ] 3. Apply the recovery instead of offering it, when the user dismissed
+- [x] 3. Apply the recovery instead of offering it, when the user dismissed
   - Surfaces: `lib/features/terminal/presentation/home_screen.dart`,
     `test/features/terminal/presentation/**`
   - A real crash keeps its prompt. Only a user dismissal auto-applies.
-  - Commit: pending
+  - Commit: `7a32075`
 
 ## Device validation, still owed
 
