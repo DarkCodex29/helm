@@ -68,7 +68,7 @@ Kept, because the surviving sections use them: `_DrawerHeader`,
 
 ## Tasks
 
-- [ ] 1. Drop the two duplicated sections and everything only they used
+- [x] 1. Drop the two duplicated sections and everything only they used
   - Surfaces: `lib/features/shortcuts/presentation/shortcuts_drawer.dart`,
     `test/features/shortcuts/presentation/shortcuts_drawer_agents_test.dart`,
     `test/features/shortcuts/presentation/shortcuts_drawer_workspaces_test.dart`,
@@ -76,9 +76,9 @@ Kept, because the surviving sections use them: `_DrawerHeader`,
   - Remove the now-unused imports too; `flutter analyze` must stay clean.
   - The three test files cover ONLY the removed sections. Any case in them that
     asserts surviving behaviour must be kept, moved, not deleted wholesale.
-  - Commit: pending
+  - Commit: `ada44bb`
 
-- [ ] 2. Retire the e2e guard whose defect no longer exists
+- [x] 2. Retire the e2e guard whose defect no longer exists
   - Surfaces: `maestro/agent_focus_honesty.yaml`
   - This flow asserts the drawer stays open after tapping an agent, reporting
     where focus landed. With the `AGENTS` section gone there is no agent row to
@@ -88,9 +88,9 @@ Kept, because the surviving sections use them: `_DrawerHeader`,
     `maestro/flows/03_drawer_back_navigation.yaml` must keep passing untouched:
     both drive the hamburger, the drawer identifier and the Settings footer,
     all of which survive.
-  - Commit: pending
+  - Commit: `8fb9c7c`
 
-- [ ] 3. Reconcile two ODD task files whose checkboxes outlived their work
+- [x] 3. Reconcile two ODD task files whose checkboxes outlived their work
   - Surfaces: `odd/tasks/sftp-upload-2026-10.md`,
     `odd/tasks/tailscale-addressing-2026-10.md`
   - Both show open items that are committed and merged. Verified:
@@ -99,7 +99,7 @@ Kept, because the surviving sections use them: `_DrawerHeader`,
     is `2f12b55`, task 2 is `d543602`, task 3 is `557d712` + `9d5bbf9` +
     `faeba48`.
   - Record the commit identities so the next session does not re-derive them.
-  - Commit: pending
+  - Commit: `91b8bb3`
 
 ## Device validation, deferred by standing preference
 
