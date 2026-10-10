@@ -27,25 +27,48 @@ const _profile = ConnectionProfile(
 /// left disconnected.
 class _Tabs extends TabsNotifier {
   _Tabs(this.session);
-  final TerminalSession session;
+
+  /// Null builds a Home with NO tabs at all.
+  final TerminalSession? session;
 
   @override
-  TabsState build() => TabsState(
-    tabs: [
-      TerminalTab(
-        id: 'test',
-        title: 'Test',
-        session: session,
-        profile: _profile,
-      ),
-    ],
-  );
+  TabsState build() {
+    final live = session;
+    if (live == null) return const TabsState(tabs: []);
+    return TabsState(
+      tabs: [
+        TerminalTab(
+          id: 'test',
+          title: 'Test',
+          session: live,
+          profile: _profile,
+        ),
+      ],
+    );
+  }
 
   @override
   Future<AutoConnectDecision> autoConnectDefault({
     required bool recoveryPending,
   }) async => const AutoConnectSkip(AutoConnectSkipReason.alreadyOpen);
 }
+
+GoRouter _router() => GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+    GoRoute(
+      path: '/settings',
+      builder: (context, state) =>
+          const Scaffold(body: Text('settings-placeholder')),
+    ),
+  ],
+);
+
+Widget _app(GoRouter router, TerminalSession? session) => ProviderScope(
+  overrides: [tabsProvider.overrideWith(() => _Tabs(session))],
+  child: MaterialApp.router(routerConfig: router),
+);
 
 void main() {
   testWidgets(
@@ -60,24 +83,7 @@ void main() {
       );
       addTearDown(session.dispose);
 
-      final router = GoRouter(
-        initialLocation: '/',
-        routes: [
-          GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
-          GoRoute(
-            path: '/settings',
-            builder: (context, state) =>
-                const Scaffold(body: Text('settings-placeholder')),
-          ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [tabsProvider.overrideWith(() => _Tabs(session))],
-          child: MaterialApp.router(routerConfig: router),
-        ),
-      );
+      await tester.pumpWidget(_app(_router(), session));
       await tester.pumpAndSettle();
 
       // Opening the overflow menu with no connected session - the whole
@@ -94,4 +100,35 @@ void main() {
       expect(find.text('settings-placeholder'), findsOneWidget);
     },
   );
+
+  // The case the first version of this test MISSED, and the one that
+  // matters most. `maestro/flows/02_settings_reachable.yaml` reaches Home
+  // straight out of setup, where there is no tab at all, and the overflow
+  // button used to be built behind `if (tabsState.hasTabs)`. Settings was
+  // therefore unreachable from exactly the screen a user lands on when
+  // their only profile will not connect — which is where they go looking
+  // for Settings.
+  testWidgets('the overflow menu offers Settings with no tabs open at all', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+
+    await tester.pumpWidget(_app(_router(), null));
+    await tester.pumpAndSettle();
+
+    // Precondition, asserted rather than assumed: this really is the empty
+    // Home, not a Home that happens to have a tab.
+    expect(find.text('No active sessions'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+
+    final settingsItem = find.text('Settings');
+    expect(settingsItem, findsOneWidget);
+
+    await tester.tap(settingsItem);
+    await tester.pumpAndSettle();
+
+    expect(find.text('settings-placeholder'), findsOneWidget);
+  });
 }

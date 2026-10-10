@@ -44,9 +44,8 @@ part 'sheet/browser_body.dart';
 part 'sheet/entry_row.dart';
 part 'sheet/formatting.dart';
 
-// The drawer's palette, repeated rather than imported because this app has
-// no token file yet and every surface spells these out — see
-// shortcuts_drawer.dart. Worth centralizing, but not from here.
+// Repeated rather than imported because this app has no token file yet and
+// every surface spells these out. Worth centralizing, but not from here.
 const _surface = AppTheme.surface;
 const _raised = AppTheme.surfaceVariant;
 const _border = AppTheme.divider;

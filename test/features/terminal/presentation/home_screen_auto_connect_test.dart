@@ -115,14 +115,12 @@ void main() {
 
       // No exception escaped the post-frame callback into the framework.
       expect(tester.takeException(), isNull);
-      // Home rendered, and its own chrome is reachable.
+      // Home rendered, and its own chrome is reachable. The failed dial
+      // still produced a tab, so the overflow menu this app bar now carries
+      // in place of the retired drawer's hamburger is on screen — proof
+      // Home's own chrome survived the failed connection.
       expect(find.byType(HomeScreen), findsOneWidget);
-      // The hamburger, and no longer Settings: Settings moved into the
-      // drawer's footer, so its absence from this bar is the new correct
-      // state rather than the failure this line used to catch. The drawer
-      // button is what still proves Home's own chrome survived — and it
-      // is also the route to Settings now, so one assertion covers both.
-      expect(find.byTooltip('Projects'), findsOneWidget);
+      expect(find.byTooltip('More actions'), findsOneWidget);
     },
   );
 

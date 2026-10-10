@@ -11,7 +11,6 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/notifications/presentation/push_notification_provider.dart';
 import 'package:helm/features/session_hold/domain/auto_hold_request.dart';
 import 'package:helm/features/session_hold/presentation/session_hold_provider.dart';
-import 'package:helm/features/shortcuts/domain/project_shortcut.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/domain/auto_connect_decision.dart';
@@ -74,7 +73,7 @@ class TabsNotifier extends Notifier<TabsState> {
   /// session it resolves to.
   ///
   /// [tmuxSessionName] names a specific session and outranks the profile.
-  /// Crash recovery and project shortcuts both use it — see
+  /// Crash recovery and push-notification opens both use it — see
   /// [resolveSessionName] for the full precedence and for why a positional
   /// counter is not an option.
   Future<void> addTab(
@@ -164,10 +163,10 @@ class TabsNotifier extends Notifier<TabsState> {
   /// ### Why here, and only here
   ///
   /// This is the single line every way of opening a session runs through
-  /// — launch auto-connect, crash recovery, a push notification, a
-  /// project shortcut and the new-tab sheet all reach the host through
-  /// [addTab]. Putting the rule anywhere else would mean re-deriving it
-  /// per entry point, and one of them would eventually disagree.
+  /// — launch auto-connect, crash recovery, a push notification and the
+  /// new-tab sheet all reach the host through [addTab]. Putting the rule
+  /// anywhere else would mean re-deriving it per entry point, and one of
+  /// them would eventually disagree.
   ///
   /// ### Why AFTER the connect, inside the try
   ///
@@ -221,9 +220,7 @@ class TabsNotifier extends Notifier<TabsState> {
     if (runner == null) return;
 
     unawaited(
-      ref
-          .read(pushNotificationServiceProvider)
-          .onAgentTrackingStarted(runner),
+      ref.read(pushNotificationServiceProvider).onAgentTrackingStarted(runner),
     );
   }
 
@@ -278,7 +275,9 @@ class TabsNotifier extends Notifier<TabsState> {
   Future<AutoConnectDecision> autoConnectDefault({
     required bool recoveryPending,
   }) async {
-    final profiles = await ref.read(connectionProfileRepositoryProvider).getAll();
+    final profiles = await ref
+        .read(connectionProfileRepositoryProvider)
+        .getAll();
 
     final decision = decideAutoConnect(
       profiles: profiles,
@@ -393,40 +392,6 @@ class TabsNotifier extends Notifier<TabsState> {
 
     _log.i('Opening session $sessionName from a notification');
     await addTab(profile, tmuxSessionName: sessionName);
-  }
-
-  /// Opens a tab for the given [shortcut], navigates to its project path,
-  /// and optionally runs a command.
-  Future<void> openShortcut(ProjectShortcut shortcut) async {
-    final repo = ref.read(connectionProfileRepositoryProvider);
-
-    // Find the profile by ID, fall back to default.
-    ConnectionProfile? profile = await repo.getById(shortcut.profileId);
-    profile ??= await repo.getDefault();
-
-    if (profile == null) {
-      _log.w('No profile found for shortcut ${shortcut.name}');
-      return;
-    }
-
-    await addTab(
-      profile,
-      tmuxSessionName: shortcut.sessionRef ?? shortcut.tmuxSession,
-    );
-
-    // Wait for tmux to be ready before sending commands.
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    final session = state.activeTab?.session;
-    if (session == null || !session.isConnected) return;
-
-    // Navigate to project path.
-    final cmd = shortcut.command.isNotEmpty
-        ? 'cd ${shortcut.projectPath} && ${shortcut.command}\n'
-        : 'cd ${shortcut.projectPath}\n';
-
-    session.terminal.onOutput?.call(cmd);
-    _log.i('Opened shortcut: ${shortcut.name} → $cmd');
   }
 }
 

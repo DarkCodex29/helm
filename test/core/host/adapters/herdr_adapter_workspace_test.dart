@@ -33,9 +33,9 @@
 //   back 5,1,2,3,4,6 — the FOCUSED tab hoisted to the front. Ordering the
 //   tree by arrival would therefore reshuffle the list the instant a user
 //   taps a row. This adapter deliberately does NOT reorder (a consumer is
-//   entitled to the host's own order); `number` is carried so the drawer
-//   can sort, and `shortcuts_drawer_workspaces_test.dart` is where that
-//   stable order is enforced.
+//   entitled to the host's own order); `number` is carried so a consumer
+//   can sort. The drawer that did that sorting is retired, so no consumer
+//   enforces a stable order today — `number` is carried for the next one.
 //
 // READ OUT OF THE BINARY, NOT FROM A LIVE INVOCATION: the focus
 // not-found code is `tab_not_found`, found in herdr 0.8.2's string table

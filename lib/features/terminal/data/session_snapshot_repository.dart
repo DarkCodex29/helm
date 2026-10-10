@@ -7,11 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Resolves [TabSnapshot.sessionRef] from a persisted JSON map, falling
 /// back to the legacy `tmuxSessionName` key when the neutral key is
 /// absent or null (spec.md: session-reference-storage). Same precedence
-/// rule as `ConnectionProfile._readSessionRef` and
-/// `ProjectShortcut._readSessionRef`, but written as a plain hand-written
-/// function rather than a `@JsonKey(readValue:)` callback — [TabSnapshot]
-/// has no freezed/json_serializable codegen at all, so none of the
-/// codegen constraints those two models work around apply here.
+/// rule as other persisted models with a session override field, but
+/// written as a plain hand-written function rather than a
+/// `@JsonKey(readValue:)` callback — [TabSnapshot] has no
+/// freezed/json_serializable codegen at all, so none of the codegen
+/// constraints those models work around apply here.
 ///
 /// - Only `tmuxSessionName` present → its value is returned (Requirement:
 ///   Legacy Field Still Readable).
@@ -19,12 +19,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - Both present → `sessionRef`'s own value wins, unconditionally
 ///   (Requirement: Neutral Field Takes Precedence When Both Are Present).
 /// - Neither present → `null`; never invented. Note: since
-///   [TabSnapshot.tmuxSessionName] is a required, non-nullable field
-///   (matching [ProjectShortcut.tmuxSession]'s nullability, not
-///   [ConnectionProfile.tmuxSession]'s), a record missing the
-///   `tmuxSessionName` key entirely already fails to load before this
-///   function ever runs — that is pre-existing behavior, unchanged by
-///   this migration.
+///   [TabSnapshot.tmuxSessionName] is a required, non-nullable field, a
+///   record missing the `tmuxSessionName` key entirely already fails to
+///   load before this function ever runs — that is pre-existing
+///   behavior, unchanged by this migration.
 String? _readSessionRef(Map<String, dynamic> json) {
   final neutral = json['sessionRef'] as String?;
   if (neutral != null) return neutral;

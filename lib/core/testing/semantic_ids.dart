@@ -40,9 +40,6 @@ class SetupSemantics {
 class HomeSemantics {
   const HomeSemantics._();
 
-  /// The hamburger that opens the shortcuts drawer.
-  static const drawerButton = 'helm.home.drawer_button';
-
   /// The AppBar `+` action, only present while there are no tabs.
   static const appBarNewSessionButton = 'helm.home.app_bar_new_session_button';
 
@@ -54,51 +51,10 @@ class HomeSemantics {
   /// The large call to action in the empty state.
   static const newSessionButton = 'helm.home.new_session_button';
 
-  /// The Settings item inside [appBarOverflowButton]'s menu.
-  ///
-  /// Reuses the EXACT string [ShortcutsSemantics.settingsButton] carried
-  /// before Settings moved into the drawer footer. That is deliberate,
-  /// not a collision: this is a SECOND, additive route to `/settings`,
-  /// restored here because the drawer's footer is the only reachable one
-  /// and a later task removes the drawer. Both ids coexist until that
-  /// happens, each naming the control it currently sits on.
+  /// The Settings item inside [appBarOverflowButton]'s menu. The only
+  /// route to `/settings` now that the drawer that used to carry a
+  /// Settings row has been retired.
   static const settingsButton = 'helm.home.settings_button';
-}
-
-/// Identifiers on `ShortcutsDrawer`.
-class ShortcutsSemantics {
-  const ShortcutsSemantics._();
-
-  /// The drawer root. Assertions must use this rather than the section
-  /// header text: the hamburger's tooltip is "Projects", which Flutter
-  /// publishes as a content-description, and Maestro matches text
-  /// case-insensitively against the full string. A text assertion for
-  /// "PROJECTS" therefore also matches the button on Home and can never
-  /// report the drawer as closed.
-  static const drawer = 'helm.shortcuts.drawer';
-
-  /// The Settings row pinned to the bottom of the drawer. This is the
-  /// only persistent route to `/settings`, so the E2E suite guards it.
-  ///
-  /// It was `helm.home.settings_button` while the control lived on
-  /// Home's AppBar. The id MOVED WITH THE WIDGET rather than being kept
-  /// stable for the flows' convenience: an identifier naming a surface
-  /// its widget no longer sits on costs nothing to leave behind and a
-  /// whole debugging session to discover.
-  static const settingsButton = 'helm.shortcuts.settings_button';
-
-  /// The AGENTS section body. Wraps the agent list AND every one of its
-  /// "nothing to show" states, so an E2E flow can assert on the honest
-  /// explanation (unsupported / unreachable / genuinely none) rather than
-  /// on the absence of rows, which all three would otherwise look like.
-  static const agentsSection = 'helm.shortcuts.agents_section';
-
-  /// One tappable workspace header inside the WORKSPACES tree, addressed
-  /// by the host's own workspace id rather than by label — the pattern
-  /// [ProfileEditSemantics.fontSizeOption] already follows, for the same
-  /// reason: two clients can share a label, but never an id.
-  static String workspaceHeaderButton(String workspaceId) =>
-      'helm.shortcuts.workspace_header_button_$workspaceId';
 }
 
 /// Identifiers on `HelmTerminalView`.
@@ -162,8 +118,8 @@ class FilesSemantics {
 
   /// The entry list AND every one of its "nothing to show" states.
   ///
-  /// One identifier over all of them on purpose, mirroring
-  /// [ShortcutsSemantics.agentsSection]: a flow asserts on the honest
+  /// One identifier over all of them on purpose, mirroring the pattern
+  /// [TrustedHostsSemantics.listing] follows: a flow asserts on the honest
   /// explanation inside it — empty, refused, or gone — rather than on the
   /// absence of rows, which all three would otherwise look like.
   static const listing = 'helm.files.listing';
@@ -300,8 +256,8 @@ class SettingsSemantics {
   static const addProfileButton = 'helm.settings.add_profile_button';
 
   /// The row that opens `TrustedHostsScreen`. The only entry point to that
-  /// screen, so the E2E suite can guard it the same way
-  /// [ShortcutsSemantics.settingsButton] guards `/settings` itself.
+  /// screen, so the E2E suite guards it the same way [HomeSemantics]
+  /// guards `/settings` itself.
   static const trustedHostsButton = 'helm.settings.trusted_hosts_button';
 }
 
@@ -311,8 +267,8 @@ class TrustedHostsSemantics {
 
   /// The list AND every one of its "nothing to show" states — empty,
   /// loading, and a storage read that failed. One identifier over all of
-  /// them, mirroring [ShortcutsSemantics.agentsSection] and
-  /// [FilesSemantics.listing]: a flow asserts on what the screen SAYS
+  /// them, mirroring [FilesSemantics.listing]: a flow asserts on what the
+  /// screen SAYS
   /// (no trusted hosts vs. could not read them), never on the mere
   /// presence of rows, which an empty list and a failed read would
   /// otherwise look identical to.
@@ -320,9 +276,9 @@ class TrustedHostsSemantics {
 
   /// The action that forgets one pinned host, addressed by the exact
   /// identity it would remove rather than by position — the same pattern
-  /// [ShortcutsSemantics.workspaceHeaderButton] follows, for the same
-  /// reason: two rows can share a host name across different ports or key
-  /// types, but never an identity.
+  /// [FilesSemantics.entryMenuButton] follows, for the same reason: two
+  /// rows can share a host name across different ports or key types, but
+  /// never an identity.
   static String forgetButton(String host, int port, String? keyType) =>
       'helm.trusted_hosts.forget_button_${host}_${port}_${keyType ?? 'legacy'}';
 
