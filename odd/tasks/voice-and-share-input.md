@@ -72,7 +72,7 @@ be worse, so this is an optimistic bound, not the average case.
 
 ## Tasks
 
-- [ ] 1. A seam that types text at the remote prompt, without sending it
+- [x] 1. A seam that types text at the remote prompt, without sending it
   - Surfaces: `lib/features/terminal/data/terminal_session.dart`,
     `test/features/terminal/data/**`
   - Measured correction to this plan, made before writing code: **there is no
@@ -94,7 +94,7 @@ be worse, so this is an optimistic bound, not the average case.
     foreground the text goes to that program. Same behaviour as typing, so it
     surprises nobody, but it is worth stating.
   - Test first.
-  - Commit: pending
+  - Commit: e0a8873
 
 - [ ] 2. Receive shared text from any app
   - Surfaces: `android/app/src/main/AndroidManifest.xml`,
@@ -148,3 +148,41 @@ on the phone, so the trigger stays explicit rather than a poll.
   mangles the technical vocabulary that is the whole use case; the measurement
   above is the argument.
 - Streaming or continuous dictation. Push-to-talk on bounded clips first.
+
+## Task 2 follow-up: `connected` is not `ready`
+
+Device validation split the feature in two, and only measurement could have
+told them apart.
+
+The WARM path works, confirmed on the S22: a share arriving while helm is open
+landed as `▎ echo HELM_HOT_d5f8` inside the pi agent's input box — typed,
+un-executed, exactly as designed.
+
+The COLD path did not. Every piece of plumbing reported success — Kotlin
+captured the intent, the pending buffer held it across 2.9s, the write was
+issued — and the text reached no pane at all. helm was writing 2ms before
+`Session connected`, while herdr was still attaching and repainting, and a
+full-screen TUI discards input in that window.
+
+Fixed with `TerminalSession.waitForOutputToSettle`: a 500ms quiet window with
+a 5s cap, armed lazily so the dozens of tests that connect without sharing pay
+no Timer for it.
+
+Two defects found while finishing it, both worth keeping:
+
+1. `_armOutputSettleTracking()` ran AFTER `statusNotifier.value = connected`.
+   A `ValueNotifier` runs its listeners synchronously, so the share listener
+   asked whether output had settled one line before the answer existed, took
+   the "nothing to wait for" early return, and reintroduced the exact defect
+   the tracking exists to fix. The order is now load-bearing and says so.
+2. Four of the five tests asserted only the end state and passed throughout.
+   Only the one asserting the intermediate state caught it. See
+   `odd/notes/measurement-traps.md`.
+
+- [x] 2. Receive `ACTION_SEND` + `text/plain`
+  - Warm path verified on device; cold path fixed and green in the suite.
+  - Commit: pending
+  - **Owed: re-run the cold start on the S22.** The cable dropped four times
+    this session and the last attempt died in `- waiting for device -`. The
+    phone found this defect once with the suite green, so its verdict is the
+    one that closes this task — not the 1517 passing tests.

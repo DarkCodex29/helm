@@ -10,7 +10,11 @@
 // the host as much as what does: no newline ever appended, nothing written
 // at all while disconnected, and a multi-line share flattened to one line
 // rather than silently executing every line but the last.
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:dartssh2/dartssh2.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/features/connection/data/ssh_service.dart';
@@ -73,6 +77,53 @@ Future<({TerminalSession session, FakeSSHSession remote})> _session({
 
 String _decode(FakeSSHSession remote) =>
     remote.writes.map((bytes) => String.fromCharCodes(bytes)).join();
+
+/// Builds an unconnected session/remote pair for a test that needs
+/// [FakeSSHSession.emitStdout] to reset [waitForOutputToSettle]'s quiet
+/// window under [FakeAsync].
+///
+/// A stream listener's callback runs in the ZONE it was registered in, not
+/// the zone that is current when the event later fires. `_bridgeIO`
+/// subscribes to `remote.stdout` inside `connect()`, so if `connect()` runs
+/// in the ordinary (real) zone — as [_session] above does — the Timer that
+/// `_noteOutputActivity` later arms from inside that subscription's
+/// callback binds to the REAL clock even when the rest of the test runs
+/// inside [FakeAsync], and [FakeAsync.elapse] can never make it fire.
+/// Building the session here and connecting it with [_connectWithin],
+/// INSIDE the same `FakeAsync.run`, is what keeps every Timer `_bridgeIO`
+/// installs on the one virtual clock the test controls.
+({TerminalSession session, FakeSSHSession remote}) _unconnectedSession({
+  required MultiplexerAdapter adapter,
+}) {
+  final service = FakeSSHService();
+  final remote = FakeSSHSession();
+  final session = TerminalSession(
+    profile: _profile,
+    sshService: service,
+    tmuxSessionName: 'helm-0',
+    terminal: _SilentTerminal(),
+    muxAdapter: adapter,
+    hostRunnerFactory: (_) => FakeHostCommandRunner(),
+    attachOpener: (client, command, pty) async => remote,
+  );
+  service.queueConnectSuccess(
+    SSHConnectionResult(
+      client: _buildFakeClient(),
+      session: FakeSSHSession(),
+    ),
+  );
+  return (session: session, remote: remote);
+}
+
+/// Drives [session.connect] to completion from inside an already-running
+/// [FakeAsync] zone, via [FakeAsync.flushMicrotasks] rather than `await` —
+/// see [_unconnectedSession]'s doc comment for why `connect()` must run
+/// inside the zone rather than before it.
+void _connectWithin(FakeAsync async, TerminalSession session) {
+  unawaited(session.connect('key'));
+  async.flushMicrotasks();
+  expect(session.status, ConnectionStatus.connected);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -160,5 +211,152 @@ void main() {
 
       await result.session.dispose();
     });
+  });
+
+  // waitForOutputToSettle is the primitive the cold-start share defect
+  // fix is built on. The device trace that exposed the defect (S22, Android
+  // share sheet) showed `typeAtPrompt` firing 2ms before "Session connected"
+  // while herdr was still attaching and repainting — text sent into that
+  // window reached NOWHERE, confirmed by scanning every herdr pane with a
+  // verified-working instrument. The fix is to hold delivery until the
+  // remote has gone quiet, which is exactly what this resolves.
+  group('waitForOutputToSettle - the window a freshly-attached remote needs', () {
+    test(
+      'resolves once the remote has been silent for '
+      'kOutputSettleQuietWindow',
+      () async {
+        final built = _unconnectedSession(adapter: FakeAgentAdapter());
+
+        FakeAsync().run((async) {
+          _connectWithin(async, built.session);
+
+          var settled = false;
+          unawaited(
+            built.session.waitForOutputToSettle().then((_) => settled = true),
+          );
+
+          async.elapse(
+            kOutputSettleQuietWindow - const Duration(milliseconds: 1),
+          );
+          async.flushMicrotasks();
+          expect(
+            settled,
+            isFalse,
+            reason: 'must not resolve before the quiet window elapses',
+          );
+
+          async.elapse(const Duration(milliseconds: 1));
+          async.flushMicrotasks();
+          expect(settled, isTrue);
+        });
+
+        await built.session.dispose();
+      },
+    );
+
+    test(
+      'output arriving during the quiet window resets it, deferring '
+      'delivery',
+      () async {
+        final built = _unconnectedSession(adapter: FakeAgentAdapter());
+
+        FakeAsync().run((async) {
+          _connectWithin(async, built.session);
+
+          var settled = false;
+          unawaited(
+            built.session.waitForOutputToSettle().then((_) => settled = true),
+          );
+
+          // Just shy of the original deadline, the attach repaints again.
+          async.elapse(
+            kOutputSettleQuietWindow - const Duration(milliseconds: 50),
+          );
+          built.remote.emitStdout(Uint8List.fromList('repaint'.codeUnits));
+          async.flushMicrotasks();
+
+          // The ORIGINAL deadline passing must change nothing: the window
+          // restarted from the repaint above.
+          async.elapse(const Duration(milliseconds: 60));
+          async.flushMicrotasks();
+          expect(
+            settled,
+            isFalse,
+            reason: 'new output must have reset the quiet window',
+          );
+
+          async.elapse(kOutputSettleQuietWindow);
+          async.flushMicrotasks();
+          expect(settled, isTrue);
+        });
+
+        await built.session.dispose();
+      },
+    );
+
+    test(
+      'a remote that never goes quiet is still delivered once '
+      'kOutputSettleCap elapses',
+      () async {
+        final built = _unconnectedSession(adapter: FakeAgentAdapter());
+
+        FakeAsync().run((async) {
+          _connectWithin(async, built.session);
+
+          var settled = false;
+          unawaited(
+            built.session.waitForOutputToSettle().then((_) => settled = true),
+          );
+
+          // Pings faster than the quiet window, continuously, so it can
+          // never settle on its own — only the cap can end this wait.
+          const pingInterval = Duration(milliseconds: 100);
+          final ticks =
+              (kOutputSettleCap.inMilliseconds / pingInterval.inMilliseconds)
+                  .ceil() +
+              2;
+          for (var i = 0; i < ticks; i++) {
+            async.elapse(pingInterval);
+            built.remote.emitStdout(Uint8List.fromList(const [0]));
+            async.flushMicrotasks();
+            if (i == ticks ~/ 2) {
+              expect(
+                settled,
+                isFalse,
+                reason: 'output is still arriving; the cap has not hit yet',
+              );
+            }
+          }
+
+          expect(
+            settled,
+            isTrue,
+            reason: 'the cap must fire even though output never stopped',
+          );
+        });
+
+        await built.session.dispose();
+      },
+    );
+
+    test(
+      'a disconnected session resolves immediately - nothing to settle',
+      () async {
+        final result = await _session(
+          adapter: FakeAgentAdapter(),
+          connect: false,
+        );
+
+        var settled = false;
+        unawaited(
+          result.session.waitForOutputToSettle().then((_) => settled = true),
+        );
+        await pumpEventQueue();
+
+        expect(settled, isTrue);
+
+        await result.session.dispose();
+      },
+    );
   });
 }

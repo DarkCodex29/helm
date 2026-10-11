@@ -56,12 +56,20 @@ class PlatformSharedTextReceiver implements SharedTextReceiver {
   Future<String?> takeInitialSharedText() async {
     try {
       final text = await _channel.invokeMethod<String>('takeInitialSharedText');
+      _log.i(
+        'Cold-start share asked: ${text == null ? 'none held' : '${text.length} chars'}',
+      );
       return _normalise(text);
     } on PlatformException catch (e) {
       _log.w('Could not read the cold-start share: ${e.code} ${e.message}');
       return null;
     } on MissingPluginException {
       // Every platform except Android, or a test with no handler wired.
+      // Logged rather than swallowed silently: on Android this means the
+      // native plugin never attached, which looks EXACTLY like "nobody
+      // shared anything" from Dart's side and cost a full device
+      // investigation to tell apart once already.
+      _log.w('No shared-text plugin answered takeInitialSharedText');
       return null;
     }
   }

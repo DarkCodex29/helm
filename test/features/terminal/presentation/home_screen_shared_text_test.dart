@@ -15,6 +15,7 @@
 // so `typeAtPrompt`'s underlying write lands directly on the fake SSH
 // session returned by `connect`).
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
@@ -192,7 +193,7 @@ void main() {
 
   testWidgets(
     'a share arriving with NO connected session (and no tab at all) is '
-    'delivered once a session appears and connects',
+    'delivered once a session appears, connects, AND settles',
     (tester) async {
       final tabs = _Tabs();
       final receiver = _FakeSharedTextReceiver();
@@ -218,28 +219,51 @@ void main() {
       await harness.connectNow();
       await tester.pump();
 
+      // `connected` alone must NOT be enough — this is the measured defect
+      // itself: herdr is still attaching/repainting at this instant, and
+      // typing into that window is exactly what reached nowhere on the
+      // S22 trace this fix is for.
+      expect(
+        harness.typed,
+        isEmpty,
+        reason: 'connected, but output has not settled yet',
+      );
+
+      // The quiet window elapsing with nothing to reset it is what
+      // delivers the share.
+      await tester.pump(kOutputSettleQuietWindow);
+
       expect(harness.typed, 'git status');
     },
   );
 
-  testWidgets('a share arriving with an already-connected session is delivered '
-      'immediately', (tester) async {
-    final harness = await _Harness.create();
-    addTearDown(harness.session.dispose);
-    await harness.connectNow();
+  testWidgets(
+    'a share arriving with an already-connected, already-idle session is '
+    'delivered without further delay - the warm path this fix must not '
+    'regress',
+    (tester) async {
+      final harness = await _Harness.create();
+      addTearDown(harness.session.dispose);
+      await harness.connectNow();
 
-    final tabs = _Tabs(initialSession: harness.session);
-    final receiver = _FakeSharedTextReceiver();
-    addTearDown(receiver.dispose);
+      final tabs = _Tabs(initialSession: harness.session);
+      final receiver = _FakeSharedTextReceiver();
+      addTearDown(receiver.dispose);
 
-    await tester.pumpWidget(_app(_router(), tabs, receiver));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(_app(_router(), tabs, receiver));
+      // Simulates a session that has already been sitting connected and
+      // idle for a while by the time its owner shares something — the
+      // ordinary warm-path case, not the cold-start race. Output settles
+      // once, here, well before the share below ever arrives.
+      await tester.pump(kOutputSettleQuietWindow);
+      await tester.pumpAndSettle();
 
-    receiver.push('echo hello');
-    await tester.pump();
+      receiver.push('echo hello');
+      await tester.pump();
 
-    expect(harness.typed, 'echo hello');
-  });
+      expect(harness.typed, 'echo hello');
+    },
+  );
 
   testWidgets(
     'a second share replaces a still-pending first one; only the second '
@@ -262,7 +286,7 @@ void main() {
       tabs.addSessionTab(harness.session);
       await tester.pump();
       await harness.connectNow();
-      await tester.pump();
+      await tester.pump(kOutputSettleQuietWindow);
 
       expect(harness.typed, 'second share');
       expect(harness.typed, isNot(contains('first share')));
@@ -288,7 +312,7 @@ void main() {
       tabs.addSessionTab(harness.session);
       await tester.pump();
       await harness.connectNow();
-      await tester.pump();
+      await tester.pump(kOutputSettleQuietWindow);
 
       expect(harness.typed, 'only once');
 
@@ -297,9 +321,48 @@ void main() {
       await harness.disconnectNow(tester);
       expect(harness.session.status, ConnectionStatus.disconnected);
       await harness.connectNow();
-      await tester.pump();
+      await tester.pump(kOutputSettleQuietWindow);
 
       expect(harness.typed, 'only once');
+    },
+  );
+
+  testWidgets(
+    'the cap fires - a remote that never goes quiet still gets the share '
+    'once kOutputSettleCap elapses',
+    (tester) async {
+      final tabs = _Tabs();
+      final receiver = _FakeSharedTextReceiver();
+      addTearDown(receiver.dispose);
+
+      await tester.pumpWidget(_app(_router(), tabs, receiver));
+      await tester.pumpAndSettle();
+
+      receiver.push('git status');
+      await tester.pump();
+
+      final harness = await _Harness.create();
+      addTearDown(harness.session.dispose);
+      tabs.addSessionTab(harness.session);
+      await tester.pump();
+      await harness.connectNow();
+
+      // Pings the terminal faster than the quiet window, continuously, so
+      // the remote can never go quiet on its own — only the cap can end
+      // the wait. kOutputSettleCap.inMilliseconds / 100 + a couple of
+      // extra ticks covers it with margin.
+      const pingInterval = Duration(milliseconds: 100);
+      final ticks =
+          (kOutputSettleCap.inMilliseconds / pingInterval.inMilliseconds)
+              .ceil() +
+          2;
+      for (var i = 0; i < ticks; i++) {
+        await tester.pump(pingInterval);
+        harness.fakeSshSession.emitStdout(Uint8List.fromList(const [0]));
+      }
+      await tester.pump();
+
+      expect(harness.typed, 'git status');
     },
   );
 }

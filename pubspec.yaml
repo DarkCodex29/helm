@@ -41,6 +41,12 @@ dependencies:
   # UUID generation
   uuid: ^4.5.1
 
+  # Readable "now" for the post-connect settle window in TerminalSession.
+  # A direct dependency rather than a transitive one because lib/ imports
+  # it: tests drive that window through fake_async, which only controls
+  # elapsed time for code that asks `clock` instead of DateTime.now().
+  clock: ^1.1.1
+
   # Ed25519 key generation (transitive via dartssh2, declared explicitly)
   pinenacl: ^0.6.0
 

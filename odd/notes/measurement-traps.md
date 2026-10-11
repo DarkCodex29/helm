@@ -136,3 +136,46 @@ Check `adb devices` before interpreting any zero.
 No agent can pass it, so any scenario needing an authenticated session needs
 the owner at the device. `maestro/agent_focus_honesty.yaml` documented this
 before it was rediscovered the hard way.
+
+## `adb shell` BLOCKS FOREVER when no device is attached
+
+Not an error, and not an empty result — it prints `- waiting for device -` and
+waits. Burned a full 1800s background timeout on a share validation that had
+already built the APK and was one command away from its answer.
+
+**Do instead:** gate every adb script on a check that exits rather than waits.
+
+```sh
+adb devices | grep -qw device || { echo "no device"; exit 1; }
+```
+
+The cable has now dropped FOUR times in one session, so treat this as
+mandatory in anything long-running, not as a nicety.
+
+## `herdr pane read --source visible --format text` returns EMPTY, exit 0
+
+A sweep of every pane reported "marker not found" while the instrument itself
+was producing nothing. That sweep would have reported the same thing had the
+feature been working perfectly, and it came within one step of being written
+up as a failure of the code under test.
+
+**Valid form:** `herdr pane read <pane_id> --lines N` — no `--source`, no
+`--format`.
+
+**The general rule, now paid for three times in one day** (truncated
+`Failing tests:`, unquoted `--include=*.dart`, and this): a tool returning
+empty is NOT saying "there is nothing". Before believing a negative result,
+run the instrument against a case known to be positive. If the control comes
+back empty too, the measurement never happened.
+
+## A test asserting only the END state cannot see a timing defect
+
+The cold-start share had five tests. Four asserted the outcome — "the text was
+typed" — and all four passed while the feature wrote into a remote that was
+still attaching and dropped it. Only the fifth, asserting the INTERMEDIATE
+state ("connected, but output has not settled, so nothing may have been typed
+YET"), could tell the difference.
+
+The device found this defect first, with the suite green. When behaviour
+depends on WHEN something happens, assert the moment it must not have happened
+yet, or the suite will happily agree with a broken implementation.

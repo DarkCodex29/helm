@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:helm/core/utils/logger.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
@@ -42,6 +43,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
+  static final _log = HelmLogger('HomeScreen');
+
   List<TabSnapshot>? _pendingRecovery;
   StreamSubscription<String>? _sharedTextSub;
 
@@ -213,19 +216,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   /// Delivers [_pendingSharedText] through [TerminalSession.typeAtPrompt]
-  /// the moment the active tab's session is connected, and clears it the
-  /// instant that succeeds — AT MOST ONCE per share. Until then, keeps a
-  /// listener on the active session's `statusNotifier` so a connect
-  /// completing later re-triggers this same check, and retargets that
-  /// listener whenever the active session itself changes (a tab appearing
-  /// for the first time, or the active tab switching).
+  /// once the active tab's session is connected AND its output has
+  /// settled, and clears it the instant that succeeds — AT MOST ONCE per
+  /// share. Until a session is connected, keeps a listener on the active
+  /// session's `statusNotifier` so a connect completing later re-triggers
+  /// this same check, and retargets that listener whenever the active
+  /// session itself changes (a tab appearing for the first time, or the
+  /// active tab switching).
+  ///
+  /// "Connected" is not "ready": a full-screen remote multiplexer (herdr)
+  /// is still attaching and repainting for a short window after
+  /// `statusNotifier` reports `connected`, and text typed into that window
+  /// reaches nowhere — measured on a real S22 cold-starting from the
+  /// Android share sheet. [TerminalSession.waitForOutputToSettle] is what
+  /// closes that gap; see its doc comment for the window and cap chosen
+  /// and why. [_deliveringShare] guards the wait this introduces against
+  /// re-entry.
   ///
   /// `statusNotifier` is a plain `ValueNotifier` here, not the
   /// `_ObservableValueNotifier` `TerminalSession.agentsNotifier` uses —
   /// attaching to it has no side effect to account for.
+  ///
+  /// True while a share is between "session just connected" and "text
+  /// actually typed", i.e. inside the await on
+  /// [TerminalSession.waitForOutputToSettle]. Guards re-entry: the
+  /// `statusNotifier` listener this method is attached through fires again
+  /// on ANY status change, not just the one that started the wait, and
+  /// [ref.listenManual]'s tabs callback can fire mid-wait too. Without this
+  /// guard either could start a second overlapping wait for the same share.
+  bool _deliveringShare = false;
+
   void _tryDeliverPendingShare() {
     final text = _pendingSharedText;
-    if (text == null) return;
+    if (text == null || _deliveringShare) return;
 
     final session = ref.read(tabsProvider).activeTab?.session;
     if (session != _pendingShareSession) {
@@ -234,11 +257,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _pendingShareSession = session;
     }
 
-    if (session != null && session.isConnected) {
-      session.typeAtPrompt(text);
-      _pendingSharedText = null;
-      _detachPendingShareListener();
+    if (session == null || !session.isConnected) {
+      _log.i(
+        'Share held: session ${session == null ? 'absent' : 'not connected'}',
+      );
+      return;
     }
+
+    // `connected` is the moment the SSH channel opened, not the moment a
+    // full-screen remote (herdr) has finished attaching and repainting.
+    // Measured on an S22: typing the instant `connected` fires lands the
+    // text nowhere, because the attach is still consuming terminal input.
+    // Waiting for output to settle first is the fix — see
+    // [TerminalSession.waitForOutputToSettle]'s doc comment. An
+    // already-idle session (the warm path) resolves that wait almost
+    // immediately, so this adds no observable delay there.
+    _deliveringShare = true;
+    unawaited(
+      session.waitForOutputToSettle().then((_) {
+        _deliveringShare = false;
+        if (!mounted) return;
+
+        // Re-validate against the state AT DELIVERY TIME, not the state
+        // that started the wait: the pending text may have been replaced
+        // by a second share, backgrounding may have cleared it, or the
+        // active tab/session may have changed while this was waiting.
+        if (_pendingSharedText != text || _pendingShareSession != session) {
+          return;
+        }
+        if (!session.isConnected) return;
+
+        _log.i('Typing a ${text.length}-char share at the prompt');
+        session.typeAtPrompt(text);
+        _pendingSharedText = null;
+        _detachPendingShareListener();
+      }),
+    );
   }
 
   /// Removes whatever [_pendingShareStatusListener] is currently attached
