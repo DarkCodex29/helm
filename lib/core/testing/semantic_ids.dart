@@ -27,6 +27,21 @@ library;
 class SetupSemantics {
   const SetupSemantics._();
 
+  /// The AppBar title. Plain Flutter `Text` never reaches the iOS
+  /// accessibility tree, so the Maestro flow needs this id to confirm the
+  /// screen is up at all on that platform; the Android-only text
+  /// assertion alongside it still guards the actual wording.
+  static const screenTitle = 'helm.setup.screen_title';
+
+  /// The "SSH Key" step header. Same reasoning as [screenTitle]: the
+  /// section title is a plain `Text` and needs an id to be addressable
+  /// on iOS.
+  static const sectionSshKey = 'helm.setup.section_ssh_key';
+
+  /// The "Connection Details" step header, mirroring [sectionSshKey].
+  static const sectionConnectionDetails =
+      'helm.setup.section_connection_details';
+
   static const publicKeyText = 'helm.setup.public_key_text';
   static const copyPublicKeyButton = 'helm.setup.copy_public_key_button';
   static const profileNameField = 'helm.setup.profile_name_field';
@@ -96,6 +111,16 @@ class TerminalSemantics {
   /// the wrong explanation was on screen.
   static const hostKeyTypeAuthorization =
       'helm.terminal.host_key_type_authorization';
+
+  /// The "Connection lost" status line inside [connectionStatusOverlay].
+  /// A plain `Text`, invisible to Maestro on iOS without this id — the
+  /// Android-only text assertion beside it in the flow still checks the
+  /// actual wording.
+  static const connectionLostText = 'helm.terminal.connection_lost_text';
+
+  /// The "Tap to reconnect" hint below [connectionLostText], same
+  /// reasoning.
+  static const tapToReconnectText = 'helm.terminal.tap_to_reconnect_text';
 }
 
 /// Identifiers on `FileBrowserSheet`.

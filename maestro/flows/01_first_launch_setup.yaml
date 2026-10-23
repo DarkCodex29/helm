@@ -17,8 +17,26 @@ env:
     clearState: true
 
 # ── Step 1: the SSH key section ─────────────────────────────────────────
-- assertVisible: "Setup"
-- assertVisible: "SSH Key"
+# The id proves the element is THERE on both platforms; the text proves
+# the COPY is right, and only Android can still see plain-Text copy —
+# measured: these titles never reach the iOS accessibility tree.
+# Dropping the text assertion entirely would silently stop guarding the
+# wording on the platform that can still check it.
+- assertVisible:
+    id: "helm.setup.screen_title"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "Setup"
+
+- assertVisible:
+    id: "helm.setup.section_ssh_key"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "SSH Key"
 
 # The key is generated asynchronously in initState, so wait for it rather
 # than asserting immediately.
@@ -34,7 +52,13 @@ env:
     id: "helm.setup.copy_public_key_button"
 
 # ── Step 2: the connection form ─────────────────────────────────────────
-- assertVisible: "Connection Details"
+- assertVisible:
+    id: "helm.setup.section_connection_details"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "Connection Details"
 - assertVisible:
     id: "helm.setup.profile_name_field"
 - assertVisible:
@@ -52,30 +76,38 @@ env:
     id: "helm.setup.profile_name_field"
 - eraseText
 - inputText: "${HELM_PROFILE_NAME}"
-- hideKeyboard
+- runFlow:
+    file: ../subflows/dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.host_field"
 - inputText: "${HELM_HOST}"
-- hideKeyboard
+- runFlow:
+    file: ../subflows/dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.port_field"
 - eraseText
 - inputText: "${HELM_PORT}"
-- hideKeyboard
+- runFlow:
+    file: ../subflows/dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.username_field"
 - inputText: "${HELM_USERNAME}"
-- hideKeyboard
+- runFlow:
+    file: ../subflows/dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.save_button"
 
 # ── We are on Home with a persisted profile ─────────────────────────────
+# Anchored on the empty state's BUTTON rather than on the words "No
+# active sessions" above it, matching `reach_home.yaml`: plain Flutter
+# `Text` widgets never reach the iOS accessibility tree.
 - extendedWaitUntil:
-    visible: "No active sessions"
+    visible:
+      id: "helm.home.new_session_button"
     timeout: 15000
 # The overflow button, not the hamburger that used to sit here: the
 # shortcuts drawer was retired once herdr's own sidebar was confirmed to

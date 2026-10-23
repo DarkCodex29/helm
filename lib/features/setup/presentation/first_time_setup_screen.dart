@@ -111,7 +111,12 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Setup')),
+      appBar: AppBar(
+        title: Semantics(
+          identifier: SetupSemantics.screenTitle,
+          child: const Text('Setup'),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -121,6 +126,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
               _StepHeader(
                 step: 1,
                 title: 'SSH Key',
+                titleSemanticId: SetupSemantics.sectionSshKey,
                 subtitle:
                     'Helm uses a passwordless Ed25519 key to connect to your '
                     'server. Copy the public key below and add it to the '
@@ -158,6 +164,7 @@ class _FirstTimeSetupScreenState extends ConsumerState<FirstTimeSetupScreen> {
               _StepHeader(
                 step: 2,
                 title: 'Connection Details',
+                titleSemanticId: SetupSemantics.sectionConnectionDetails,
                 subtitle: 'Enter the details to connect to your server.',
               ),
               const SizedBox(height: 16),
@@ -246,11 +253,19 @@ class _StepHeader extends StatelessWidget {
   const _StepHeader({
     required this.step,
     required this.title,
+    required this.titleSemanticId,
     required this.subtitle,
   });
 
   final int step;
   final String title;
+
+  /// Lets the Maestro suite address this header on iOS, where plain
+  /// `Text` never reaches the accessibility tree. Required rather than
+  /// optional because both call sites in [FirstTimeSetupScreen] need one,
+  /// and a silently-absent id would be the kind of gap this file exists
+  /// to prevent.
+  final String titleSemanticId;
   final String subtitle;
 
   @override
@@ -279,7 +294,10 @@ class _StepHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Text(title, style: theme.textTheme.titleMedium),
+            Semantics(
+              identifier: titleSemanticId,
+              child: Text(title, style: theme.textTheme.titleMedium),
+            ),
           ],
         ),
         const SizedBox(height: 8),
