@@ -29,5 +29,13 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+
+    // Hand-written, same as `SessionHoldPlugin.kt` on Android — see
+    // `DocumentPickerPlugin.swift` for why this is not a pub package.
+    if let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "DocumentPickerPlugin")
+    {
+      DocumentPickerPlugin.register(with: registrar)
+    }
   }
 }

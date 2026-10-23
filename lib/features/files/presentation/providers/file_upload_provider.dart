@@ -1,16 +1,29 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/files/data/document_tree_gateway.dart';
+import 'package:helm/features/files/data/ios_document_tree_gateway.dart';
 import 'package:helm/features/files/data/saf_upload_source.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/files/domain/upload_outcome.dart';
 
-/// The live picker is replaceable in tests because SAF uses a platform channel.
+/// The live picker is replaceable in tests because both gateways use a
+/// platform channel.
+///
+/// The Android/iOS choice is made HERE, in one place, and nowhere else —
+/// the same discipline `DownloadDestinationService.supportsFolderChoice`
+/// documents for its own constructor parameter. A second `Platform.isIOS`
+/// anywhere downstream would be a second source of truth this provider
+/// could silently disagree with.
 final uploadSourcePickerProvider = Provider<UploadSourcePicker>(
-  (_) => UploadSourcePicker(gateway: SafDocumentTreeGateway()),
+  (_) => UploadSourcePicker(
+    gateway: Platform.isIOS
+        ? IosDocumentTreeGateway()
+        : SafDocumentTreeGateway(),
+  ),
 );
 
 /// Each item is pending, moving bytes, or in one of the service's four

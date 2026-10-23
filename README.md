@@ -49,11 +49,18 @@ para atenderlos desde cualquier lado.
   para `foto(3).jpg`, las alternativas van de `foto(4).jpg` a `foto(102).jpg`.
   Cambia el rango, no la cantidad; si se agotan, se rechaza la subida: elegí otro nombre
 
-**La subida y el selector de galería son solo para Android.** Storage Access Framework
-no tiene contraparte en iOS; donde no se puede subir, la app no muestra el control.
-El Photo Picker nativo requiere Android 13 o posterior, abre la galería real y no pide
-permiso de almacenamiento. En versiones anteriores se usa el selector de documentos
-filtrado a imágenes y videos: funciona, pero no tiene la misma interfaz de galería.
+**La subida y el selector de galería funcionan en Android e iOS.** Cada plataforma usa
+su propio selector nativo, detrás de la misma interfaz: Android va por Storage Access
+Framework, e iOS por `UIDocumentPickerViewController` con `asCopy: true`, que devuelve
+una copia ya dentro del contenedor de la app y así evita el manejo de URLs con alcance
+de seguridad. Donde no hay ninguno de los dos, la app no muestra el control: un botón
+que siempre falla es peor que ningún botón.
+
+En Android, el Photo Picker nativo requiere Android 13 o posterior, abre la galería real
+y no pide permiso de almacenamiento. En versiones anteriores se usa el selector de
+documentos filtrado a imágenes y videos: funciona, pero no tiene la misma interfaz de
+galería. En iOS la galería usa `PHPickerViewController`, que corre fuera del proceso de
+la app y por eso tampoco pide permiso de fototeca.
 
 La búsqueda de nombre comprueba el destino antes de publicar, pero no es una garantía
 atómica contra sobrescrituras: otro proceso puede ocuparlo entre la comprobación y el
