@@ -232,11 +232,21 @@ Poné ahí el nombre de la sesión a la que querés engancharte — casi
 siempre **`default`** — y la app entra a la tuya, con tus workspaces,
 tus tabs y el estado real de tus agentes.
 
-Para limpiar las sesiones huérfanas que hayan quedado:
+Para limpiar las sesiones huérfanas que hayan quedado hacen falta **dos**
+comandos: `delete` solo acepta una sesión ya detenida.
 
 ```bash
 herdr session list                 # ver cuáles sobran
-herdr session kill <nombre>        # una por una
+herdr session stop <nombre>
+herdr session delete <nombre>
+```
+
+O todas las `helm-*` de una vez, sin tocar `default`:
+
+```bash
+for s in $(herdr session list | awk '$1 ~ /^helm-/ {print $1}'); do
+  herdr session stop "$s" && herdr session delete "$s"
+done
 ```
 
 ### Set as default profile, o no hay reconexión automática
