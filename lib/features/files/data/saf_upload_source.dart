@@ -38,17 +38,23 @@ class SafUploadSource implements UploadSource {
 /// button's build site, where only the branch the test host happens to run
 /// on would ever execute.
 ///
-/// SAF \u2014 and therefore picking a file to upload \u2014 is Android only. iOS
-/// gets NO upload control at all rather than one with a single, permanent
-/// outcome: a button that always fails is worse than no button, the same
-/// trade [SafDocumentTreeGateway]'s class comment makes for the gateway
-/// itself.
+/// Picking a file to upload is supported on Android, over
+/// [SafDocumentTreeGateway], and on iOS, over `IosDocumentTreeGateway`.
+/// Both implement [DocumentTreeGateway]'s [pickFile] and [pickMedia],
+/// which is the whole reason this class is generic over the interface
+/// rather than named after either platform — [SafUploadSource]'s own
+/// name is Android-flavoured history, not a constraint on what it can
+/// wrap. A platform with neither still gets NO upload control at all
+/// rather than one with a single, permanent outcome: a button that
+/// always fails is worse than no button, the same trade
+/// [SafDocumentTreeGateway]'s class comment makes for the gateway itself.
 class UploadSourcePicker {
   UploadSourcePicker({
     required DocumentTreeGateway gateway,
     bool? supportsPicking,
   }) : _gateway = gateway,
-       supportsPicking = supportsPicking ?? Platform.isAndroid;
+       supportsPicking =
+           supportsPicking ?? (Platform.isAndroid || Platform.isIOS);
 
   final DocumentTreeGateway _gateway;
 

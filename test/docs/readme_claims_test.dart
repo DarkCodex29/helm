@@ -242,16 +242,32 @@ void main() {
     }
   });
 
-  test('README Android-only upload and gallery share the production gate', () {
-    final platform = capture(
-      picker,
-      r'supportsPicking = supportsPicking \?\? Platform\.is(\w+);',
-    );
+  test('README upload and gallery platforms match the production gate', () {
+    // A SET of platform names, not one captured word, and the change is
+    // the point: this gate was single-platform until iOS got its own
+    // picker. A regex holding exactly one name would have had to be
+    // rewritten anyway, and — worse — would have gone on passing while
+    // the README advertised only one of the two platforms the code
+    // actually admits. Comparing sets fails loudly on that mismatch.
+    final gate = capture(picker, r'supportsPicking \?\?\s*\(([^;]*)\);');
+    final inCode = RegExp(
+      r'Platform\.is(\w+)',
+    ).allMatches(gate).map((match) => match.group(1)!.toLowerCase()).toSet();
+    expect(inCode, {'android', 'ios'});
+
     final documented = capture(
       readme,
-      r'La subida y el selector de galería son solo para (\w+)',
-    );
-    expect(documented.toLowerCase(), platform.toLowerCase());
+      r'La subida y el selector de galería funcionan en ([^.]+)\.',
+    ).toLowerCase();
+    for (final platform in inCode) {
+      expect(
+        documented,
+        contains(platform),
+        reason:
+            'README omits a platform the production gate admits: '
+            '$platform',
+      );
+    }
     for (final method in ['pick', 'pickMedia']) {
       expect(
         picker,
@@ -271,10 +287,14 @@ void main() {
         'lib/features/files/presentation/providers/file_upload_provider.dart',
       ),
     );
-    expect(
-      provider,
-      contains('UploadSourcePicker(gateway: SafDocumentTreeGateway())'),
-    );
+    // The gateway choice lives HERE and nowhere else. Asserting all three
+    // strings together is what makes a second platform check downstream
+    // visible: drop either gateway and this fails, and so does moving the
+    // decision out of the provider into a call site that could silently
+    // disagree with it.
+    expect(provider, contains('Platform.isIOS'));
+    expect(provider, contains('IosDocumentTreeGateway()'));
+    expect(provider, contains('SafDocumentTreeGateway()'));
   });
 
   test(

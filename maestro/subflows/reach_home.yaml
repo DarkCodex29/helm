@@ -9,6 +9,21 @@
 # Callers pass HELM_HOST / HELM_PORT / HELM_USERNAME / HELM_PROFILE_NAME
 # through `runFlow.env`. Defaults are deliberately unusable so a flow
 # that forgets to pass them cannot reach a real machine.
+#
+# ## On iOS, `clearState` IS NOT A CLEAN DEVICE
+#
+# This flow reaches Setup only while the app holds no SSH key:
+# `app_router.dart` starts at `/auth`, and `auth_redirect.dart` sends an
+# unlocked app to `/setup` ONLY when `hasSSHKey` is false. That key
+# lives in the Keychain, and on iOS the Keychain survives BOTH
+# `clearState` AND `xcrun simctl uninstall` — measured in that order,
+# each failing identically. A second run therefore lands on Home, and
+# every `helm.setup.*` lookup below then fails while saying nothing
+# about the real cause.
+#
+# Only `xcrun simctl erase` clears it, which is outside anything Maestro
+# can express. `maestro/run_ios.sh` does that before handing over, so on
+# iOS run the suite through that script rather than `maestro test`.
 appId: com.darkcodex.helm
 ---
 - launchApp:
@@ -28,27 +43,38 @@ appId: com.darkcodex.helm
     id: "helm.setup.profile_name_field"
 - eraseText
 - inputText: "${HELM_PROFILE_NAME}"
-- hideKeyboard
+- runFlow:
+    file: dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.host_field"
 - inputText: "${HELM_HOST}"
-- hideKeyboard
+- runFlow:
+    file: dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.port_field"
 - eraseText
 - inputText: "${HELM_PORT}"
-- hideKeyboard
+- runFlow:
+    file: dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.username_field"
 - inputText: "${HELM_USERNAME}"
-- hideKeyboard
+- runFlow:
+    file: dismiss_keyboard.yaml
 
 - tapOn:
     id: "helm.setup.save_button"
 
+# Anchored on the empty state's BUTTON rather than on the words "No
+# active sessions" above it, and that is portability, not taste: plain
+# Flutter `Text` widgets never reach the iOS accessibility tree.
+# Measured on this very screen — four strings rendered, zero of them in
+# the hierarchy dump, while every `helm.*` identifier resolved. A text
+# assertion here passes on Android and can only ever fail on iOS.
 - extendedWaitUntil:
-    visible: "No active sessions"
+    visible:
+      id: "helm.home.new_session_button"
     timeout: 15000

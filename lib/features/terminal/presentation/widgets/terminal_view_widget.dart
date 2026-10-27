@@ -341,12 +341,16 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                     ),
                                   ),
                                   const SizedBox(height: 16),
-                                  const Text(
-                                    'Connection lost',
-                                    style: TextStyle(
-                                      color: AppTheme.onBackground,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
+                                  Semantics(
+                                    identifier:
+                                        TerminalSemantics.connectionLostText,
+                                    child: const Text(
+                                      'Connection lost',
+                                      style: TextStyle(
+                                        color: AppTheme.onBackground,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
@@ -412,11 +416,15 @@ class _HelmTerminalViewState extends State<HelmTerminalView> {
                                     ),
                                   ),
                                   const SizedBox(height: 10),
-                                  const Text(
-                                    'Tap to reconnect',
-                                    style: TextStyle(
-                                      color: AppTheme.onSurfaceFaint,
-                                      fontSize: 13,
+                                  Semantics(
+                                    identifier:
+                                        TerminalSemantics.tapToReconnectText,
+                                    child: const Text(
+                                      'Tap to reconnect',
+                                      style: TextStyle(
+                                        color: AppTheme.onSurfaceFaint,
+                                        fontSize: 13,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 24),

@@ -1,0 +1,42 @@
+# Shared step: put the on-screen keyboard away, on either platform.
+#
+# `hideKeyboard` ALONE IS NOT PORTABLE, and that is measured rather than
+# assumed: on an iOS simulator it fails outright with "Couldn't hide the
+# keyboard. This can happen if the app uses a custom input or doesn't
+# expose a standard dismiss action", which is where this suite stopped
+# the first time it ran against iOS — five steps into `reach_home`, with
+# four `hideKeyboard` calls still ahead of it.
+#
+# `pressKey: Enter` is what works, and it was chosen by measurement
+# after two cheaper-looking ideas were tried and rejected:
+#
+#  * Tapping the keyboard's own `Done` key. It exists on the text
+#    keyboard, so it looked right — and it failed with "Element not
+#    found: Id matching regex: Done" the moment the flow reached the
+#    PORT field, which opens a numeric keypad that has no such key.
+#  * Tapping a static element, which is Maestro's own suggestion in the
+#    failure message. Two things kill it: plain Flutter `Text` widgets
+#    never reach the iOS accessibility tree (the Home screen renders
+#    four and the hierarchy dump contains none), and Flutter does not
+#    dismiss the keyboard for a tap outside a field unless the screen
+#    explicitly handles it. The tap would land and nothing would close.
+#
+# Verified on the simulator: with the keyboard up, `pressKey: Enter`
+# makes `helm.setup.save_button` — the one control the keyboard covers —
+# visible again.
+#
+# A subflow rather than four inlined copies, because the paragraph above
+# is the real content of this step and it needs to exist once.
+appId: com.darkcodex.helm
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - pressKey: Enter

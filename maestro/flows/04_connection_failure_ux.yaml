@@ -42,8 +42,25 @@ env:
     visible:
       id: "helm.terminal.reconnect_button"
     timeout: 60000
-- assertVisible: "Connection lost"
-- assertVisible: "Tap to reconnect"
+# The id proves the element is THERE on both platforms; the text proves
+# the COPY is right, and only Android can still see plain-Text copy —
+# both strings are plain `Text` that never reach the iOS accessibility
+# tree. Dropping the text assertion entirely would silently stop
+# guarding the wording on the platform that can still check it.
+- assertVisible:
+    id: "helm.terminal.connection_lost_text"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "Connection lost"
+- assertVisible:
+    id: "helm.terminal.tap_to_reconnect_text"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "Tap to reconnect"
 
 # ── Retrying is safe: it must not crash the app ─────────────────────────
 - tapOn:
