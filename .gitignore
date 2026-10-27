@@ -78,3 +78,6 @@ ios/Runner/GoogleService-Info.plist
 !.env.example
 *service-account*.json
 *serviceaccount*.json
+
+# maestro-runner writes its HTML/JSON reports here
+reports/

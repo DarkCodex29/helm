@@ -1,31 +1,47 @@
-# Relaunches the app and proves the session actually attached, rather
-# than trusting that provisioning "looked fine".
+# Proves the session actually attached, rather than trusting that
+# provisioning "looked fine".
 #
 # Not a test in the suite sense, but unlike the other two files here it
 # does assert: it is the only step that can tell a working install from
 # one that merely finished without an error.
 #
+# ## Why it asserts the KEYBOARD TOGGLE and not the absence of the overlay
+#
+# An earlier version waited for `connection_status_overlay` to become
+# notVisible. That passed on a device that had never connected at all:
+# with no session open the app shows its empty state, where the overlay
+# does not exist either. The flow reported PASS while Home still read
+# "No active sessions" — measured on a real iPhone.
+#
+# Absence of a failure is not evidence of success. `keyboard_toggle` is
+# the positive signal: it belongs to the terminal surface, so it exists
+# only once a session is actually open. The overlay check then stays, so
+# an open-but-failing tab still fails.
+#
 # ## Why a relaunch and not a Reconnect tap
 #
-# Measured: a tab keeps the profile snapshot it was opened with. The tab
-# created during setup predates the key being authorized, and tapping
-# Reconnect retries with that stale state forever. Only a relaunch makes
-# auto-connect read the saved profile again.
+# Measured: a tab keeps the profile snapshot it was opened with. A tab
+# created before the key was authorized retries with that stale state
+# forever. Only a relaunch makes auto-connect read the saved profile
+# again — and only for a profile marked as default.
 appId: com.darkcodex.helm
 ---
 # No clearState: it would discard the key that was just authorized and
 # send the app back to Setup.
 - launchApp
 
-# Connecting means the failure overlay goes away and stays away. Waiting
-# for it to disappear is the assertion: on a host that rejects the key it
-# never does, and this fails with the overlay still on screen.
+# A terminal surface exists at all. The empty state has no keyboard
+# toggle, so a device that never connected fails here instead of passing
+# by accident.
 - extendedWaitUntil:
-    notVisible:
-      id: "helm.terminal.connection_status_overlay"
+    visible:
+      id: "helm.terminal.keyboard_toggle"
     timeout: 30000
 
-# The app bar proves we are on Home with a live tab rather than on some
-# other screen that merely lacks the overlay.
+# And that session is not sitting on the failure overlay.
+- assertNotVisible:
+    id: "helm.terminal.connection_status_overlay"
+
+# The app bar proves we are on Home rather than on some other screen.
 - assertVisible:
     id: "helm.home.app_bar_overflow_button"

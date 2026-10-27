@@ -254,19 +254,11 @@ tenías guardadas, es por ahí.
 
 ---
 
-## En un iPhone físico no hay automatización
+## Automatizar un iPhone físico
 
-Maestro solo sirve en simulador, y el límite es de Apple, no nuestro.
-
-Para manejar un dispositivo real, Maestro compila y firma su propio
-driver de UITest. El comando está oculto del `--help`:
-
-```bash
-maestro driver-setup --apple-team-id <TEAM> \
-  --destination "platform=iOS,id=<udid>"
-```
-
-Con el Team ID correcto igual falla:
+**Maestro solo sirve en simulador.** Para un dispositivo real compila y
+firma su propio driver de UITest, y falla al registrar un identificador
+que pertenece a **mobile.dev**:
 
 ```text
 Failed Registering Bundle Identifier: The app identifier
@@ -274,13 +266,33 @@ Failed Registering Bundle Identifier: The app identifier
 development team because it is not available.
 ```
 
-Ese identificador es de **mobile.dev**. Ninguna otra cuenta puede
-registrarlo, ni gratuita ni de pago.
+Ninguna otra cuenta puede registrarlo, ni gratuita ni de pago, y Maestro
+no expone forma de cambiarlo.
 
-**Consecuencia práctica**: en un teléfono, la app se instala por comando
-pero se configura a mano, siguiendo
-[`SETUP_GUIDE.md`](SETUP_GUIDE.md). Lo que sí se automatiza es el host
-entero y, en simulador, la configuración completa.
+**`maestro-runner` de DeviceLab sí funciona**, y corre los mismos YAML:
+
+```bash
+curl -fsSL https://open.devicelab.dev/install/maestro-runner | bash
+
+export DEVICELAB_IOS_AGENT_BUNDLE_ID=com.tunombre.devicelab.agent
+maestro-runner --platform ios --team-id <TEAM_ID> \
+  --device <udid> test <flow.yaml>
+```
+
+Esa variable **no es opcional** con una cuenta personal de Apple: sin
+ella falla igual que Maestro, con la diferencia de que el error te dice
+qué variable poner. Verificado contra un iPhone 16 con iOS 26.7.1.
+
+Es **software de terceros**, no de mobile.dev. Se instala aislado en
+`$HOME/.maestro-runner`, sin `sudo`, verifica checksum SHA-256 y no toca
+tu instalación de Maestro.
+
+> Escribe reportes en `reports/` dentro del directorio desde el que lo
+> corras. Ese directorio está en `.gitignore`.
+
+**Consecuencia práctica**: el host se automatiza entero, el simulador
+también, y un teléfono físico se automatiza con `maestro-runner`
+siguiendo [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
 
 ```bash
 flutter build ios --release        # firmado, requiere certificado vigente

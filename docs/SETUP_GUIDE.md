@@ -8,12 +8,12 @@ sobre la Mac, no sobre la app.
 
 Hay dos caminos y terminan en el mismo lugar.
 
-- **[Automático](#automático-simulador-de-ios)** — un comando, **solo simulador**.
-- **[A mano](#a-mano-cualquier-dispositivo)** — cuatro pasos, y el **único** camino
-  en un teléfono real.
+- **[Automático](#automático-simulador-de-ios)** — un comando, solo simulador.
+- **[A mano](#a-mano-cualquier-dispositivo)** — cinco pasos, sirve en todos lados.
 
-> **En un iPhone físico no hay automatización posible**, y no es una decisión
-> nuestra: ver [Maestro no puede manejar un iPhone físico](#maestro-no-puede-manejar-un-iphone-físico).
+> En un iPhone físico, Maestro a secas **no sirve**, pero sí hay
+> automatización: ver
+> [Automatizar un iPhone físico](#automatizar-un-iphone-físico).
 
 El README cubre el resto del proyecto. Esta guía cubre solo poner la app
 a funcionar por primera vez.
@@ -208,6 +208,48 @@ No es opcional ni superstición: ver
 
 ---
 
+## Dos ajustes del perfil que casi nadie encuentra
+
+Se pueden pasar por alto sin que nada dé error, y los dos cambian el
+comportamiento de la app lo suficiente como para parecer defectos.
+
+### Session reference, o la app crea una sesión nueva cada vez
+
+Si dejás **Session reference (optional)** vacío, la app **crea una sesión
+de herdr nueva en cada conexión**. El síntoma es claro una vez que se
+sabe: entrás y ves `tab 1`, `no agents`, y ninguno de tus workspaces,
+mientras en la Mac se acumulan sesiones:
+
+```text
+$ herdr session list
+default          running
+helm-975e9b5a    running
+helm-a2b322bf    running
+helm-c7fc0e5d    running     <- una por cada conexión
+```
+
+Poné ahí el nombre de la sesión a la que querés engancharte — casi
+siempre **`default`** — y la app entra a la tuya, con tus workspaces,
+tus tabs y el estado real de tus agentes.
+
+Para limpiar las sesiones huérfanas que hayan quedado:
+
+```bash
+herdr session list                 # ver cuáles sobran
+herdr session kill <nombre>        # una por una
+```
+
+### Set as default profile, o no hay reconexión automática
+
+Un perfil creado con **+ Add profile** **no queda como default**. Sin
+eso, cada vez que abrís la app aterrizás en "No active sessions" y hay
+que tocar **New Session** a mano, y el paso 5 de esta guía no hace nada.
+
+Activalo en el perfil: **Set as default profile — Opens automatically on
+launch**.
+
+---
+
 ## Cuando no funciona
 
 ### "Authentication failed"
@@ -240,12 +282,12 @@ El paso 1 lo detecta el propio script: sondea el puerto 22 **en el
 nombre MagicDNS**, no en loopback, justamente porque loopback responde
 aunque Tailscale esté desconectado.
 
-### Conecta, pero a otra pestaña de la que venías usando
+### Conecta, pero no ves ninguno de tus workspaces
 
-Eso es herdr, no Helm. La app se engancha al **servidor** de herdr y
-entra como cliente nuevo, en la pestaña que ese cliente abra. Tus otras
-pestañas siguen estando: cambiá entre ellas desde el terminal, igual que
-en la Mac.
+Entrás y aparece `tab 1`, `no agents`, y nada de lo que tenías abierto.
+No es que la app no vea tu sesión: **creó una propia**. Falta llenar
+**Session reference** en el perfil, explicado arriba en
+[Session reference](#session-reference-o-la-app-crea-una-sesión-nueva-cada-vez).
 
 ### La app abre Home en vez de la pantalla de setup
 
@@ -284,19 +326,11 @@ guardado.
 
 Es una aspereza conocida, no un error de configuración.
 
-### Maestro no puede manejar un iPhone físico
+### Automatizar un iPhone físico
 
-Solo simulador. El límite no es de Helm ni es configurable.
-
-Maestro necesita compilar y firmar su propio driver de UITest contra tu
-equipo de desarrollo. El comando que lo hace está **oculto del `--help`**:
-
-```bash
-maestro driver-setup --apple-team-id <TEAM> \
-  --destination "platform=iOS,id=<udid>"
-```
-
-Y con el Team ID correcto igual falla:
+**Maestro a secas no puede.** Necesita compilar y firmar su propio driver
+de UITest contra tu equipo, y falla al registrar un identificador que no
+es tuyo:
 
 ```text
 Failed Registering Bundle Identifier: The app identifier
@@ -305,13 +339,45 @@ development team because it is not available.
 ```
 
 Ese identificador pertenece a **mobile.dev**. Ninguna otra cuenta puede
-registrarlo — ni gratuita ni de pago — y Maestro no expone forma de
-cambiarlo.
+registrarlo, ni gratuita ni de pago, y Maestro no expone forma de
+cambiarlo: el issue #2697 pide esa palanca y está cerrado sin
+implementar. El comando `maestro driver-setup --apple-team-id <TEAM>`
+existe, está oculto del `--help`, y falla igual.
 
-Por eso en un teléfono real el único camino es
-[a mano](#a-mano-cualquier-dispositivo), y por eso
-`provision_simulator.sh` se llama así: no existe un equivalente para
-hardware, y no es que falte escribirlo.
+**Sí funciona `maestro-runner`**, de DeviceLab. Corre los mismos YAML sin
+cambios y sí deja elegir el identificador del agente:
+
+```bash
+curl -fsSL https://open.devicelab.dev/install/maestro-runner | bash
+
+export DEVICELAB_IOS_AGENT_BUNDLE_ID=com.tunombre.devicelab.agent
+maestro-runner --platform ios --team-id <TEAM_ID> \
+  --device <udid> test maestro/provision/configure_profile.yaml
+```
+
+Verificado contra un iPhone 16 con iOS 26.7.1 y una cuenta personal de
+Apple.
+
+Tres cosas que conviene saber antes:
+
+- **`DEVICELAB_IOS_AGENT_BUNDLE_ID` no es opcional** con cuenta personal.
+  Sin esa variable falla igual que Maestro — aunque, a diferencia de
+  Maestro, el error te dice exactamente qué variable poner.
+- Se instala en `$HOME/.maestro-runner`, **sin `sudo`**, verifica
+  checksum SHA-256 y **no toca tu instalación de Maestro**.
+- Es **software de terceros**, no de mobile.dev.
+
+Su `hierarchy` usa otro formato que el de Maestro (`type`/`text`/`id` en
+vez de `attributes`), y `--compact` da una vista plana mucho más fácil de
+grepear:
+
+```bash
+maestro-runner --platform ios --device <udid> --team-id <TEAM> \
+  hierarchy --compact
+```
+
+`provision_simulator.sh` sigue siendo solo simulador, porque depende de
+`simctl erase` y eso no existe para hardware.
 
 ### Por qué los flows están escritos así
 
