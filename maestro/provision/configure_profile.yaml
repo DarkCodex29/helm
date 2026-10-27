@@ -1,0 +1,44 @@
+# Provisions a REAL install: generates the SSH key, fills the setup form
+# with a host the caller actually owns, and lands on Home.
+#
+# This is not a test. It asserts nothing beyond reaching Home, and it
+# writes state the caller is expected to keep. It lives outside
+# `maestro/flows/` for exactly the reason `maestro/subflows/` does:
+# `maestro/config.yaml` globs `flows/*.yaml`, so nothing here is ever
+# picked up by `maestro test maestro/`.
+#
+# ## It only works on a device with NO key yet
+#
+# `auth_redirect.dart` routes to `/setup` only while `hasSSHKey` is
+# false. On iOS that key survives `clearState` AND `simctl uninstall`;
+# only `simctl erase` clears it. On an already-configured device this
+# flow lands on Home and every `helm.setup.*` lookup fails. Use
+# `scripts/provision_device.sh`, which resolves that before calling in.
+#
+# ## Usage
+#
+#   maestro --device <udid> test \
+#     -e HELM_HOST=192.168.1.10 \
+#     -e HELM_PORT=22 \
+#     -e HELM_USERNAME=you \
+#     -e HELM_PROFILE_NAME="My Mac" \
+#     maestro/provision/configure_profile.yaml
+#
+# The values come from `scripts/host_setup_report.sh`, which reads them
+# off the host rather than asking anyone to guess.
+appId: com.darkcodex.helm
+env:
+  # Deliberately unusable, matching `reach_home.yaml`: a caller that
+  # forgets to pass real values must not reach a real machine.
+  HELM_HOST: "127.0.0.1"
+  HELM_PORT: "22"
+  HELM_USERNAME: "invalid-user"
+  HELM_PROFILE_NAME: "Unconfigured"
+---
+- runFlow:
+    file: ../subflows/reach_home.yaml
+    env:
+      HELM_HOST: "${HELM_HOST}"
+      HELM_PORT: "${HELM_PORT}"
+      HELM_USERNAME: "${HELM_USERNAME}"
+      HELM_PROFILE_NAME: "${HELM_PROFILE_NAME}"

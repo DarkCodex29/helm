@@ -1,0 +1,31 @@
+# Relaunches the app and proves the session actually attached, rather
+# than trusting that provisioning "looked fine".
+#
+# Not a test in the suite sense, but unlike the other two files here it
+# does assert: it is the only step that can tell a working install from
+# one that merely finished without an error.
+#
+# ## Why a relaunch and not a Reconnect tap
+#
+# Measured: a tab keeps the profile snapshot it was opened with. The tab
+# created during setup predates the key being authorized, and tapping
+# Reconnect retries with that stale state forever. Only a relaunch makes
+# auto-connect read the saved profile again.
+appId: com.darkcodex.helm
+---
+# No clearState: it would discard the key that was just authorized and
+# send the app back to Setup.
+- launchApp
+
+# Connecting means the failure overlay goes away and stays away. Waiting
+# for it to disappear is the assertion: on a host that rejects the key it
+# never does, and this fails with the overlay still on screen.
+- extendedWaitUntil:
+    notVisible:
+      id: "helm.terminal.connection_status_overlay"
+    timeout: 30000
+
+# The app bar proves we are on Home with a live tab rather than on some
+# other screen that merely lacks the overlay.
+- assertVisible:
+    id: "helm.home.app_bar_overflow_button"

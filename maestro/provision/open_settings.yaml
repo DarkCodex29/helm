@@ -1,0 +1,31 @@
+# Opens Settings on an already-configured app, so the caller can read the
+# generated SSH public key out of the accessibility tree.
+#
+# Not a test: it asserts only enough to fail loudly instead of leaving
+# the caller reading a hierarchy from the wrong screen. Lives outside
+# `maestro/flows/` so `maestro test maestro/` never runs it.
+#
+# ## Why `assertVisible` sits between the two taps
+#
+# Measured: tapping the overflow button and the Settings entry back to
+# back fails on iOS, because the menu is still animating when the second
+# tap lands. `assertVisible` makes Maestro wait for the entry instead.
+#
+# ## Why there is no `- back` anywhere in this repo's iOS flows
+#
+# Measured: `- back` does nothing on iOS and reports COMPLETED, leaving
+# the next step to fail on the wrong screen. The edge-swipe gesture is
+# the portable way out.
+appId: com.darkcodex.helm
+---
+# No clearState: this flow exists to inspect a configured install, and
+# clearing it would throw away the very key the caller came to read.
+- launchApp
+- tapOn:
+    id: "helm.home.app_bar_overflow_button"
+- assertVisible:
+    id: "helm.home.settings_button"
+- tapOn:
+    id: "helm.home.settings_button"
+- assertVisible:
+    id: "helm.settings.trusted_hosts_button"

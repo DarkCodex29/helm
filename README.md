@@ -153,6 +153,14 @@ android/app/src/main/kotlin/com/darkcodex/helm/
 
 ## Setup
 
+> Si es tu primera vez, [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) recorre
+> estos mismos pasos con los scripts que leen los valores de tu propia Mac, y
+> en un simulador de iOS los hace de corrido con un solo comando.
+>
+> Y si la Mac todavía no tiene herdr, Pi ni Tailscale,
+> [`docs/HOST_SETUP.md`](docs/HOST_SETUP.md) arma ese lado primero, con las
+> versiones exactas contra las que está verificado.
+
 1. Abrí Helm y autenticá con huella o Face ID
 2. La app genera una SSH key Ed25519 en memoria y la guarda con `flutter_secure_storage`
    (Keychain en iOS y almacenamiento seguro en Android)
