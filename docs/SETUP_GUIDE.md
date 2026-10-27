@@ -377,6 +377,14 @@ Tres cosas que conviene saber antes:
   checksum SHA-256 y **no toca tu instalación de Maestro**.
 - Es **software de terceros**, no de mobile.dev.
 
+**`longPressOn` no sirve en hardware iOS.** Medido: no emite el
+`pointerUp` que espera un widget construido sobre `Listener` en vez de un
+gesture recognizer, así que un press-and-hold queda colgado — el botón de
+dictado quedó grabando, con el punto naranja de iOS encendido, hasta que
+se mató la app. Con un dedo real funciona. Si un flow tuyo falla así,
+sospechá del driver antes que de la app. `tapOn`, `inputText` y
+`assertVisible` no dieron ningún problema.
+
 Su `hierarchy` usa otro formato que el de Maestro (`type`/`text`/`id` en
 vez de `attributes`), y `--compact` da una vista plana mucho más fácil de
 grepear:

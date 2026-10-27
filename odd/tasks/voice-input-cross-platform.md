@@ -206,6 +206,44 @@ Task 1 runs in parallel with task 2 because it is read-only and informs
 the UI, not the plumbing. Task 3 depends on task 2 having a recording to
 upload. Task 4 is last by construction.
 
+## Validación en hardware
+
+iPhone 16, iOS 26.7.1, build `--release` firmado, conectado a la Mac por
+Tailscale.
+
+**Funciona de punta a punta.** Mantener el botón, hablar y soltar graba,
+transcribe y escribe al prompt sin enviar.
+
+Confirmado en el dispositivo:
+
+- El permiso de micrófono aparece al **primer uso**, no al arranque, con
+  el texto exacto del `Info.plist`. El `NSMicrophoneUsageDescription`
+  llegó al bundle firmado.
+- El botón está donde la medición lo puso: `helm.terminal.keyboard_voice`,
+  48x48, entre `keyboard_hide` y `keyboard_resize`.
+- **Ningún audio queda en la Mac.** `/tmp` sin un solo `.wav` después de
+  dictar: el borrado remoto del `finally` se cumple fuera del test.
+
+### Un falso positivo que casi cuesta un cambio innecesario
+
+Manejando el teléfono con `maestro-runner`, `longPressOn` dejó la
+grabación colgada: `Recording…` cinco segundos después del press, con el
+punto naranja de iOS encendido. El síntoma era real y el micrófono estaba
+abierto de verdad.
+
+**No era un defecto de la app.** Ese driver no emite el `pointerUp` que
+`PushToTalkButton` espera, porque el botón usa `Listener` en vez de un
+gesture recognizer — deliberado, para que un temblor de dedo no invalide
+una pulsación sostenida. Con un dedo real la grabación se detiene.
+
+Se plantearon las dos hipótesis y NO se tocó el código hasta distinguir
+cuál era. "Arreglarlo" habría cambiado una decisión de diseño correcta
+por culpa de la herramienta de medición.
+
+**Límite a recordar**: `longPressOn` de `maestro-runner` no sirve para
+probar press-and-hold en hardware iOS. `tapOn`, `inputText` y
+`assertVisible` funcionaron sin problema.
+
 ## Log
 
 - **L1** (owner, verbatim): "con la voz , tenemos que hacerlo , ve si no
