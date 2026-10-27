@@ -179,3 +179,77 @@ YET"), could tell the difference.
 The device found this defect first, with the suite green. When behaviour
 depends on WHEN something happens, assert the moment it must not have happened
 yet, or the suite will happily agree with a broken implementation.
+
+## A pipe swallows the exit code of the command that mattered
+
+Paid for THREE times in this repository, twice in commands shaped like this:
+
+```bash
+flutter build ios --debug 2>&1 | tail -25        # reports 0 on failure
+maestro driver-setup --apple-team-id X | tail -40  # reports 0 on failure
+```
+
+A shell pipeline exits with the status of its LAST command, and `tail` always
+succeeds. Both of these reported **exit 0 while the build had failed**, and in
+the first case the next `&&` step then ran against a stale `Runner.app` and
+the whole task was recorded as green.
+
+The sibling of this is `grep` in a chain: `grep -c` exits 1 when it finds
+nothing, so `grep ... && other-measurement` silently skips the second
+measurement, and the silence reads as "there was nothing to find".
+
+**The rule:** never put a command whose result matters on the LEFT of a pipe
+without `set -o pipefail`. For independent exploratory measurements, separate
+them with `;`, never with `&&`.
+
+**And gate on the artifact, not on the exit code.** `flutter install` on a
+device with Developer Mode off prints an error, installs nothing, and exits 0.
+Verify the thing you wanted to exist actually exists.
+
+## `security find-identity -v` lists expired certificates as valid
+
+It reported an expired Apple Development certificate among its "4 valid
+identities found". `find-identity` is not a source of truth for validity.
+
+Dates come from the certificate itself:
+
+```bash
+security find-certificate -c "Apple Development" -p \
+  | openssl x509 -noout -subject -dates
+```
+
+**And the Team ID is the `OU` field, never the parenthesis in the `CN`.** The
+`CN` reads `Apple Development: you@example.com (6T4525JS5U)` and that value is
+NOT the Team ID — mistaking it cost a wrong diagnosis and a request to the
+owner to change a signing team that was correct all along.
+
+## A debug build installs fine on a device and then refuses to open
+
+`flutter build ios --debug` + `xcrun devicectl device install app` both
+succeed, and tapping the icon then shows a black screen reading:
+
+> In iOS 14+, debug mode Flutter apps can only be launched from Flutter
+> tooling, IDEs with Flutter plugins or from Xcode.
+
+Nothing in the install path reports a problem, and the failure looks like a
+signing or provisioning issue — it is neither. For an app someone is meant to
+USE on a phone, build `--release`. `--debug` is only for `flutter run` driven
+from the Mac.
+
+Same family as the earlier device traps: a successful exit code describes the
+step that ran, not the outcome anyone cared about.
+
+## A physical iPhone's screen is readable without Xcode
+
+`simctl io screenshot` is simulator-only, which made this look impossible.
+It is not:
+
+```bash
+xcrun devicectl device capture screenshot \
+  --device <udid> --destination /tmp/screen.png
+```
+
+Worth reaching for before asking a human to send a photo — and the only way
+to see a physical device's screen here, because Maestro cannot drive one (its
+driver bundle ID belongs to mobile.dev and cannot be registered to another
+team).

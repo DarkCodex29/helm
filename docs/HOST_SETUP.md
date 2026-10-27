@@ -221,9 +221,16 @@ solo.
 - **Contraseña de administrador** para activar Remote Login.
 - **Login de Tailscale**, en la Mac y en el teléfono.
 - **`pi auth`**, contra tu proveedor de modelos.
+- **Confiar el perfil de desarrollo**, si instalás en un teléfono físico:
+  Ajustes → General → VPN y gestión de dispositivos → Confiar. Hasta que
+  eso pase, la app **no arranca** y el error habla de firma inválida sin
+  mencionar el ajuste que lo resuelve.
+- **Todo el resto de la configuración, si el destino es un iPhone
+  físico**, porque ahí no hay automatización posible. Ver abajo.
 
-Los tres son credenciales. Un orquestador puede dejar todo lo demás
-listo y parar ahí.
+Los primeros cuatro son credenciales o permisos del dueño del aparato.
+Un orquestador puede dejar todo lo demás listo y parar ahí, y en
+simulador puede hacerlo entero.
 
 ---
 
@@ -244,3 +251,65 @@ de SSH no es el problema. Revisá que `herdr status` diga `running`.
 **Una pestaña de tmux nacida por SSH no lee el Keychain**, mientras que
 un pane de herdr sí. Medido. Si un agente te pide credenciales que ya
 tenías guardadas, es por ahí.
+
+---
+
+## En un iPhone físico no hay automatización
+
+Maestro solo sirve en simulador, y el límite es de Apple, no nuestro.
+
+Para manejar un dispositivo real, Maestro compila y firma su propio
+driver de UITest. El comando está oculto del `--help`:
+
+```bash
+maestro driver-setup --apple-team-id <TEAM> \
+  --destination "platform=iOS,id=<udid>"
+```
+
+Con el Team ID correcto igual falla:
+
+```text
+Failed Registering Bundle Identifier: The app identifier
+"dev.mobile.maestro-driver-ios" cannot be registered to your
+development team because it is not available.
+```
+
+Ese identificador es de **mobile.dev**. Ninguna otra cuenta puede
+registrarlo, ni gratuita ni de pago.
+
+**Consecuencia práctica**: en un teléfono, la app se instala por comando
+pero se configura a mano, siguiendo
+[`SETUP_GUIDE.md`](SETUP_GUIDE.md). Lo que sí se automatiza es el host
+entero y, en simulador, la configuración completa.
+
+```bash
+flutter build ios --release        # firmado, requiere certificado vigente
+xcrun devicectl device install app \
+  --device <udid> build/ios/iphoneos/Runner.app
+```
+
+> **`--release`, no `--debug`.** Medido: un build debug se instala bien y
+> después **se niega a abrir desde el teléfono**, mostrando una pantalla
+> negra que dice *"In iOS 14+, debug mode Flutter apps can only be
+> launched from Flutter tooling, IDEs with Flutter plugins or from
+> Xcode"*. No es un fallo de firma ni del perfil: es una restricción de
+> iOS para builds debug. Para alguien que va a **usar** la app, la
+> respuesta es `--release`; `--debug` sirve solo mientras estés
+> depurando desde la Mac con `flutter run`.
+
+Y para ver qué hay en pantalla sin tocar el teléfono:
+
+```bash
+xcrun devicectl device capture screenshot \
+  --device <udid> --destination /tmp/pantalla.png
+```
+
+> **Verificá la vigencia del certificado con `openssl`, no con
+> `security find-identity`**, que lista identidades vencidas entre las
+> “valid identities found”. Y el Team ID se lee del campo `OU`, nunca
+> del paréntesis del `CN`:
+>
+> ```bash
+> security find-certificate -c "Apple Development" -p \
+>   | openssl x509 -noout -subject -dates
+> ```

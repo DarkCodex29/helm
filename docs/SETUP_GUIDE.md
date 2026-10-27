@@ -8,8 +8,12 @@ sobre la Mac, no sobre la app.
 
 Hay dos caminos y terminan en el mismo lugar.
 
-- **[Automático](#automático-simulador-de-ios)** — un comando, solo simulador.
-- **[A mano](#a-mano-cualquier-dispositivo)** — cuatro pasos, sirve en un teléfono real.
+- **[Automático](#automático-simulador-de-ios)** — un comando, **solo simulador**.
+- **[A mano](#a-mano-cualquier-dispositivo)** — cuatro pasos, y el **único** camino
+  en un teléfono real.
+
+> **En un iPhone físico no hay automatización posible**, y no es una decisión
+> nuestra: ver [Maestro no puede manejar un iPhone físico](#maestro-no-puede-manejar-un-iphone-físico).
 
 El README cubre el resto del proyecto. Esta guía cubre solo poner la app
 a funcionar por primera vez.
@@ -115,12 +119,77 @@ usar de verdad, y esa diferencia aparece recién en el teléfono.
 > dirección muerta. El síntoma es un "Connection lost" que parece
 > problema de red y no lo es. El README lo explica en su sección Setup.
 
-### Paso 2 — llenar la app
+### Paso 2 — confiar el perfil (solo teléfono físico)
+
+Salteá este paso en el simulador. En un teléfono, una app firmada con un
+certificado de desarrollo **no arranca** hasta que la autorices a mano, y
+la primera vez que la toques vas a ver esto:
+
+> **Desarrollador no confiable**
+>
+> Tu configuración de administración de dispositivos no permite usar apps
+> del desarrollador "Apple Development: tu@correo.com (XXXXXXXXXX)" en
+> este iPhone. Puedes permitirlas en Configuración.
+>
+> [ Cancelar ]
+
+**Ese diálogo solo ofrece Cancelar**, así que parece un callejón sin
+salida. No lo es: la autorización vive en otra pantalla.
+
+1. Tocá **Cancelar**.
+2. **Ajustes → General → VPN y gestión de dispositivos**.
+3. Entrá en **Apple Development: tu@correo.com**.
+4. Tocá **Confiar en "Apple Development: tu@correo.com"** y confirmá
+   **Confiar**.
+5. Volvé a abrir Helm.
+
+La frase "configuración de administración de dispositivos" es la
+redacción estándar de iOS para cualquier desarrollador sin confiar. **No
+significa que tu teléfono esté administrado por una empresa**, y aparece
+igual en un equipo totalmente personal.
+
+Desde la Mac el mismo bloqueo se ve así, sin mencionar en ningún lado que
+la solución es un ajuste del teléfono:
+
+```text
+Unable to launch com.darkcodex.helm because it has an invalid code
+signature, inadequate entitlements or its profile has not been
+explicitly trusted by the user
+```
+
+> Con una cuenta de Apple gratuita el perfil **caduca cada 7 días**. Al
+> vencerse la app deja de abrir y hay que reinstalarla; confiar el perfil
+> es una sola vez por certificado, no por instalación.
+
+#### Si en vez de la app ves una pantalla negra con texto
+
+> In iOS 14+, debug mode Flutter apps can only be launched from Flutter
+> tooling, IDEs with Flutter plugins or from Xcode.
+>
+> Alternatively, build in profile or release modes to enable launching
+> from the home screen.
+
+Entonces la app se instaló como **build debug**, y iOS no deja abrir esos
+desde el home screen. **No es un problema de firma ni del perfil**, y
+confiar el desarrollador otra vez no lo arregla.
+
+La solución es reinstalar en release:
+
+```bash
+flutter build ios --release
+xcrun devicectl device install app \
+  --device <udid> build/ios/iphoneos/Runner.app
+```
+
+Un build debug solo sirve lanzado desde la Mac con `flutter run`. Para
+usar la app en el teléfono, siempre `--release`.
+
+### Paso 3 — llenar la app
 
 Abrí Helm. En el primer arranque genera su propia clave SSH y te muestra
 el formulario. Escribí los valores del paso 1 y guardá.
 
-### Paso 3 — autorizar el dispositivo
+### Paso 4 — autorizar el dispositivo
 
 La app muestra su clave pública en esa misma pantalla, y después en
 `Settings → SSH key`. Tocá copiar, y entonces:
@@ -132,7 +201,7 @@ scripts/host_setup_report.sh --from-clipboard
 Rechaza cualquier cosa que no sea una clave pública SSH parseable, y no
 agrega la misma clave dos veces.
 
-### Paso 4 — reiniciar la app
+### Paso 5 — reiniciar la app
 
 No es opcional ni superstición: ver
 [Una pestaña conserva el perfil con el que se abrió](#una-pestaña-conserva-el-perfil-con-el-que-se-abrió).
@@ -215,11 +284,40 @@ guardado.
 
 Es una aspereza conocida, no un error de configuración.
 
+### Maestro no puede manejar un iPhone físico
+
+Solo simulador. El límite no es de Helm ni es configurable.
+
+Maestro necesita compilar y firmar su propio driver de UITest contra tu
+equipo de desarrollo. El comando que lo hace está **oculto del `--help`**:
+
+```bash
+maestro driver-setup --apple-team-id <TEAM> \
+  --destination "platform=iOS,id=<udid>"
+```
+
+Y con el Team ID correcto igual falla:
+
+```text
+Failed Registering Bundle Identifier: The app identifier
+"dev.mobile.maestro-driver-ios" cannot be registered to your
+development team because it is not available.
+```
+
+Ese identificador pertenece a **mobile.dev**. Ninguna otra cuenta puede
+registrarlo — ni gratuita ni de pago — y Maestro no expone forma de
+cambiarlo.
+
+Por eso en un teléfono real el único camino es
+[a mano](#a-mano-cualquier-dispositivo), y por eso
+`provision_simulator.sh` se llama así: no existe un equivalente para
+hardware, y no es que falte escribirlo.
+
 ### Por qué los flows están escritos así
 
-Si vas a escribir tus propios flows de Maestro contra Helm, cuatro cosas
-se comportan distinto en iOS de lo que esperarías. Las cuatro medidas
-sobre esta app.
+Si vas a escribir tus propios flows de Maestro contra Helm — en
+simulador, que es donde se puede — cuatro cosas se comportan distinto en
+iOS de lo que esperarías. Las cuatro medidas sobre esta app.
 
 **`- back` no hace nada en iOS** y aun así reporta `COMPLETED`, así que
 el paso siguiente falla en la pantalla equivocada. Usá el gesto de
