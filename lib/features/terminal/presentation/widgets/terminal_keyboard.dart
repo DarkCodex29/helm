@@ -69,19 +69,21 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
     if (geometry == null || widget.viewport != _limitViewport) {
       _limit = null;
     }
-    // Home's AppBar and fixed safe-area FAB shelf already consume vertical
-    // insets. Only the lateral safe insets remain inside this body's viewport.
+    // The fixed safe-area FAB shelf was removed (see home_screen.dart), so
+    // this viewport includes the bottom system inset. Keep the panel inside
+    // the measured safe height rather than relying on Scaffold to reserve it.
     final padding = MediaQuery.paddingOf(context);
     final available = math.max(0.0, widget.viewport.width - padding.horizontal);
+    final safeHeight = math.max(0.0, widget.viewport.height - padding.bottom);
     final maxWidth = math.min(keyboardMaximumWidth, available);
     final minWidth = math.min(keyboardMinimumWidth, maxWidth);
-    final maxHeight = math.min(480.0, widget.viewport.height);
+    final maxHeight = math.min(480.0, safeHeight);
     final minHeight = math.min(keyboardMinimumHeight, maxHeight);
     if (maxWidth <= 0 || maxHeight < 96) return const SizedBox.shrink();
     final width = (geometry?.width ?? 384.0).clamp(minWidth, maxWidth);
     final height = (geometry?.height ?? 368.0).clamp(minHeight, maxHeight);
     final travelX = available - width;
-    final travelY = widget.viewport.height - height;
+    final travelY = safeHeight - height;
     final left = padding.left + (geometry?.x ?? .5) * travelX;
     final top = geometry == null
         ? math.max(0.0, travelY - 12)
@@ -99,7 +101,7 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
       final live = ref.read(keyboardProvider).geometry;
       final liveW = (live?.width ?? 384.0).clamp(minWidth, maxWidth);
       final liveH = (live?.height ?? 368.0).clamp(minHeight, maxHeight);
-      final liveTravelY = widget.viewport.height - liveH;
+      final liveTravelY = safeHeight - liveH;
       var w = liveW;
       var h = liveH;
       var x = (live?.x ?? .5) * (available - liveW);
@@ -124,11 +126,11 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
         y += delta.dy;
       }
       x = x.clamp(0.0, available - w);
-      y = y.clamp(0.0, widget.viewport.height - h);
+      y = y.clamp(0.0, safeHeight - h);
       notifier.setGeometry(
         KeyboardGeometry(
           available == w ? .5 : x / (available - w),
-          widget.viewport.height == h ? 1 : y / (widget.viewport.height - h),
+          safeHeight == h ? 1 : y / (safeHeight - h),
           w,
           h,
         ),

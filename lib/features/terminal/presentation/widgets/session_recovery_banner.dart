@@ -31,72 +31,90 @@ class SessionRecoveryBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.divider),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const Icon(Icons.bolt, color: AppTheme.primary, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Previous session found',
-                  style: TextStyle(
-                    color: AppTheme.onBackground,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final message = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.bolt, color: AppTheme.primary, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Previous session found',
+                      style: TextStyle(
+                        color: AppTheme.onBackground,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'You had open: $profileNames',
+                      style: const TextStyle(
+                        color: AppTheme.onSurface,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'You had open: $profileNames',
-                  style: const TextStyle(
-                    color: AppTheme.onSurface,
-                    fontSize: 12,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Both buttons carry a full 48dp tap target.
-          //
-          // They previously combined `minimumSize: Size.zero` with
-          // `MaterialTapTargetSize.shrinkWrap`, which strips the padding
-          // Material adds for exactly this reason and left the hit area at
-          // the text's own height — measured on a Galaxy S22 Ultra, roughly
-          // 24dp, half the documented minimum. These are the two buttons a
-          // user meets on a cold start, one of which discards recovered
-          // work, so a mis-tap here is expensive.
-          TextButton(
-            onPressed: onDiscard,
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.onSurface,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              minimumSize: const Size(48, 48),
-            ),
-            child: const Text('Discard', style: TextStyle(fontSize: 13)),
-          ),
-          const SizedBox(width: 4),
-          ElevatedButton(
-            onPressed: onRecover,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: AppTheme.background,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              minimumSize: const Size(64, 48),
-              textStyle: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
               ),
-            ),
-            child: const Text('Resume'),
-          ),
-        ],
+            ],
+          );
+          // Both buttons carry a full 48dp tap target. Keep them on a second
+          // line when the measured width cannot hold the scaled labels and
+          // the message without a RenderFlex overflow.
+          final actions = Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              TextButton(
+                onPressed: onDiscard,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.onSurface,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: const Size(48, 48),
+                ),
+                child: const Text('Discard', style: TextStyle(fontSize: 13)),
+              ),
+              ElevatedButton(
+                onPressed: onRecover,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: AppTheme.background,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  minimumSize: const Size(64, 48),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                child: const Text('Resume'),
+              ),
+            ],
+          );
+
+          if (constraints.maxWidth < 420) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [message, const SizedBox(height: 4), actions],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: message),
+              const SizedBox(width: 8),
+              actions,
+            ],
+          );
+        },
       ),
     );
   }
