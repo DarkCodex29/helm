@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:clock/clock.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
@@ -348,6 +349,31 @@ const kTabFocusTimeout = Duration(seconds: 8);
 /// Deliberately far longer than a frame: expiring early would put back
 /// exactly the bug this unit removes — a PTY opened at a fabricated size.
 const kViewportLayoutDeadline = Duration(seconds: 3);
+
+/// How long the remote must stay SILENT before [TerminalSession.
+/// waitForOutputToSettle] considers it attached and ready to receive text.
+///
+/// Measured on an S22, cold start via the Android share sheet: herdr
+/// attaches and repaints the screen in bursts for roughly 150-300ms after
+/// "Session connected" fires, and text sent into that window is silently
+/// discarded — confirmed by scanning every herdr pane with a
+/// verified-working instrument. 500ms gives that repainting a full extra
+/// beat of margin past the slowest burst actually measured, while still
+/// being short enough that an ALREADY-idle session (the warm path, which
+/// this must never delay) only pays it once, briefly, rather than
+/// noticeably.
+const kOutputSettleQuietWindow = Duration(milliseconds: 500);
+
+/// Absolute ceiling on [TerminalSession.waitForOutputToSettle], independent
+/// of how often the remote keeps resetting the quiet window.
+///
+/// A chatty remote — a long-running build, a tail -f left on the prompt,
+/// a motd that staggers across several writes — could otherwise defer the
+/// share indefinitely by simply never going quiet. 5 seconds is roughly 10x
+/// [kOutputSettleQuietWindow]: enough resets to absorb a genuinely bursty
+/// attach, while still landing the text well inside a single glance at the
+/// screen rather than making the owner wonder if the share was lost again.
+const kOutputSettleCap = Duration(seconds: 5);
 
 /// [ValueNotifier] that reports when it goes from unobserved to observed
 /// and back, so its owner can start and stop the work that produces its
@@ -987,6 +1013,16 @@ class TerminalSession {
       // it back on failure, so the one surface explaining the problem
       // would flicker on every retry.
       lastFailureNotifier.value = null;
+      // Armed BEFORE `connected` is published, and the order is
+      // load-bearing: assigning to a ValueNotifier runs its listeners
+      // SYNCHRONOUSLY, and one of them delivers a pending share by asking
+      // [waitForOutputToSettle]. Arming after the assignment meant that
+      // ask arrived while `_connectedAt` was still null, took the
+      // "nothing to wait for" early return, and typed into the attaching
+      // remote — reintroducing the exact defect this tracking exists to
+      // fix, with every test still green except the one that asserted the
+      // intermediate state.
+      _armOutputSettleTracking();
       statusNotifier.value = ConnectionStatus.connected;
       _log.i('Session connected: ${profile.name}');
 
@@ -1099,6 +1135,208 @@ class TerminalSession {
     }
   }
 
+  /// Writes [text] to the remote WITHOUT a trailing newline, so it lands at
+  /// the prompt exactly as if the owner had typed it himself: he reads it
+  /// there, edits it with the shell's or the agent's own keys, and presses
+  /// enter on his own.
+  ///
+  /// This is the ENTIRE review surface the design in
+  /// `odd/tasks/voice-and-share-input.md` relies on. The drawer's deleted
+  /// QUICK ACTIONS section did
+  /// `session.terminal.onOutput?.call('${action.command}\n')` — WITH a
+  /// trailing newline — so a tap executed on the host immediately. The
+  /// one-character absence of that `\n` here is the whole difference
+  /// between typing something at a prompt and running it: text handed to
+  /// this method can be inspected and corrected before it does anything.
+  ///
+  /// Text arriving from outside helm — a shared message, a dictated clip —
+  /// is frequently multi-line (a pasted WhatsApp message, a sentence
+  /// Whisper split across newlines). Sending embedded newlines straight
+  /// through would execute every line but the last the instant it typed
+  /// them, which defeats the entire point of not sending the final one.
+  /// So every `\n` and `\r` INSIDE the text is collapsed to a single
+  /// space rather than stripped outright — stripping would silently glue
+  /// unrelated words together (`"git\nstatus"` -> `"gitstatus"`), which is
+  /// a worse failure for the owner to catch by eye at the prompt than an
+  /// extra space would be. Leading/trailing whitespace (including
+  /// newlines) is trimmed, since it contributes nothing at a prompt.
+  ///
+  /// A no-op while not connected, consistent with the guard
+  /// [onResize]/`terminal.onOutput` already apply: there is no host to
+  /// type into, and queuing text for a session that may never reconnect
+  /// would mean the first thing a reconnect delivers is TEXT, decided by
+  /// the moment it happened to come in rather than by the owner.
+  ///
+  /// Also a no-op for empty or whitespace-only text — nothing worth
+  /// reviewing at a prompt.
+  void typeAtPrompt(String text) {
+    final sessionRef = _session;
+    if (sessionRef == null ||
+        statusNotifier.value != ConnectionStatus.connected) {
+      return;
+    }
+
+    final flattened = text.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+    if (flattened.isEmpty) return;
+
+    sessionRef.write(utf8.encode(flattened));
+  }
+
+  /// When the last output activity was observed for the CURRENT connection
+  /// — `terminal` receiving a write, or the connect itself, which counts
+  /// as the first activity (a multiplexer begins attaching and repainting
+  /// immediately on attach, before anything has reached [terminal]). Null
+  /// only before the first [connect] ever completes.
+  ///
+  /// This, rather than a Timer armed unconditionally on every [connect], is
+  /// what [waitForOutputToSettle] below reads to decide whether a session
+  /// is already settled — so a connection nobody ever asks to settle costs
+  /// NOTHING: no Timer exists until something actually calls
+  /// [waitForOutputToSettle]. That matters beyond this feature: dozens of
+  /// existing tests connect a session and never touch sharing at all, and
+  /// `flutter_test`'s own binding fails a test outright if ANY Timer is
+  /// still pending when it ends — regardless of whether that Timer would
+  /// have resolved harmlessly on its own. Arming one unconditionally at
+  /// every connect broke eleven of them the first time this was tried.
+  DateTime? _lastOutputActivityAt;
+
+  /// When the CURRENT connection's [kOutputSettleCap] ceiling started
+  /// counting from. Set once per [connect], alongside
+  /// [_lastOutputActivityAt].
+  DateTime? _connectedAt;
+
+  /// Completed by [_resolveOutputSettle] the moment the remote is judged
+  /// settled, or null when nothing is waiting. Shared rather than
+  /// per-call: at most one pending share exists at a time (see
+  /// `HomeScreen._pendingSharedText`), so a second concurrent caller joins
+  /// the same wait instead of arming a second pair of timers.
+  Completer<void>? _outputSettleCompleter;
+
+  /// Restarted by every observed write to the terminal while a settle wait
+  /// is in progress — see [_noteOutputActivity]. Firing this (uninterrupted
+  /// by further output) is what "settled" means. Exists ONLY between a
+  /// [waitForOutputToSettle] call that had to wait and that wait resolving
+  /// — see [_lastOutputActivityAt]'s doc comment for why nothing is armed
+  /// outside that window.
+  Timer? _outputSettleQuietTimer;
+
+  /// Armed alongside [_outputSettleQuietTimer] and never restarted, so a
+  /// remote that keeps resetting the quiet timer still settles by
+  /// [kOutputSettleCap] after the connect that started this wait.
+  Timer? _outputSettleCapTimer;
+
+  /// Resolves once the remote has gone quiet for [kOutputSettleQuietWindow]
+  /// since the last [connect], or after [kOutputSettleCap] elapses since
+  /// that same connect, whichever comes first — or IMMEDIATELY if that has
+  /// already happened by the time this is called.
+  ///
+  /// This is the fix for the cold-start share defect measured on a real
+  /// S22: `statusNotifier` reporting `connected` is the moment the SSH
+  /// channel opened, not the moment herdr has finished attaching and
+  /// repainting the screen. Text written into that gap reached nowhere —
+  /// confirmed by scanning every herdr pane with a verified-working
+  /// instrument. Waiting for OUTPUT ACTIVITY to settle, rather than typing
+  /// the instant `connected` fires, is what closes that gap: a remote that
+  /// is still attaching is still writing to [terminal], and a remote that
+  /// has nothing left to repaint goes quiet almost immediately.
+  ///
+  /// Resolves IMMEDIATELY in two cases. Not connected at all — the caller's
+  /// own connected-check already guards delivery, so there is nothing to
+  /// settle. And the already-idle WARM path: [_lastOutputActivityAt] is
+  /// already more than [kOutputSettleQuietWindow] in the past by the time
+  /// this is called — measured on-device as the path that already worked
+  /// before this fix, and which must not regress into a delay. Only a
+  /// session that is STILL within its post-connect quiet/cap window
+  /// actually arms anything and waits.
+  Future<void> waitForOutputToSettle() {
+    if (statusNotifier.value != ConnectionStatus.connected) {
+      return Future.value();
+    }
+
+    final lastActivity = _lastOutputActivityAt;
+    final connectedAt = _connectedAt;
+    if (lastActivity == null || connectedAt == null) {
+      // connect() always sets both before statusNotifier reports
+      // `connected` — reached only if that invariant is ever broken, and
+      // degrading to "nothing to wait for" is the safe direction: it
+      // reproduces the pre-fix behaviour, never a hang.
+      return Future.value();
+    }
+
+    final now = clock.now();
+    if (now.difference(lastActivity) >= kOutputSettleQuietWindow) {
+      return Future.value();
+    }
+
+    final existing = _outputSettleCompleter;
+    if (existing != null) return existing.future;
+
+    final completer = Completer<void>();
+    _outputSettleCompleter = completer;
+    _armOutputSettleQuietTimer();
+    final capRemaining = kOutputSettleCap - now.difference(connectedAt);
+    _outputSettleCapTimer = Timer(
+      capRemaining.isNegative ? Duration.zero : capRemaining,
+      _resolveOutputSettle,
+    );
+    return completer.future;
+  }
+
+  /// Opens the settle window for the connection that just stood up.
+  ///
+  /// Records WHEN rather than arming anything. Both the quiet timer and
+  /// the cap are armed lazily, by [waitForOutputToSettle], and only when a
+  /// share is actually waiting: `flutter_test`'s binding fails any test
+  /// that ends with a Timer still pending, so arming one at every connect
+  /// would charge dozens of tests that never share anything for a feature
+  /// they do not use — see [_lastOutputActivityAt]'s doc comment.
+  ///
+  /// Seeding [_lastOutputActivityAt] with the connect instant (rather than
+  /// leaving it null until the first byte arrives) is what makes the quiet
+  /// window measure "silence since connecting", so a remote that says
+  /// nothing at all settles after one window instead of waiting out the cap.
+  void _armOutputSettleTracking() {
+    final now = clock.now();
+    _connectedAt = now;
+    _lastOutputActivityAt = now;
+  }
+
+  void _armOutputSettleQuietTimer() {
+    _outputSettleQuietTimer?.cancel();
+    _outputSettleQuietTimer = Timer(
+      kOutputSettleQuietWindow,
+      _resolveOutputSettle,
+    );
+  }
+
+  /// Called from every point [_bridgeIO] observes a write reaching
+  /// [terminal] — stdout, stderr. Records the activity unconditionally
+  /// (cheap: a timestamp assignment, no Timer), and additionally restarts
+  /// the quiet timer when a [waitForOutputToSettle] call is actively
+  /// waiting, so output that keeps arriving keeps deferring settlement up
+  /// to [kOutputSettleCap].
+  void _noteOutputActivity() {
+    _lastOutputActivityAt = clock.now();
+    if (_outputSettleCompleter == null) return;
+    _armOutputSettleQuietTimer();
+  }
+
+  /// Ends whatever [waitForOutputToSettle] call is in flight, however it
+  /// got here — the quiet window finally elapsing, [kOutputSettleCap]
+  /// forcing the issue, a disconnect making the wait moot, or [dispose]
+  /// tearing the session down. Safe to call when nothing is waiting.
+  void _resolveOutputSettle() {
+    _outputSettleQuietTimer?.cancel();
+    _outputSettleQuietTimer = null;
+    _outputSettleCapTimer?.cancel();
+    _outputSettleCapTimer = null;
+    final completer = _outputSettleCompleter;
+    _outputSettleCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
   Future<void> dispose() async {
     _log.i('Disposing session for ${profile.name}');
     // Set BEFORE awaiting anything: an advisory collect or an agent poll
@@ -1110,6 +1348,9 @@ class TerminalSession {
     // will ever finish.
     _viewportAttached = false;
     _releaseViewportWaiters();
+    // Same reasoning as [_handleDisconnect]: a settle wait parked on a
+    // session that is being torn down must not outlive it.
+    _resolveOutputSettle();
     _stopAgentTracking();
     await _stdoutSub?.cancel();
     await _stderrSub?.cancel();
@@ -1220,15 +1461,21 @@ class TerminalSession {
 
   void _bridgeIO(SSHSession session) {
     _stdoutSub = session.stdout.listen(
-      (data) => terminal.write(utf8.decode(data, allowMalformed: true)),
+      (data) {
+        terminal.write(utf8.decode(data, allowMalformed: true));
+        // Every byte that reaches the terminal while a share is held is
+        // evidence the remote is still attaching/repainting — see
+        // [waitForOutputToSettle].
+        _noteOutputActivity();
+      },
       onError: (e) => _log.e('stdout stream error', e),
       onDone: () => _log.i('stdout stream closed'),
     );
 
-    _stderrSub = session.stderr.listen(
-      (data) => terminal.write(utf8.decode(data, allowMalformed: true)),
-      onError: (e) => _log.e('stderr stream error', e),
-    );
+    _stderrSub = session.stderr.listen((data) {
+      terminal.write(utf8.decode(data, allowMalformed: true));
+      _noteOutputActivity();
+    }, onError: (e) => _log.e('stderr stream error', e));
 
     terminal.onOutput = (data) {
       final sessionRef = _session;
@@ -1248,6 +1495,10 @@ class TerminalSession {
   ]) {
     if (statusNotifier.value == ConnectionStatus.disconnected) return;
     statusNotifier.value = ConnectionStatus.disconnected;
+    // A settle wait is meaningless once there is no connection left to
+    // settle — resolve it rather than leaving a caller waiting out the
+    // full cap on a session that is already gone.
+    _resolveOutputSettle();
     _stopAgentTracking();
     // Agent state describes a host we can no longer ask. Leaving the last
     // reading on screen would keep asserting "Working" about an agent

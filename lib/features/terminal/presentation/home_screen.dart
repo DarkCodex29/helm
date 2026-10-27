@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:helm/core/utils/logger.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
@@ -13,6 +14,7 @@ import 'package:helm/features/notifications/presentation/pending_session_alert.d
 import 'package:helm/features/session_hold/domain/hold_labels.dart';
 import 'package:helm/features/session_hold/presentation/session_hold_action.dart';
 import 'package:helm/features/session_hold/presentation/session_hold_provider.dart';
+import 'package:helm/features/share/presentation/shared_text_provider.dart';
 import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
@@ -41,12 +43,89 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
+  static final _log = HelmLogger('HomeScreen');
+
   List<TabSnapshot>? _pendingRecovery;
+  StreamSubscription<String>? _sharedTextSub;
+
+  /// A share that arrived before any session was ready to receive it, held
+  /// in memory only — never persisted, so it cannot survive an app
+  /// restart.
+  ///
+  /// Cold-starting from the Android share sheet is the feature's PRIMARY
+  /// use case, not a rare race: `_deliverInitialSharedText` below resolves
+  /// in milliseconds, while the session that will eventually receive its
+  /// text is created and connected only later, in the post-frame callback
+  /// (auto-connect, crash recovery, or `openSessionNamed`). Dropping the
+  /// share on that gap, as `typeAtPrompt`'s connected-only guard would do
+  /// on its own, means the feature does nothing on exactly the launch path
+  /// it exists for.
+  ///
+  /// This is bounded, one-shot delivery, not a durable queue — the risk
+  /// [_deliverSharedText]'s doc comment describes (a stale share typed
+  /// into a session the owner never meant it for) is real. A SECOND share
+  /// REPLACES this one outright (the owner's most recent intent is the
+  /// right one), and the field is cleared the instant delivery succeeds.
+  /// It is also cleared when the app is BACKGROUNDED
+  /// (`AppLifecycleState.paused`) before that happens — see
+  /// `didChangeAppLifecycleState` — because once the owner has switched
+  /// away, the moment the share belonged to has passed, and typing it into
+  /// whatever session connects on an unrelated later resume would be the
+  /// same stale-delivery failure this design otherwise avoids. That is
+  /// also what keeps this from sitting indefinitely.
+  String? _pendingSharedText;
+
+  /// The session [_pendingShareStatusListener] is currently attached to,
+  /// or null when nothing is pending. Tracked so a tab/session change can
+  /// retarget the listener instead of leaking it on the old session.
+  TerminalSession? _pendingShareSession;
+
+  /// Re-evaluates [_pendingSharedText] on the active session's own
+  /// `statusNotifier` — the only listenable that reports the moment a
+  /// session already attached to a tab finishes connecting. Reused across
+  /// retargets so [_detachPendingShareListener] always removes exactly
+  /// what was added.
+  void _pendingShareStatusListener() => _tryDeliverPendingShare();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Pushed shares while helm is already running. Subscribed in
+    // initState rather than inside the post-frame callback below, because
+    // THAT callback runs once and returns; a share arriving any time
+    // after it would otherwise have no listener.
+    _sharedTextSub = ref
+        .read(sharedTextReceiverProvider)
+        .sharedText
+        .listen(_deliverSharedText);
+
+    // Covers the OTHER half of "no session yet": a tab appearing, or the
+    // active tab changing, after a share is already pending. Retargeting
+    // the status listener happens inside `_tryDeliverPendingShare` itself,
+    // so this callback only needs to ask it to re-check. `listenManual` is
+    // the right tool here for the same reason `AuthScreen` uses it: valid
+    // outside `build`, and it auto-disposes with this State.
+    ref.listenManual<TabsState>(tabsProvider, (_, _) {
+      _tryDeliverPendingShare();
+    });
+
+    // Deliberately UNAWAITED, and that is load-bearing rather than an
+    // oversight. A widget test that pumps this screen without mocking
+    // `helm/shared_text` has nothing answering `invokeMethod` at all --
+    // not even a MissingPluginException, because `testWidgets` routes an
+    // unmocked outgoing message to the real platform delegate, which
+    // never replies in a test binding. Awaiting that call here would hang
+    // every OTHER test that pumps HomeScreen and knows nothing about
+    // sharing, including the crash-recovery and auto-connect logic in the
+    // very callback below -- which is exactly what an earlier, awaited
+    // version of this call did to five tests that were passing before it.
+    // On a real device the native side already answered by the time this
+    // call lands, so this buys no observable delay; it only stops a
+    // hypothetical slow or silent channel from blocking auto-connect
+    // behind it.
+    unawaited(_deliverInitialSharedText());
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final repo = ref.read(sessionSnapshotRepoProvider);
@@ -108,8 +187,121 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    _sharedTextSub?.cancel();
+    _detachPendingShareListener();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Asks the platform for the text a cold start was launched with, and
+  /// delivers it if any. See the `unawaited` call site in [initState] for
+  /// why this runs detached from the rest of startup rather than ahead of
+  /// it.
+  Future<void> _deliverInitialSharedText() async {
+    final initialShare = await ref
+        .read(sharedTextReceiverProvider)
+        .takeInitialSharedText();
+    if (initialShare != null && mounted) {
+      _deliverSharedText(initialShare);
+    }
+  }
+
+  /// Records [text] as the one pending share, replacing whatever was
+  /// pending before it, then tries to deliver it immediately. See
+  /// [_pendingSharedText]'s doc comment for why this replaces rather than
+  /// queues, and why the buffer it lives in is bounded.
+  void _deliverSharedText(String text) {
+    _pendingSharedText = text;
+    _tryDeliverPendingShare();
+  }
+
+  /// Delivers [_pendingSharedText] through [TerminalSession.typeAtPrompt]
+  /// once the active tab's session is connected AND its output has
+  /// settled, and clears it the instant that succeeds — AT MOST ONCE per
+  /// share. Until a session is connected, keeps a listener on the active
+  /// session's `statusNotifier` so a connect completing later re-triggers
+  /// this same check, and retargets that listener whenever the active
+  /// session itself changes (a tab appearing for the first time, or the
+  /// active tab switching).
+  ///
+  /// "Connected" is not "ready": a full-screen remote multiplexer (herdr)
+  /// is still attaching and repainting for a short window after
+  /// `statusNotifier` reports `connected`, and text typed into that window
+  /// reaches nowhere — measured on a real S22 cold-starting from the
+  /// Android share sheet. [TerminalSession.waitForOutputToSettle] is what
+  /// closes that gap; see its doc comment for the window and cap chosen
+  /// and why. [_deliveringShare] guards the wait this introduces against
+  /// re-entry.
+  ///
+  /// `statusNotifier` is a plain `ValueNotifier` here, not the
+  /// `_ObservableValueNotifier` `TerminalSession.agentsNotifier` uses —
+  /// attaching to it has no side effect to account for.
+  ///
+  /// True while a share is between "session just connected" and "text
+  /// actually typed", i.e. inside the await on
+  /// [TerminalSession.waitForOutputToSettle]. Guards re-entry: the
+  /// `statusNotifier` listener this method is attached through fires again
+  /// on ANY status change, not just the one that started the wait, and
+  /// [ref.listenManual]'s tabs callback can fire mid-wait too. Without this
+  /// guard either could start a second overlapping wait for the same share.
+  bool _deliveringShare = false;
+
+  void _tryDeliverPendingShare() {
+    final text = _pendingSharedText;
+    if (text == null || _deliveringShare) return;
+
+    final session = ref.read(tabsProvider).activeTab?.session;
+    if (session != _pendingShareSession) {
+      _detachPendingShareListener();
+      session?.statusNotifier.addListener(_pendingShareStatusListener);
+      _pendingShareSession = session;
+    }
+
+    if (session == null || !session.isConnected) {
+      _log.i(
+        'Share held: session ${session == null ? 'absent' : 'not connected'}',
+      );
+      return;
+    }
+
+    // `connected` is the moment the SSH channel opened, not the moment a
+    // full-screen remote (herdr) has finished attaching and repainting.
+    // Measured on an S22: typing the instant `connected` fires lands the
+    // text nowhere, because the attach is still consuming terminal input.
+    // Waiting for output to settle first is the fix — see
+    // [TerminalSession.waitForOutputToSettle]'s doc comment. An
+    // already-idle session (the warm path) resolves that wait almost
+    // immediately, so this adds no observable delay there.
+    _deliveringShare = true;
+    unawaited(
+      session.waitForOutputToSettle().then((_) {
+        _deliveringShare = false;
+        if (!mounted) return;
+
+        // Re-validate against the state AT DELIVERY TIME, not the state
+        // that started the wait: the pending text may have been replaced
+        // by a second share, backgrounding may have cleared it, or the
+        // active tab/session may have changed while this was waiting.
+        if (_pendingSharedText != text || _pendingShareSession != session) {
+          return;
+        }
+        if (!session.isConnected) return;
+
+        _log.i('Typing a ${text.length}-char share at the prompt');
+        session.typeAtPrompt(text);
+        _pendingSharedText = null;
+        _detachPendingShareListener();
+      }),
+    );
+  }
+
+  /// Removes whatever [_pendingShareStatusListener] is currently attached
+  /// to, if anything. Safe to call when nothing is pending.
+  void _detachPendingShareListener() {
+    _pendingShareSession?.statusNotifier.removeListener(
+      _pendingShareStatusListener,
+    );
+    _pendingShareSession = null;
   }
 
   @override
@@ -118,6 +310,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     switch (state) {
       case AppLifecycleState.paused:
         ref.read(tabsProvider.notifier).saveSnapshot();
+        // The moment a share belonged to has passed once the owner has
+        // switched away from helm entirely. Clearing here is what keeps
+        // [_pendingSharedText] from sitting indefinitely when a session
+        // never connects before the app is backgrounded — see that
+        // field's doc comment.
+        _pendingSharedText = null;
+        _detachPendingShareListener();
       case AppLifecycleState.resumed:
         ref.read(sessionSnapshotRepoProvider).markClean();
         // The user is back, which is both halves of what a hold needs to
