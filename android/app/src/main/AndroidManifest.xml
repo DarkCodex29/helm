@@ -6,6 +6,13 @@
          builds. -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- Voice dictation push-to-talk (voice-input-cross-platform.md,
+         task 2). Declaring this is necessary but not sufficient: Android
+         still requires the runtime prompt the `record` package's
+         `hasPermission()` triggers on first use (see
+         RecordPluginVoiceRecorder.start), on Android 6 and above. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <!-- ── Holding a session open in the background ──────────────────────
 
          All three are NORMAL permissions: granted at install time, with no

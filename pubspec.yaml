@@ -82,6 +82,23 @@ dependencies:
   firebase_messaging: 16.6.0
   flutter_local_notifications: 22.3.0
 
+  # Microphone capture for push-to-talk voice dictation
+  # (voice-input-cross-platform.md, task 2). PINNED EXACTLY, for the same
+  # toolchain reason as every other pin in this file: this is the version
+  # verified to resolve against this app's Flutter/Dart floor, and a caret
+  # would silently stop resolving the moment it publishes again.
+  #
+  # Chosen over a hand-rolled MethodChannel because it is a FEDERATED
+  # plugin that already ships BOTH platform implementations behind one
+  # Dart API — `record_android` and `record_ios` are both direct
+  # dependencies of `record` itself, unlike `saf_util` above, which turned
+  # out to be Android-only and was only discovered later. It also records
+  # straight to 16 kHz mono WAV (`AudioEncoder.wav`) and exposes
+  # `hasPermission()`, which requests microphone access on first call
+  # rather than at launch — exactly what S4/the push-to-talk requirement
+  # above needs, with no extra permission package.
+  record: 7.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -92,6 +109,14 @@ dev_dependencies:
   # spending it. Already resolved transitively via flutter_test; declared
   # explicitly because test code imports it directly.
   fake_async: ^1.3.1
+
+  # The platform-interface half of `record`, pinned to the exact version
+  # `record: 7.1.2` resolves against. Declared explicitly, the same
+  # reasoning as `clock` above: test code fakes microphone capture by
+  # implementing `RecordPlatform` directly (there is no device, and no
+  # MethodChannel, in a unit test), so test/ imports this package's types
+  # on its own rather than only ever seeing them re-exported through `record`.
+  record_platform_interface: 2.1.0
 
   # Code generation
   freezed: ^2.5.7

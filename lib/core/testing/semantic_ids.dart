@@ -355,4 +355,20 @@ class KeyboardLayoutSemantics {
   /// SHOWS the keyboard: the floating button overlays the terminal, so
   /// while the panel is up the two would collide over its resize grip.
   static const hide = 'helm.terminal.keyboard_hide';
+
+  /// Push-to-talk dictation, in the footer beside [hide] and [resize].
+  ///
+  /// Not in the command strip: that row is fixed at seven 48dp controls
+  /// and exactly consumes `keyboardMinimumWidth`. Not in the app-bar
+  /// overflow: that surface needs a selection, not a press-and-hold
+  /// gesture. See `odd/tasks/voice-input-cross-platform.md`'s "Where the
+  /// button goes, and why".
+  static const voice = 'helm.terminal.keyboard_voice';
+
+  /// The footer's shared status line, repurposed for voice feedback
+  /// (recording / permission denied / transcription failed / not
+  /// connected) when it has something to say — distinct from [limit],
+  /// which is scoped to resize-clamp messages, so a test asserting one
+  /// can never be satisfied by the other meaning something unrelated.
+  static const voiceStatus = 'helm.terminal.keyboard_voice_status';
 }

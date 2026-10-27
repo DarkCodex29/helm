@@ -8,6 +8,9 @@ import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/features/terminal/data/keyboard_geometry_store.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
+import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
+import 'package:helm/features/voice/application/voice_transcriber.dart';
+import 'package:helm/features/voice/presentation/widgets/push_to_talk_button.dart';
 import 'package:xterm/xterm.dart';
 
 /// 7 top-bar widths * 48dp + 16dp padding + 6 gaps * 3dp = 370dp.
@@ -52,6 +55,7 @@ class FloatingKeyboardPanel extends ConsumerStatefulWidget {
 
 class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
   String? _limit;
+  String? _voiceStatus;
 
   /// The viewport the current [_limit] was measured against.
   ///
@@ -173,6 +177,27 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
         child: SizedBox(width: keyboardMinimumWidth, child: keys),
       );
     }
+
+    // Resolved at RELEASE time, through `tabsProvider`, rather than
+    // captured when the press began: a long hold could straddle a
+    // reconnect. Not home_screen.dart's job to thread a session down —
+    // this panel already reaches `keyboardProvider` directly, and this
+    // follows the same shape.
+    VoiceTranscribe? resolveTranscribe() {
+      final session = ref.read(tabsProvider).activeTab?.session;
+      final uploadService = session?.uploadService;
+      final hostRunner = session?.hostRunner;
+      if (uploadService == null || hostRunner == null) return null;
+      return VoiceTranscriber(
+        uploadService: uploadService,
+        hostRunner: hostRunner,
+      ).transcribe;
+    }
+
+    void typeAtPrompt(String text) {
+      ref.read(tabsProvider).activeTab?.session.typeAtPrompt(text);
+    }
+
     return Stack(
       children: [
         Positioned(
@@ -232,18 +257,26 @@ class _FloatingKeyboardPanelState extends ConsumerState<FloatingKeyboardPanel> {
                           onPressed: notifier.toggleVisibility,
                         ),
                       ),
+                      PushToTalkButton(
+                        resolveTranscribe: resolveTranscribe,
+                        typeAtPrompt: typeAtPrompt,
+                        onStatus: (message) =>
+                            setState(() => _voiceStatus = message),
+                      ),
                       Expanded(
                         child: Semantics(
-                          identifier: KeyboardLayoutSemantics.limit,
+                          identifier: _voiceStatus == null
+                              ? KeyboardLayoutSemantics.limit
+                              : KeyboardLayoutSemantics.voiceStatus,
                           liveRegion: true,
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 150),
                             padding: const EdgeInsets.symmetric(horizontal: 12),
-                            color: _limit == null
+                            color: _limit == null && _voiceStatus == null
                                 ? _bgColor
                                 : AppTheme.surfaceVariant,
                             child: Text(
-                              _limit ?? 'Drag corner to resize',
+                              _voiceStatus ?? _limit ?? 'Drag corner to resize',
                               style: const TextStyle(fontSize: 12),
                             ),
                           ),

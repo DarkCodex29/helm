@@ -30,6 +30,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Helm uses Face ID to unlock your saved SSH keys and connection profiles.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Helm uses the microphone to record voice dictation, which is sent to your Mac for transcription.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
