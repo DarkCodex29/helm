@@ -208,6 +208,41 @@ No es opcional ni superstición: ver
 
 ---
 
+## Dictado por voz
+
+Mantené el botón de micrófono del teclado flotante, hablá, soltá. El
+texto aparece en el prompt **sin enviarse**, para que lo revises antes de
+darle enter.
+
+El teléfono solo graba: **la Mac transcribe**. El audio viaja por la
+misma conexión SSH, se procesa local con whisper.cpp y **se borra en los
+dos lados**, pase lo que pase con la transcripción. Nada va a un servicio
+de terceros.
+
+**Necesita whisper.cpp y su modelo en la Mac**, que no vienen con nada de
+lo anterior:
+
+```bash
+brew install whisper.cpp
+mkdir -p ~/.cache/whisper-cpp
+curl -L -o ~/.cache/whisper-cpp/ggml-large-v3-turbo.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+```
+
+Esa ruta exacta es la que la app busca; el modelo pesa ~1.6 GB. Los
+detalles, modelos alternativos y cómo comprobar que carga están en
+[`HOST_SETUP.md`](HOST_SETUP.md).
+
+La primera vez que mantengas el botón, el teléfono va a pedir permiso de
+micrófono. Es al primer uso, no al instalar.
+
+> **Si el estado dice "Transcription failed"**, lo primero a revisar es el
+> modelo: `whisper-cli` sale con código 3 y *"failed to initialize whisper
+> context"* cuando no lo encuentra. El comando para comprobarlo está en
+> `HOST_SETUP.md`.
+
+---
+
 ## Dos ajustes del perfil que casi nadie encuentra
 
 Se pueden pasar por alto sin que nada dé error, y los dos cambian el

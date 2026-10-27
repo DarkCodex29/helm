@@ -15,6 +15,7 @@ anterior: dejar la Mac en condiciones de que valga la pena conectarse.
 | **Pi** | El agente de código que corre dentro de cada pestaña | No, pero es el punto |
 | **gentle-pi** | Convierte a Pi en un orquestador con disciplina de trabajo | No |
 | **Tailscale** | El único camino de red hasta la Mac | Sí, siempre |
+| **whisper.cpp** | Transcribe el dictado por voz en la Mac | Solo para la voz |
 
 Helm habla con **herdr, tmux o zellij**. Con tmux y zellij tenés
 terminal; con herdr además tenés el estado de los agentes (trabajando,
@@ -159,6 +160,52 @@ Comprobá qué quedó instalado:
 pi list
 ```
 
+## 6. whisper.cpp, para el dictado por voz
+
+Solo hace falta si vas a usar el botón de micrófono. El teléfono graba y
+**la Mac transcribe**: el audio viaja por la misma conexión SSH, se
+transcribe local y se borra. Nada sale a un servicio de terceros.
+
+```bash
+brew install whisper.cpp
+whisper-cli --help | head -1
+```
+
+Verificado contra **whisper.cpp 1.9.2**. La fórmula se llamó
+`whisper-cpp` antes; `brew` resuelve el nombre viejo igual. El binario
+queda como `whisper-cli`, no `whisper.cpp`.
+
+### El modelo hay que bajarlo aparte
+
+Homebrew **no** descarga modelos, y lo dice en sus caveats. Helm espera
+`ggml-large-v3-turbo`, que es el que tiene los números medidos en
+`odd/tasks/voice-and-share-input.md`: 0.26x tiempo real, y con el prompt
+de vocabulario corre **más rápido** que sin él.
+
+```bash
+mkdir -p ~/.cache/whisper-cpp
+curl -L -o ~/.cache/whisper-cpp/ggml-large-v3-turbo.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+```
+
+**Pesa ~1.6 GB.** Esa ruta exacta es la que Helm busca por defecto, así
+que cualquier otra ubicación necesita configurar `modelPath` a mano.
+
+Comprobá que carga antes de depender de él:
+
+```bash
+whisper-cli -m "$HOME/.cache/whisper-cpp/ggml-large-v3-turbo.bin" \
+  -f /dev/null -nt -np; echo "exit=$?"
+```
+
+Un `exit=3` con *"failed to initialize whisper context"* significa que no
+encontró el modelo. **Medido**: pasarle el NOMBRE del modelo en vez de la
+ruta al `.bin` falla exactamente así — `whisper-cli` no resuelve nombres.
+
+> Un modelo más chico (`ggml-base`, ~150 MB) también funciona y baja
+> mucho más rápido, a costa de precisión en términos técnicos. Si lo
+> usás, apuntá `modelPath` ahí.
+
 ### gentle-ai (opcional, aparte)
 
 `gentle-pi` es un paquete de Pi. `gentle-ai` es una herramienta de línea
@@ -186,7 +233,17 @@ nc -z -G 5 "$MAC" 22 && echo "2. sshd alcanzable por la VPN OK"
 herdr session list && echo "3. herdr OK"
 pi --version && echo "4. pi OK"
 pi list | grep -q gentle-pi && echo "5. gentle-pi OK"
+
+# Solo si vas a usar el dictado por voz:
+whisper-cli -m "$HOME/.cache/whisper-cpp/ggml-large-v3-turbo.bin" \
+  -f /dev/null -nt -np >/dev/null 2>&1
+[ $? -ne 3 ] && echo "6. whisper.cpp y su modelo OK"
 ```
+
+El paso 6 se fija en que el código de salida **no** sea 3, que es el que
+`whisper-cli` devuelve cuando no puede cargar el modelo. El error por el
+`/dev/null` vacío es esperado y no importa: lo que se mide es que el
+modelo exista y cargue.
 
 El paso 2 sondea el **nombre MagicDNS**, no loopback. No es un detalle:
 loopback responde aunque Tailscale esté desconectado, así que una
