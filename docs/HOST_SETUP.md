@@ -247,6 +247,24 @@ en disco: se escribe en un directorio temporal `0700` solo mientras `openssl` fi
 timeout de 15 s) y se borra enseguida. Las respuestas HTTP que redirigen a `http://` se
 rechazan.
 
+**Un canal por dispositivo.** `device-tokens.json` tiene la forma
+`{"tokens": ["<token FCM>", ...], "ntfy_topics": ["helm-...", ...]}`. Cada teléfono se
+registra solo, por SSH, cuando se conecta: con token FCM agrega el token; sin FCM (iOS hoy)
+agrega un topic de ntfy aleatorio propio. Un archivo con solo `tokens` sigue funcionando, y
+el registro conserva la otra clave. Ante cada aviso el notifier envía a **todos** los tokens
+y a **todos** los topics, cada destino por separado: si uno falla, los demás igual reciben
+el aviso. El log dice solo cuántos (`pushed[fcm x1, ntfy x2]`), nunca un token ni un topic.
+
+Cada teléfono con topic se suscribe en la app ntfy con el topic que muestra
+**Ajustes → Notifications on this device** (**+**, pegar, servidor `ntfy.sh`). El topic es un
+secreto: quien lo conoce lee los avisos.
+
+El archivo `topic` (o `HELM_NOTIFIER_TOPIC`) es el canal heredado de todo el host y se usa
+**solo si ningún dispositivo registró nada** (ni tokens ni topics); así un host sin
+configurar sigue como antes y no hay avisos duplicados al registrarse dispositivos. Los
+dispositivos que ya no usás se acumulan en el archivo: se quitan a mano editándolo (borrarlos
+desde la app es trabajo futuro).
+
 **Migrar una instalación anterior es manual.** El instalador no detiene ni recarga el
 agente viejo. Orden: `launchctl bootout` del agente anterior, `install.sh`, comprobar que
 la credencial y los tokens estén en el directorio de instalación, y recién entonces

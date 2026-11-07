@@ -72,6 +72,8 @@ renombrado final.
 - La notificación dice qué agente, en qué proyecto, y qué estaba haciendo
 - Tocarla abre esa sesión
 - Una notificación por agente: dos agentes no se pisan
+- Push por dispositivo: cada teléfono registra su propio canal al conectarse (FCM si tiene token, o un
+  topic de ntfy propio y aleatorio si no); la Mac avisa a todos, cada uno por el suyo
 
 **Segundo plano**
 
@@ -218,6 +220,20 @@ android/app/src/main/kotlin/com/darkcodex/helm/
 Requiere provisionar FCM una vez y dejar el notifier (`host/notifier/`) corriendo en la Mac. El proyecto
 Firebase solo transporta el push: el contenido lo compone la Mac y la credencial de envío
 nunca sale de ella.
+
+**Un canal por dispositivo.** Al conectarse, cada teléfono se registra solo en la Mac
+(`~/helm-notifier/device-tokens.json`, `{"tokens": [...], "ntfy_topics": [...]}`):
+
+- con token FCM, registra el token y nada más;
+- sin FCM (hoy, iOS), genera una vez un topic de ntfy aleatorio, lo guarda en el Keychain
+  y lo registra. En **Ajustes → Notifications on this device** aparece el topic (oculto
+  por defecto) con un botón para copiarlo. En la app ntfy: **+**, pegar el topic, dejar el
+  servidor `ntfy.sh`. La app de ntfy en iOS no abre enlaces `ntfy://`, por eso el paso es manual.
+
+El topic es un secreto: quien lo conoce lee los avisos. El notifier nunca lo escribe en el
+log. Un archivo `topic` heredado (o `HELM_NOTIFIER_TOPIC`) solo se usa si **ningún**
+dispositivo se registró. Los dispositivos viejos se acumulan; por ahora se quitan editando
+el archivo (la baja desde la app es trabajo futuro).
 
 Este repo es público: `android/app/google-services.json` y `lib/firebase_options.dart`
 contienen una clave de API de Google para el cliente Firebase. No es una filtración:
