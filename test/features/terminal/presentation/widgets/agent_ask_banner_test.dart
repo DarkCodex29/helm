@@ -268,4 +268,79 @@ void main() {
     }
     handle.dispose();
   });
+
+  testWidgets('stale busy/failed state is pruned when the ask goes', (
+    tester,
+  ) async {
+    await pumpBanner(tester);
+    await serve(tester, _confirm('a1'));
+    await tester.tap(find.text('Confirm'));
+    await tester.pump();
+    await serve(
+      tester,
+      const proto.ErrorMessage(
+        code: 'internal',
+        message: 'ask a1 failed',
+        requestId: 'a1',
+      ),
+    );
+    expect(find.text('Could not send, try again'), findsOneWidget);
+    // The ask goes, then the SAME id comes back (e.g. after a reconnect).
+    await serve(tester, const proto.AskResolvedMessage('a1'));
+    expect(id(AgentAskSemantics.banner), findsNothing);
+    await serve(tester, _confirm('a1'));
+    expect(find.text('Could not send, try again'), findsNothing);
+    final confirm = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Confirm'),
+    );
+    expect(confirm.onPressed, isNotNull);
+  });
+
+  testWidgets('a late failure for an ask that is gone leaves no state', (
+    tester,
+  ) async {
+    await pumpBanner(tester);
+    await serve(tester, _confirm('a1'));
+    await tester.tap(find.text('Confirm'));
+    await tester.pump();
+    // A fresh ready clears the list (no ask_resolved); our answer is re-sent
+    // and the daemon then rejects it AFTER the ask is gone.
+    connector.last.serveReady();
+    await tester.pump();
+    await tester.pump();
+    expect(id(AgentAskSemantics.banner), findsNothing);
+    await serve(
+      tester,
+      const proto.ErrorMessage(
+        code: 'internal',
+        message: 'ask a1 failed',
+        requestId: 'a1',
+      ),
+    );
+    // The same id comes back: it must not carry a stale failed/busy mark.
+    await serve(tester, _confirm('a1'));
+    expect(find.text('Could not send, try again'), findsNothing);
+    final confirm = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Confirm'),
+    );
+    expect(confirm.onPressed, isNotNull);
+  });
+
+  testWidgets('disposing while an answer is in flight raises nothing', (
+    tester,
+  ) async {
+    await pumpBanner(tester);
+    await serve(tester, _confirm('a1'));
+    await tester.tap(find.text('Confirm'));
+    await tester.pump();
+    expect(answers(), hasLength(1)); // in flight, unanswered
+    await tester.pumpWidget(const SizedBox());
+    // Closing the client fails the in-flight answer AFTER the dispose.
+    for (final c in built) {
+      await c.close().timeout(const Duration(seconds: 5));
+    }
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }

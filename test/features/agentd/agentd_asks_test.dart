@@ -145,4 +145,73 @@ void main() {
     await pump(20);
     expect(connector.channels.single.closedByClient, isTrue);
   });
+
+  test('a provider subscribed AFTER the ask arrived still lists it', () async {
+    c.listen(agentdClientStatesProvider('p1'), (_, _) {});
+    await pump(20);
+    connector.last.serveReady();
+    connector.last.serve(_ask('a1'));
+    await pump();
+    // Nobody was watching the asks yet (inactive tab).
+    c.listen(agentdAsksProvider('p1'), (_, _) {});
+    await pump(20);
+    expect(ids(c), ['a1']);
+    expect(built, hasLength(1));
+  });
+
+  test('switching away and back (dispose, re-create) keeps the ask', () async {
+    c.listen(agentdClientStatesProvider('p1'), (_, _) {});
+    final first = c.listen(agentdAsksProvider('p1'), (_, _) {});
+    await pump(20);
+    connector.last.serveReady();
+    connector.last.serve(_ask('a1'));
+    await pump();
+    expect(ids(c), ['a1']);
+    first.close(); // the tab is no longer active
+    await pump(20);
+    connector.last.serve(_ask('a2')); // arrives while away
+    await pump();
+    c.listen(agentdAsksProvider('p1'), (_, _) {}); // back
+    await pump(20);
+    expect(ids(c), ['a1', 'a2']);
+    expect(built, hasLength(1));
+    expect(connector.channels, hasLength(1));
+  });
+
+  test('a rebuilt client resets the list to ITS snapshot', () async {
+    final k = ProviderContainer(
+      overrides: [
+        agentdClientProvider.overrideWith((ref, id) async {
+          ref.watch(agentdTokenVersionProvider(id));
+          final client = AgentdClient(
+            endpoint: const AgentdEndpoint(host: '127.0.0.1', port: 1),
+            token: _token,
+            connect: connector.call,
+          );
+          built.add(client);
+          ref.onDispose(client.close);
+          return client;
+        }),
+      ],
+    );
+    addTearDown(k.dispose);
+    k.listen(agentdClientStatesProvider('p1'), (_, _) {});
+    k.listen(agentdAsksProvider('p1'), (_, _) {});
+    await pump(20);
+    connector.last.serveReady();
+    connector.last.serve(_ask('old'));
+    await pump();
+    expect(ids(k), ['old']);
+
+    // A token (or host) change rebuilds the client.
+    k.read(agentdTokenVersionProvider('p1').notifier).state++;
+    await pump(30);
+    expect(built, hasLength(2));
+    expect(built.first.openAsks, isEmpty); // closed
+    expect(ids(k), isEmpty, reason: 'old client asks must not leak');
+    connector.last.serveReady();
+    connector.last.serve(_ask('new'));
+    await pump();
+    expect(ids(k), ['new']);
+  });
 }

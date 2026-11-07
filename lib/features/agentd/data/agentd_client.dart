@@ -161,6 +161,8 @@ class AgentdClient {
   final _states = StreamController<AgentdConnectionState>.broadcast();
   final _messages = StreamController<proto.ServerMessage>.broadcast();
   final _diagnostics = StreamController<AgentdDiagnostic>.broadcast();
+  final _asksChanged = StreamController<List<proto.AskMessage>>.broadcast();
+  final _openAsks = <String, proto.AskMessage>{};
   final _commands = <String, _Command>{};
 
   AgentdConnectionState _state = const AgentdDisconnected();
@@ -185,6 +187,34 @@ class AgentdClient {
 
   /// Non-fatal oddities such as [SeqGap].
   Stream<AgentdDiagnostic> get diagnostics => _diagnostics.stream;
+
+  /// The `ask`s the agent has open right now, in arrival order. Owned by
+  /// the client so a late subscriber (a tab that was not active when the ask
+  /// came) still sees them: a broadcast stream has no replay.
+  ///
+  /// `ask` adds (or replaces by id), `ask_resolved` removes, `ready` clears
+  /// (the daemon re-sends every open ask right after it). A plain drop keeps
+  /// them until the next `ready`; a fatal failure and [close] clear them.
+  List<proto.AskMessage> get openAsks => List.unmodifiable(_openAsks.values);
+
+  /// The snapshot first, then every change. Each listener gets its own
+  /// copy of the current list as its first event.
+  Stream<List<proto.AskMessage>> get openAsksChanges {
+    late StreamController<List<proto.AskMessage>> out;
+    StreamSubscription<List<proto.AskMessage>>? sub;
+    out = StreamController<List<proto.AskMessage>>(
+      onListen: () {
+        out.add(openAsks);
+        sub = _asksChanged.stream.listen(out.add, onDone: out.close);
+      },
+      onCancel: () => sub?.cancel(),
+    );
+    return out.stream;
+  }
+
+  void _asksUpdated() {
+    if (!_asksChanged.isClosed) _asksChanged.add(openAsks);
+  }
 
   @override
   String toString() => 'AgentdClient($endpoint, $_state)';
@@ -292,6 +322,10 @@ class AgentdClient {
           return;
         }
         _ready = true;
+        if (_openAsks.isNotEmpty) {
+          _openAsks.clear();
+          _asksUpdated();
+        }
         _setState(AgentdConnected(AgentState.fromWire(m.agentState.wire)));
         _messages.add(m);
         _flush(channel);
@@ -302,7 +336,12 @@ class AgentdClient {
         _messages.add(m);
       case proto.AckMessage():
         _settle(m.requestId, _Kind.request);
+      case proto.AskMessage():
+        _openAsks[m.requestId] = m;
+        _asksUpdated();
+        _messages.add(m);
       case proto.AskResolvedMessage():
+        if (_openAsks.remove(m.requestId) != null) _asksUpdated();
         _settle(m.requestId, _Kind.answer);
         _messages.add(m);
       case proto.ErrorMessage():
@@ -423,12 +462,19 @@ class AgentdClient {
     _reconnectTimer = _timer(delay, _open);
   }
 
+  void _clearAsks() {
+    if (_openAsks.isEmpty) return;
+    _openAsks.clear();
+    _asksUpdated();
+  }
+
   void _fail(AgentdFailure reason) {
     _detach();
     _connectGuard?.cancel();
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _failAll(AgentdCommandError.disconnected);
+    _clearAsks();
     _setState(AgentdFailed(reason));
   }
 
@@ -523,11 +569,13 @@ class AgentdClient {
     final channel = _channel;
     _detach();
     _failAll(AgentdCommandError.closed);
+    _clearAsks();
     if (_state is! AgentdFailed) _setState(const AgentdDisconnected());
     if (channel != null) await _safeClose(channel);
     await _states.close();
     await _messages.close();
     await _diagnostics.close();
+    await _asksChanged.close();
   }
 }
 

@@ -159,3 +159,21 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   a late answer's `ask_resolved` rejection shows nothing (the row goes with
   the `ask_resolved` frame); any other failure re-enables the buttons with
   "Could not send, try again". A double tap sends one frame.
+- **L13** — The independent verifier failed T4 (S1, S4); fixed test-first by a
+  worker, uncommitted. (1) HIGH, late subscribers lost open asks: every tab
+  keeps its profile connected but only the ACTIVE profile mounts the banner,
+  and `agentdAsksProvider` started from an empty map over a broadcast stream
+  with no replay, so an ask for an inactive tab (or one open across a tab
+  switch) never showed while the badge said "needs you". The shared
+  `AgentdClient` now owns the snapshot: `openAsks` (unmodifiable, arrival
+  order) and `openAsksChanges` (snapshot first, then updates). `ask` adds,
+  `ask_resolved` removes, `ready` clears (the daemon replays), a fatal
+  failure and `close()` clear; a plain drop keeps them until the next
+  `ready`. The provider emits the snapshot and follows the changes; it still
+  never connects and keeps the states provider alive. (2) A client rebuilt
+  by a token change resets the list to the new client's snapshot (tested).
+  (3) The banner pruned neither `_sending` nor `_failed` for asks that went
+  away, and a late failure re-added a mark for a gone ask: both are pruned on
+  every build and a failure only marks an ask still open. (4) Disposing the
+  banner with an answer in flight raises nothing (tested). Unverified: real
+  device, Linux CI.

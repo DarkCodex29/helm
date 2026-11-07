@@ -36,6 +36,11 @@ class _AgentAskBannerState extends ConsumerState<AgentAskBanner> {
   /// Asks whose last send failed (not by `ask_resolved`).
   final _failed = <String>{};
 
+  bool _isOpen(String id) {
+    final asks = ref.read(agentdAsksProvider(widget.profileId)).valueOrNull;
+    return asks != null && asks.any((a) => a.requestId == id);
+  }
+
   Future<void> _answer(
     proto.AskMessage ask, {
     String? value,
@@ -63,13 +68,14 @@ class _AgentAskBannerState extends ConsumerState<AgentAskBanner> {
       // Someone else answered first: the ask_resolved frame removes the row.
       setState(() {
         _sending.remove(id);
-        if (e.code != 'ask_resolved') _failed.add(id);
+        if (e.code != 'ask_resolved' && _isOpen(id)) _failed.add(id);
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _sending.remove(id);
-        _failed.add(id);
+        // A late failure for an ask that is gone must not leave state behind.
+        if (_isOpen(id)) _failed.add(id);
       });
     }
   }
@@ -79,9 +85,14 @@ class _AgentAskBannerState extends ConsumerState<AgentAskBanner> {
     final connected =
         ref.watch(agentdClientStatesProvider(widget.profileId)).valueOrNull
             is AgentdConnected;
-    final asks =
-        ref.watch(agentdAsksProvider(widget.profileId)).valueOrNull ??
-        const <proto.AskMessage>[];
+    final asksValue = ref.watch(agentdAsksProvider(widget.profileId));
+    final asks = asksValue.valueOrNull ?? const <proto.AskMessage>[];
+    if (asksValue.hasValue) {
+      // Forget marks of asks that are gone (derived state, no rebuild).
+      final open = {for (final a in asks) a.requestId};
+      _sending.removeWhere((id) => !open.contains(id));
+      _failed.removeWhere((id) => !open.contains(id));
+    }
     if (!connected || asks.isEmpty) return const SizedBox.shrink();
 
     final ask = asks.first;

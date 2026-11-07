@@ -6,13 +6,11 @@ import 'package:helm_protocol/helm_protocol.dart' as proto;
 
 /// The `ask`s the agent of one profile has open right now, oldest first.
 ///
-/// Folded from the client's message stream:
-/// * `ask` adds (or replaces, by request id);
-/// * `ask_resolved` removes (whoever answered, or the daemon cleared it);
-/// * `ready` clears, because the daemon re-sends every still-open ask right
-///   after `ready` on each new socket, so a reconnect never leaves ghosts
-///   nor duplicates;
-/// * everything else is ignored.
+/// The shared [AgentdClient] owns the snapshot (`ask` adds, `ask_resolved`
+/// removes, `ready` clears because the daemon replays every open ask right
+/// after it). This provider emits that snapshot immediately and then
+/// follows its changes, so a banner mounted late (another tab was active
+/// when the ask came) still lists it.
 ///
 /// This provider never connects. It keeps [agentdClientStatesProvider]
 /// alive, which owns the single connection of the profile, so listeners of
@@ -29,27 +27,10 @@ final agentdAsksProvider = StreamProvider.autoDispose
           out.add(const []);
           return;
         }
-        final open = <String, proto.AskMessage>{};
-        void emit() {
-          if (!out.isClosed) out.add(List.unmodifiable(open.values));
-        }
-
-        final sub = client.messages.listen((m) {
-          switch (m) {
-            case proto.ReadyMessage():
-              if (open.isEmpty) return;
-              open.clear();
-            case proto.AskMessage():
-              open[m.requestId] = m;
-            case proto.AskResolvedMessage():
-              if (open.remove(m.requestId) == null) return;
-            default:
-              return;
-          }
-          emit();
+        final sub = client.openAsksChanges.listen((l) {
+          if (!out.isClosed) out.add(l);
         });
         ref.onDispose(sub.cancel);
-        emit();
       }().catchError((Object _) {
         if (!out.isClosed) out.add(const []);
       });
