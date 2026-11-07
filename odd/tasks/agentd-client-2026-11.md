@@ -42,8 +42,8 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 |---|---|---|---|---|
 | T1 | S1-S5 | App protocol client `AgentdClient` + token provisioning over SFTP into the Keychain; tested against an in-process `AgentServer` + fake Pi | worker | 8102e58, c993ef6, 75b4b3e, 1b924f4, 06f2b74, 5dc51ba (PR #10, merge b5e0c88) |
 | T2 | S1, S4, S5 | Run `helm-agentd` on the Mac as a LaunchAgent bound to the Tailscale IP (installer like the notifier's) | worker | 8df6919, b333ec0, 93ad16a, 44f63de, e2f44c2 (PR #9, merge 960ca7d) |
-| T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | |
-| T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | pending | |
+| T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | 95ca413, 2b41ff8, 937ce9e, 9772a73, 2bf99aa (PR #11, merge c9f8228) |
+| T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | |
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer) | pending | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
@@ -145,3 +145,17 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   Pinned by a new arming test (RED: 0 host polls under an agentd badge);
   fixed by keeping the `agentsNotifier` listener mounted in every branch
   and switching only what is drawn.
+- **L12** — T4 built by a worker (S1, S4; S2, S3, S5 respected), uncommitted.
+  `agentdAsksProvider` (`data/agentd_asks.dart`) folds the client's messages
+  into the open asks: `ask` adds/replaces by id, `ask_resolved` removes,
+  `ready` clears (the daemon replays open asks right after it). It never
+  connects; it keeps `agentdClientStatesProvider` alive, so one client and
+  one socket per profile. Decisions: (1) `input`/`editor` are answered on
+  the Mac only: the banner says so and offers Cancel, no text field. (2) No
+  client-side timer: the daemon owns the ask's lifetime and sends
+  `ask_resolved`. (3) The `AgentAskBanner` sits in the `SessionRecoveryBanner`
+  slot of `HomeScreen`, for the ACTIVE tab's profile only, hidden without
+  asks or without a connected daemon. (4) First answer wins is the daemon's:
+  a late answer's `ask_resolved` rejection shows nothing (the row goes with
+  the `ask_resolved` frame); any other failure re-enables the buttons with
+  "Could not send, try again". A double tap sends one frame.
