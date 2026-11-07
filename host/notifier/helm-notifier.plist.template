@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__INSTALL_DIR__/notifier.py</string>
+    </array>
+
+    <!-- The notifier is a long-lived watcher: if it dies, nobody is told
+         when an agent blocks, so launchd must bring it back. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Floor on respawn frequency: a notifier that cannot reach herdr must
+         not spin. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Only crash output lands here. Normal logging goes to the rotating
+         file (HELM_NOTIFIER_LOG), so this file stays tiny. -->
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/notifier.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/notifier.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HELM_NOTIFIER_DIR</key>
+        <string>__INSTALL_DIR__</string>
+    </dict>
+</dict>
+</plist>

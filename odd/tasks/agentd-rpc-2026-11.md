@@ -44,7 +44,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | T4c | S1, S5 | Per-client backpressure: bound each socket's outgoing queue, drop or disconnect a slow client without stalling the others | pending | |
 | T4d | S1, S6 | Cap concurrent unauthenticated connections and pre-auth buffering in helm-agentd | pending | |
 | T4e | S6 | Replace owner-specific path fixtures in the app tests with neutral ones | pending | |
-| T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
+| T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | worker | |
 
 ## Log
 
@@ -196,3 +196,29 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   macOS), and the hardened token store correctly refused them. Fixed in
   the tests (`af3d6a0`, chmod 700 on their temp dirs), reproduced locally
   with TMPDIR at 0755 first; rerun 42354088485 green on all three jobs.
+- **L15** — T5 built (S2, S5, S6), uncommitted. The out-of-repo Python
+  LaunchAgent is now `host/notifier/`: `notifier.py`, `fcm.py`,
+  `provision_fcm.py`, plus new `config.py` (all paths from `HELM_*` env vars)
+  and `hlog.py` (rotating, redacting log), `helm-notifier.plist.template`,
+  `install.sh` (POSIX sh, `--dry-run`, prints `launchctl bootstrap`, runs it
+  only with `--load`, never touches credentials/tokens/the old agent), a
+  `.gitignore` (credentials, tokens, topic, logs, pem, json except fixtures),
+  stdlib `unittest` tests with fake fixtures, and a `notifier` CI job
+  (system python3, no setup-python). Still system Python plus openssl only.
+  Sanitizations (kinds, no values): the FCM project id hardcoded in
+  provisioning became `--project` / `HELM_FCM_PROJECT_ID`; the owner home
+  paths for install dir, credentials, tokens and log became env-derived with a
+  `~/helm-notifier` default; the owner-specific LaunchAgent label and absolute
+  paths became `__LABEL__`/`__INSTALL_DIR__`/`__PYTHON__` placeholders with a
+  generic default label; the ntfy topic became optional config (file or env)
+  instead of a crash at import, and is never logged; the provisioning and
+  selftest output no longer prints the project id or the service-account
+  e-mail; prose that named the owner and a specific host in comments was
+  rewritten generically; fixtures use fake ids and tokens only. Behavior
+  changes vs the live script: rotating 1 MB x 3 log, umask 077; the message
+  body, token suffixes and topic are no longer logged (titles clipped to 40);
+  `describe()` returned 3 values on lookup failure while the caller unpacks 4
+  (alert dropped) and now returns 4; missing `topic` no longer kills startup;
+  malformed token entries are dropped; non-https or non-JSON FCM responses
+  raise RuntimeError. Migrating the live install is a manual step for the
+  owner and was not done.
