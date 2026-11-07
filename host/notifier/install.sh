@@ -18,7 +18,7 @@ PYTHON=/usr/bin/python3
 PLIST_DIR=$HOME/Library/LaunchAgents
 DRY=0
 LOAD=0
-FILES="notifier.py fcm.py hlog.py config.py netsafe.py provision_fcm.py"
+FILES="notifier.py fcm.py devices.py hlog.py config.py netsafe.py provision_fcm.py"
 
 usage() {
   sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'

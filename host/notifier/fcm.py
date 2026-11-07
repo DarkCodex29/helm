@@ -175,30 +175,15 @@ def access_token():
     return _cached["token"]
 
 
-def device_tokens():
-    """Every device registered to receive helm's notifications.
-
-    Missing, empty, unreadable or malformed files all mean "none": the caller
-    then falls back to ntfy. Entries that are not non-empty strings are
-    dropped (the live code passed them on to FCM) and duplicates collapse.
-    """
-    path = config.tokens_path()
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path) as handle:
-            raw = json.load(handle).get("tokens", [])
-    except Exception:
-        return []
-    if not isinstance(raw, list):
-        return []
-    tokens = []
-    for item in raw:
-        if isinstance(item, str) and item.strip() and item.strip() not in tokens:
-            tokens.append(item.strip())
-    for token in tokens:
-        hlog.register_secret(token)
-    return tokens
+# Device-file parsing lives in devices.py so a failure to import this module
+# (FCM) can never take the ntfy devices down with it. Re-exported here for
+# existing callers.
+from devices import (  # noqa: E402,F401
+    _clean_strings,
+    _read_device_file,
+    device_ntfy_topics,
+    device_tokens,
+)
 
 
 def build_message(device_token, title, body, data=None, tag=None):

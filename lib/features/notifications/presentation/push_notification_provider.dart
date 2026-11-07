@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:helm/features/notifications/data/local_notification_presenter.dart';
 import 'package:helm/features/notifications/data/push_messaging_gateway.dart';
 import 'package:helm/features/notifications/data/push_notification_service.dart';
+import 'package:helm/features/notifications/domain/notification_channel.dart';
 import 'package:helm/features/notifications/presentation/pending_session_alert.dart';
 import 'package:helm/firebase_options.dart';
 
@@ -30,3 +31,9 @@ final pushNotificationServiceProvider = Provider<PushNotificationService>((
   ref.onDispose(service.dispose);
   return service;
 });
+
+/// The channel this device receives push on, for the Settings screen.
+final notificationChannelProvider =
+    FutureProvider.autoDispose<NotificationChannel>(
+      (ref) => ref.watch(pushNotificationServiceProvider).resolveChannel(),
+    );
