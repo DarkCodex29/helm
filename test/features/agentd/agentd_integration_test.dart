@@ -187,4 +187,52 @@ void main() {
 
     await client.send('hello').timeout(_bound);
   });
+
+  test(
+    'ask: the phone answers, first answer wins, a late one is rejected',
+    () async {
+      final first = rig.client();
+      final second = rig.client();
+      final messages = <proto.ServerMessage>[];
+      first.messages.listen(messages.add);
+      final asked = first.messages
+          .firstWhere((m) => m is proto.AskMessage)
+          .timeout(_bound);
+      final secondAsked = second.messages
+          .firstWhere((m) => m is proto.AskMessage)
+          .timeout(_bound);
+      final secondResolved = second.messages
+          .firstWhere((m) => m is proto.AskResolvedMessage)
+          .timeout(_bound);
+      final done = first.messages
+          .firstWhere((m) => m is proto.MessageDoneMessage)
+          .timeout(_bound);
+
+      first.connect();
+      second.connect();
+      await _until(first, (s) => s is AgentdConnected);
+      await _until(second, (s) => s is AgentdConnected);
+
+      await first.send('ask:confirm').timeout(_bound);
+      final ask = await asked as proto.AskMessage;
+      await secondAsked;
+      expect(ask.method, 'confirm');
+
+      await first.answer(ask.requestId, confirmed: true).timeout(_bound);
+      await secondResolved;
+      final end = await done as proto.MessageDoneMessage;
+      expect(end.text, 'Confirmed.');
+      expect(messages.whereType<proto.AskResolvedMessage>(), hasLength(1));
+
+      // The second device answers after the fact: rejected, never applied.
+      await expectLater(
+        second.answer(ask.requestId, confirmed: false).timeout(_bound),
+        throwsA(
+          isA<AgentdCommandException>()
+              .having((e) => e.kind, 'kind', AgentdCommandError.rejected)
+              .having((e) => e.code, 'code', 'ask_resolved'),
+        ),
+      );
+    },
+  );
 }

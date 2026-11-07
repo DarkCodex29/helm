@@ -66,6 +66,83 @@ void main() {
     await pump();
   }
 
+  group('open asks snapshot', () {
+    proto.AskMessage ask(String id) =>
+        proto.AskMessage(requestId: id, method: 'confirm', title: 'T $id');
+    List<String> ids() => [for (final a in client.openAsks) a.requestId];
+
+    test('follows ask, resolved and the ready replay', () async {
+      final c = await connectAndReady();
+      expect(client.openAsks, isEmpty);
+      c.serve(ask('a1'));
+      c.serve(ask('a2'));
+      await pump();
+      expect(ids(), ['a1', 'a2']);
+      c.serve(const proto.AskResolvedMessage('a1'));
+      await pump();
+      expect(ids(), ['a2']);
+      // A replay after a new ready clears first, then re-adds what is open.
+      c.serveReady();
+      c.serve(ask('a3'));
+      await pump();
+      expect(ids(), ['a3']);
+      expect(() => client.openAsks.add(ask('x')), throwsUnsupportedError);
+    });
+
+    test('a new listener gets the snapshot first, then updates', () async {
+      final c = await connectAndReady();
+      c.serve(ask('a1'));
+      await pump();
+      final seen = <List<String>>[];
+      final sub = client.openAsksChanges.listen(
+        (l) => seen.add([for (final a in l) a.requestId]),
+      );
+      addTearDown(sub.cancel);
+      await pump();
+      expect(seen, [
+        ['a1'],
+      ]);
+      c.serve(ask('a2'));
+      await pump();
+      expect(seen.last, ['a1', 'a2']);
+      c.serve(const proto.AskResolvedMessage('a1'));
+      await pump();
+      expect(seen.last, ['a2']);
+    });
+
+    test('is cleared on close()', () async {
+      final c = await connectAndReady();
+      c.serve(ask('a1'));
+      await pump();
+      await client.close().timeout(_bound);
+      expect(client.openAsks, isEmpty);
+    });
+
+    test('is cleared on a fatal failure and announced', () async {
+      final c = await connectAndReady();
+      c.serve(ask('a1'));
+      await pump();
+      final seen = <int>[];
+      final sub = client.openAsksChanges.listen((l) => seen.add(l.length));
+      addTearDown(sub.cancel);
+      await pump();
+      c.serverClose(4401);
+      await pump();
+      expect(client.state, isA<AgentdFailed>());
+      expect(client.openAsks, isEmpty);
+      expect(seen.last, 0);
+    });
+
+    test('a plain drop keeps it until the next ready replays', () async {
+      final c = await connectAndReady();
+      c.serve(ask('a1'));
+      await pump();
+      c.serverClose(1006);
+      await pump();
+      expect(ids(), ['a1']);
+    });
+  });
+
   group('handshake', () {
     test('hello is the first frame and carries token + protocol', () async {
       client.connect();
