@@ -37,7 +37,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | ID | Specs | Task | Route | Commit |
 |---|---|---|---|---|
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
-| T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | |
+| T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
 | T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | pending | |
 | T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | pending | |
 | T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
@@ -78,3 +78,9 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   `dart pub get` in `packages/helm_protocol` before analyzing (a workspace
   would avoid that but needs root `pubspec.yaml` changes, out of this task's
   surface).
+- **L7** — T2 committed as three slices, each green on its own: codec
+  (`d6e92de`, 16 tests), Pi records (`f5316c5`, 31), fake Pi + integration
+  (`638aa22`, 52). The parent added `--fatal-infos` to the package's
+  `dart analyze` in CI, because one info-level lint had passed unnoticed.
+  Slice boundary: T2 ships as its own PR; T3 starts a new branch from
+  `main` after it merges.
