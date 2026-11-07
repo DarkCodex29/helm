@@ -63,11 +63,6 @@ class SftpFileService {
 
   // ── Public API ─────────────────────────────────────────────────────────
 
-  /// The ONE SFTP session of this connection (opened lazily on first use),
-  /// for callers that need a raw read, e.g. the agentd token provisioner.
-  /// Never opens a second channel; do not close it, the owner does.
-  Future<SftpSession> sharedSession() => _obtainSession();
-
   /// Lists the directory at [path].
   ///
   /// NEVER THROWS. Every failure comes back as [RemoteListingFailed] so a

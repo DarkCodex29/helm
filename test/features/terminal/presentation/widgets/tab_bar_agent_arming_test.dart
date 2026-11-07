@@ -21,8 +21,6 @@
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:helm/features/agentd/data/agentd_providers.dart';
-import 'package:helm/features/agentd/domain/agentd_tab_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
@@ -76,11 +74,7 @@ Future<TerminalSession> _connected(FakeAgentAdapter adapter) async {
   return session;
 }
 
-Widget _tabStrip(
-  TerminalSession session, {
-  AgentdTabState agentd = const AgentdTabAbsent(),
-}) => ProviderScope(
-  overrides: [agentdTabStateProvider.overrideWith((ref, id) => agentd)],
+Widget _tabStrip(TerminalSession session) => ProviderScope(
   child: MaterialApp(
     home: Scaffold(
       appBar: AppBar(
@@ -106,38 +100,6 @@ Widget _tabStrip(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  // The PTY (herdr) lane must stay armed whatever helm-agentd reports: an
-  // agentd badge on top of it may never switch the host poll off.
-  testWidgets('herdr polling stays armed while helm-agentd owns the badge', (
-    tester,
-  ) async {
-    final adapter = FakeAgentAdapter()
-      ..whenAgents(
-        const MuxAgentsAvailable([
-          (
-            target: 'w1:p1',
-            label: 'claude',
-            state: AgentState.idle,
-            tabId: null,
-            workspaceId: null,
-          ),
-        ]),
-      );
-    final session = await _connected(adapter);
-
-    await tester.pumpWidget(
-      _tabStrip(session, agentd: const AgentdTabKnown(AgentdUiState.needsYou)),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byType(AgentdBadge), findsOneWidget);
-    expect(
-      adapter.listAgentsCalls,
-      greaterThan(0),
-      reason: 'the herdr lane is still observed under the agentd badge',
-    );
-  });
 
   testWidgets(
     'merely RENDERING the tab strip asks the host who is running - no '

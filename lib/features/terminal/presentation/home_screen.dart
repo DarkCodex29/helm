@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:helm/core/utils/logger.dart';
-import 'package:helm/features/agentd/data/agentd_provisioner.dart';
 import 'package:helm/core/testing/semantic_ids.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/core/theme/terminal_theme.dart';
@@ -20,7 +19,6 @@ import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
-import 'package:helm/features/terminal/presentation/widgets/agent_ask_banner.dart';
 import 'package:helm/features/terminal/presentation/widgets/session_recovery_banner.dart';
 import 'package:helm/features/terminal/presentation/widgets/tab_bar_widget.dart';
 import 'package:helm/features/terminal/presentation/widgets/terminal_keyboard.dart';
@@ -112,13 +110,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ref.listenManual<TabsState>(tabsProvider, (_, _) {
       _tryDeliverPendingShare();
     });
-
-    // Copies the helm-agentd token from the host once per profile when a
-    // tab first connects (see AgentdProvisioner). Fire-and-forget: it never
-    // touches the PTY lane and swallows its own failures.
-    ref.listenManual<TabsState>(tabsProvider, (_, next) {
-      ref.read(agentdProvisionerProvider.notifier).track(next.tabs);
-    }, fireImmediately: true);
 
     // Deliberately UNAWAITED, and that is load-bearing rather than an
     // oversight. A widget test that pumps this screen without mocking
@@ -465,12 +456,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 await ref.read(sessionSnapshotRepoProvider).markClean();
                 if (mounted) setState(() => _pendingRecovery = null);
               },
-            ),
-          // Only the ACTIVE tab's profile: its agent is the one asking.
-          if (tabsState.activeTab != null)
-            AgentAskBanner(
-              key: ValueKey('agent-ask-${tabsState.activeTab!.profile.id}'),
-              profileId: tabsState.activeTab!.profile.id,
             ),
           Expanded(
             child: tabsState.hasTabs

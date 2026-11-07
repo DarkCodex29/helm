@@ -372,30 +372,3 @@ class KeyboardLayoutSemantics {
   /// can never be satisfied by the other meaning something unrelated.
   static const voiceStatus = 'helm.terminal.keyboard_voice_status';
 }
-
-/// Identifiers on `AgentAskBanner`, the strip that lets the phone answer a
-/// question the agent is waiting on.
-class AgentAskSemantics {
-  const AgentAskSemantics._();
-
-  /// The whole banner. Its absence means no ask is open (or no agentd link).
-  static const banner = 'helm.agent_ask.banner';
-
-  /// The "Agent needs you" header.
-  static const header = 'helm.agent_ask.header';
-
-  /// The "+N more" count of further open asks.
-  static const more = 'helm.agent_ask.more';
-
-  static const confirmButton = 'helm.agent_ask.confirm_button';
-  static const declineButton = 'helm.agent_ask.decline_button';
-  static const cancelButton = 'helm.agent_ask.cancel_button';
-
-  /// The "Answer this on the Mac" hint for `input` / `editor` asks.
-  static const macHint = 'helm.agent_ask.mac_hint';
-
-  /// The inline "Could not send, try again" line.
-  static const sendError = 'helm.agent_ask.send_error';
-
-  static String option(int index) => 'helm.agent_ask.option_$index';
-}

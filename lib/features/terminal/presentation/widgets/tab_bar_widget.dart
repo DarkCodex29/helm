@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:helm/features/agentd/data/agentd_providers.dart';
-import 'package:helm/features/agentd/domain/agentd_tab_state.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
@@ -124,28 +121,11 @@ class TerminalTabBar extends StatelessWidget {
             // Agent state, glanceable without opening the drawer — the
             // point of putting it here at all.
             //
-            // Precedence: a state measured by helm-agentd wins; a daemon
-            // that cannot tell shows a small hint; otherwise the PTY (herdr)
-            // badge renders exactly as before.
-            //
-            // The herdr listener stays mounted in EVERY branch: listening to
-            // `agentsNotifier` is what arms the host poll, and the PTY lane
-            // must keep working underneath helm-agentd, which can drop at
-            // any moment. Only what is drawn changes, never what is observed.
+            // The listener is what arms the host poll (herdr), so it stays
+            // mounted whatever is drawn.
             ValueListenableBuilder<AgentSnapshot>(
               valueListenable: tab.session.agentsNotifier,
-              builder: (context, snapshot, _) => Consumer(
-                builder: (context, ref, _) {
-                  final agentd = ref.watch(
-                    agentdTabStateProvider(tab.profile.id),
-                  );
-                  return switch (agentd) {
-                    AgentdTabKnown(:final state) => AgentdBadge(state: state),
-                    AgentdTabUnavailable(:final hint) => AgentdHint(hint: hint),
-                    AgentdTabAbsent() => _herdrBadge(snapshot),
-                  };
-                },
-              ),
+              builder: (context, snapshot, _) => _herdrBadge(snapshot),
             ),
             Flexible(
               child: Text(
