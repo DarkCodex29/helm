@@ -39,7 +39,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
 | T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
 | T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | c33c2da, f708f9c |
-| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | worker | e569564, f4a9458, 3d70318, a9aab95 + fixes |
+| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | worker | e569564, f4a9458, 3d70318, a9aab95, fb34c04, 6871989, af3d6a0 (PR #4) |
 | T4b | S1 | History and resync: on a `seq` gap the phone asks for `get_messages` (Pi) so it can rebuild the transcript | pending | |
 | T4c | S1, S5 | Per-client backpressure: bound each socket's outgoing queue, drop or disconnect a slow client without stalling the others | pending | |
 | T4d | S1, S6 | Cap concurrent unauthenticated connections and pre-auth buffering in helm-agentd | pending | |
@@ -191,3 +191,8 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   noted: pre-existing owner-path fixtures in the app tests (e.g.
   `test/features/files/domain/remote_path_test.dart:15`) violate S6
   repo-wide; recorded as T4e.
+- **L14** — PR #4 merged (`74a8b65`). First CI run failed 10 helm_agentd
+  tests on Linux only: Dart temp directories are 0755 there (0700 on
+  macOS), and the hardened token store correctly refused them. Fixed in
+  the tests (`af3d6a0`, chmod 700 on their temp dirs), reproduced locally
+  with TMPDIR at 0755 first; rerun 42354088485 green on all three jobs.
