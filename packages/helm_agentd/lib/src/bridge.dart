@@ -302,7 +302,13 @@ class AgentBridge implements Bridge {
     final label = requestId == null ? 'command' : 'request $requestId';
     void fail(String code, String detail) {
       if (requestId != null) _requestIds.fail(requestId);
-      client.send(ErrorMessage(code: code, message: '$label: $detail'));
+      client.send(
+        ErrorMessage(
+          code: code,
+          message: '$label: $detail',
+          requestId: requestId,
+        ),
+      );
     }
 
     final Future<PiResponse> pending;
@@ -344,6 +350,7 @@ class AgentBridge implements Bridge {
           message: resolved
               ? 'ask ${r.requestId} was already answered'
               : 'no open ask ${r.requestId}',
+          requestId: r.requestId,
         ),
       );
       return;
@@ -362,7 +369,13 @@ class AgentBridge implements Bridge {
     try {
       supervisor.sendUiResponse(response);
     } on PiSupervisorException catch (e) {
-      client.send(ErrorMessage(code: 'not_running', message: e.toString()));
+      client.send(
+        ErrorMessage(
+          code: 'not_running',
+          message: 'ask ${r.requestId}: $e',
+          requestId: r.requestId,
+        ),
+      );
       return;
     }
     _asks.remove(r.requestId);

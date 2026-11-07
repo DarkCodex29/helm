@@ -99,9 +99,19 @@ dependencies:
   # above needs, with no extra permission package.
   record: 7.1.2
 
+  # Phone <-> helm-agentd protocol models (pure Dart, shared with the
+  # daemon). A path dependency: it lives in this repository.
+  helm_protocol:
+    path: packages/helm_protocol
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # The daemon, for integration tests ONLY (an in-process AgentServer).
+  # A dev_dependency so the shipped app never contains the daemon.
+  helm_agentd:
+    path: packages/helm_agentd
 
   flutter_lints: ^6.0.0
 

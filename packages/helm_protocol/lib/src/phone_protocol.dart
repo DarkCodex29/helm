@@ -392,9 +392,17 @@ class InterruptedMessage extends ServerMessage {
 }
 
 class ErrorMessage extends ServerMessage {
-  const ErrorMessage({required this.code, required this.message});
+  const ErrorMessage({
+    required this.code,
+    required this.message,
+    this.requestId,
+  });
   final String code;
   final String message;
+
+  /// The request (or ask) id this error refers to, when it refers to one.
+  /// Omitted from the wire when null so older peers see the same frame.
+  final String? requestId;
   @override
   String get type => 'error';
   @override
@@ -402,6 +410,7 @@ class ErrorMessage extends ServerMessage {
     'type': type,
     'code': code,
     'message': message,
+    if (requestId != null) 'requestId': requestId,
   };
 }
 
@@ -495,6 +504,7 @@ ServerMessage? _decodeServer(Map<String, Object?> m) {
       return ErrorMessage(
         code: _req<String>(m, 'code'),
         message: _req<String>(m, 'message'),
+        requestId: m['requestId'] is String ? m['requestId']! as String : null,
       );
   }
   return null;
