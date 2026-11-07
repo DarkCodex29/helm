@@ -16,6 +16,7 @@ anterior: dejar la Mac en condiciones de que valga la pena conectarse.
 | **gentle-pi** | Convierte a Pi en un orquestador con disciplina de trabajo | No |
 | **Tailscale** | El único camino de red hasta la Mac | Sí, siempre |
 | **whisper.cpp** | Transcribe el dictado por voz en la Mac | Solo para la voz |
+| **helm-notifier** | Avisa al teléfono (FCM) cuando un agente se bloquea o termina; vive en `host/notifier/` | Solo para las notificaciones |
 
 Helm habla con **herdr, tmux o zellij**. Con tmux y zellij tenés
 terminal; con herdr además tenés el estado de los agentes (trabajando,
@@ -217,6 +218,39 @@ brew install gentleman-programming/tap/gentle-ai
 
 Esta máquina la usa para CodeGraph (`gentle-ai codegraph init`). No
 hace falta para Helm.
+
+### helm-notifier (opcional, notificaciones)
+
+El daemon que se suscribe a herdr y empuja a FCM vive en este repo, en
+`host/notifier/`. Usa solo `/usr/bin/python3` y `openssl`.
+
+```bash
+host/notifier/install.sh --dry-run   # muestra el plan, no escribe nada
+host/notifier/install.sh             # copia los scripts y renderiza el plist
+```
+
+`install.sh` imprime el comando `launchctl bootstrap gui/$(id -u) <plist>`; solo lo
+ejecuta si le pasás `--load`. Etiqueta por defecto: `dev.helm.notifier`. Opciones:
+`--install-dir`, `--label`, `--python`, `--plist-dir`.
+
+Lo que **no** instala, a propósito: la credencial de servicio FCM (`fcm-sa.json`), los
+tokens de dispositivo (`device-tokens.json`) y el `topic` de ntfy. Van en el directorio de
+instalación (por defecto `~/helm-notifier/`, o `HELM_NOTIFIER_DIR`), con permisos `0600`, y
+nunca en el repo. Para generar la credencial una vez:
+`python3 host/notifier/provision_fcm.py --project <id-de-tu-proyecto-firebase>`.
+
+El log rota solo (1 MB × 3, `notifier.log` en el directorio de instalación) y no registra
+tokens, credenciales ni el texto de los mensajes. Todo queda en `0600`: el plist fija
+`Umask` 077, `install.sh` pre-crea `notifier.out` y `notifier.err` en `0600`, y al arrancar
+el daemon ajusta a `0600` un log o respaldo que ya existiera. La clave privada ya no se deja
+en disco: se escribe en un directorio temporal `0700` solo mientras `openssl` firma (con
+timeout de 15 s) y se borra enseguida. Las respuestas HTTP que redirigen a `http://` se
+rechazan.
+
+**Migrar una instalación anterior es manual.** El instalador no detiene ni recarga el
+agente viejo. Orden: `launchctl bootout` del agente anterior, `install.sh`, comprobar que
+la credencial y los tokens estén en el directorio de instalación, y recién entonces
+`launchctl bootstrap` del nuevo. Dos agentes a la vez mandarían cada aviso duplicado.
 
 ---
 

@@ -101,17 +101,29 @@ directo a FCM: no hay servicio intermedio ni cuenta de terceros.
 
 ### Componente del host
 
-Vive fuera de este repo, en `~/helm-notifier/`:
+Vive en este repo, en [`host/notifier/`](host/notifier/):
 
 | Archivo | Rol |
 |---|---|
 | `notifier.py` | Se suscribe a `events.subscribe` de herdr, enriquece el evento y entrega |
 | `fcm.py` | Firma un JWT con `openssl` y empuja a FCM HTTP v1 |
-| `provision_fcm.py` | Provisiona la credencial una sola vez |
+| `provision_fcm.py` | Provisiona la credencial una sola vez (el id del proyecto se pasa con `--project`) |
+| `hlog.py` | Log con rotación (1 MB × 3), archivos `0600` y redacción de secretos |
+| `config.py` | Rutas y opciones, todo por variables `HELM_*` |
+| `helm-notifier.plist.template` | Plantilla del LaunchAgent |
+| `install.sh` | Copia los scripts, renderiza el plist e imprime el `launchctl bootstrap` |
 
-Se instala como LaunchAgent (`~/Library/LaunchAgents/com.gian.helm-notifier.plist`).
-Usa solo el Python del sistema y `openssl` — sin dependencias que un `brew upgrade` pueda
-huerfanizar meses después.
+Se instala como LaunchAgent con `host/notifier/install.sh` (`--dry-run` para ver el plan;
+solo ejecuta `launchctl` si le pasás `--load`). La credencial FCM y los tokens de
+dispositivo **no** están en el repo ni los toca el instalador: viven en el directorio de
+instalación (por defecto `~/helm-notifier/`). Usa solo el Python del sistema y `openssl` —
+sin dependencias que un `brew upgrade` pueda huerfanizar meses después. Los tests corren
+con `python3 -m unittest discover -s host/notifier/tests`.
+
+> **Migrar una instalación existente es un paso manual.** `install.sh` no detiene ni
+> recarga nada. Si ya tenés el notifier viejo corriendo: detené y descargá el agente
+> anterior (`launchctl bootout`), corré `install.sh`, verificá que la credencial y los
+> tokens estén en el directorio de instalación y cargá el agente nuevo.
 
 ### Estructura del código
 
@@ -203,7 +215,7 @@ android/app/src/main/kotlin/com/darkcodex/helm/
 
 ### Notificaciones (opcional)
 
-Requiere provisionar FCM una vez y dejar el notifier corriendo en la Mac. El proyecto
+Requiere provisionar FCM una vez y dejar el notifier (`host/notifier/`) corriendo en la Mac. El proyecto
 Firebase solo transporta el push: el contenido lo compone la Mac y la credencial de envío
 nunca sale de ella.
 
