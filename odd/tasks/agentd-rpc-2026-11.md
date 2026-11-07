@@ -44,7 +44,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | T4c | S1, S5 | Per-client backpressure: bound each socket's outgoing queue, drop or disconnect a slow client without stalling the others | pending | |
 | T4d | S1, S6 | Cap concurrent unauthenticated connections and pre-auth buffering in helm-agentd | pending | |
 | T4e | S6 | Replace owner-specific path fixtures in the app tests with neutral ones | pending | |
-| T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | worker | |
+| T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | worker | ecb7978, 71baad0, 9225670 (PR #6) |
 
 ## Log
 
@@ -250,3 +250,9 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   RSA key (no network) through `_private_key_pem` + `_sign_rs256`;
   `openssl dgst -verify` reports Verified OK, the PEM is 0600 while in use
   and removed afterwards. Notifier suite 84 green on /usr/bin/python3.
+- **L18** — PR #6 merged (`6df25b9`); CI green on all four jobs (run
+  42376902875). Phase 1 (T1-T5) is complete. Open: T4b history/resync,
+  T4c backpressure, T4d pre-auth cap, T4e owner-path fixtures, and the
+  owner's manual switch from the old `com.gian.helm-notifier` agent to the
+  repo copy (`dev.helm.notifier`). Phase 2 (app RPC client, split
+  `TerminalSession`, approvals from the phone) is a separate feature.
