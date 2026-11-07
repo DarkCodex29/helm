@@ -28,6 +28,11 @@
     <key>KeepAlive</key>
     <true/>
 
+    <!-- A daemon that exits 69/78 (pi missing, port busy) is retried at most
+         every 10 s, never in a tight loop. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
     <key>RunAtLoad</key>
     <true/>
 

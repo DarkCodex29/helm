@@ -36,7 +36,8 @@ class InstallTest(unittest.TestCase):
         dir = dir or self.bin
         path = os.path.join(dir, name)
         with open(path, "w") as h:
-            h.write(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{self.log}/{name}"\n{body}\n')
+            # One record per call: argc, then each argument on its own line.
+            h.write(f'#!/bin/sh\n{{ printf "%s\\n" "$#"; for a in "$@"; do printf "%s\\n" "$a"; done; }} >> "{self.log}/{name}"\n{body}\n')
         os.chmod(path, 0o700)
         return path
 
@@ -45,7 +46,13 @@ class InstallTest(unittest.TestCase):
         if not os.path.exists(path):
             return []
         with open(path) as h:
-            return h.read().splitlines()
+            lines = h.read().splitlines()
+        out = []
+        while lines:
+            n = int(lines.pop(0))
+            out.append(lines[:n])
+            lines = lines[n:]
+        return out
 
     def run_sh(self, *args, path=None):
         env = dict(os.environ)
@@ -86,22 +93,31 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(p["EnvironmentVariables"]["PATH"], self.pi_dir + ":/usr/bin:/bin:/usr/sbin:/sbin")
         self.assertEqual(p["Umask"], 63)
         self.assertTrue(p["KeepAlive"])
+        self.assertEqual(p["ThrottleInterval"], 10)
         self.assertTrue(p["RunAtLoad"])
         self.assertEqual(p["StandardOutPath"], os.path.join(self.base, "agentd.out"))
         self.assertEqual(self.calls("launchctl"), [])
         self.assertNotIn("running:", r.stdout)
         self.assertEqual(len(self.calls("dart")), 1)
-        self.assertTrue(self.calls("dart")[0].startswith("compile exe "))
+        self.assertEqual(self.calls("dart")[0][:2], ["compile", "exe"])
 
     def test_load_calls_launchctl_with_three_args(self):
         r = self.run_sh("--load")
         self.assertEqual(r.returncode, 0, r.stderr)
         calls = self.calls("launchctl")
         self.assertEqual(len(calls), 1)
-        # The recorded line is argv joined by spaces; the plist path has
-        # spaces, so check the prefix and the exact tail instead of splitting.
         plist = os.path.join(self.plist_dir, "dev.helm.agentd.plist")
-        self.assertEqual(calls[0], f"bootstrap gui/{os.getuid()} {plist}")
+        self.assertIn(" ", plist)
+        self.assertEqual(calls[0], ["bootstrap", f"gui/{os.getuid()}", plist])
+
+    def test_dart_receives_separate_arguments(self):
+        self.assertEqual(self.run_sh().returncode, 0)
+        args = self.calls("dart")[0]
+        binary = os.path.join(self.base, "bin", "helm-agentd")
+        self.assertEqual(len(args), 5)
+        self.assertEqual(args[:2], ["compile", "exe"])
+        self.assertTrue(args[2].endswith("packages/helm_agentd/bin/helm_agentd.dart"), args[2])
+        self.assertEqual(args[3:], ["-o", binary + ".tmp"])
 
     def test_explicit_pi_and_port_and_host(self):
         other = self.fake("mypi", dir=self.pi_dir)
@@ -134,6 +150,41 @@ class InstallTest(unittest.TestCase):
         for host in ("100.64.0", "100.64.0.256", "abc", "100.64.0.1.2", "100.64.*.1"):
             r = self.run_sh("--host", host, "--allow-non-tailnet")
             self.assertNotEqual(r.returncode, 0, host)
+
+    def assert_refused_nothing_written(self, r, label):
+        self.assertNotEqual(r.returncode, 0, label)
+        self.assertTrue(r.stderr.strip(), label)
+        self.assertFalse(os.path.exists(self.base), label)
+        self.assertFalse(os.path.exists(self.plist_dir), label)
+        self.assertEqual(self.calls("dart"), [], label)
+
+    def test_non_canonical_ipv4_refused(self):
+        bad = ("100.64.0.1.", ".100.64.0.1", "100.064.0.1", "100.64.0.01",
+               "100.64.0.1.2", "100.64.0", "100.64.0.1 ", " 100.64.0.1",
+               "100. 64.0.1", "100.64.0.1\n", "myhost.example", "::1",
+               "fd7a:115c:a1e0::1", "100..64.1")
+        for host in bad:
+            r = self.run_sh("--host", host, "--allow-non-tailnet")
+            self.assert_refused_nothing_written(r, repr(host))
+            self.assertIn("invalid IPv4", r.stderr, repr(host))
+
+    def test_empty_explicit_host_is_usage_error(self):
+        r = self.run_sh("--host", "")
+        self.assert_refused_nothing_written(r, "empty")
+        self.assertEqual(r.returncode, 64)
+        self.assertEqual(self.calls("tailscale"), [])
+
+    def test_tailscale_non_canonical_output_refused(self):
+        for out in ("100.64.0.1.", "100.064.0.1", "fd7a:115c:a1e0::1", "myhost", "100.64.0"):
+            self.fake("tailscale", body=f'printf "%s\\n" "{out}"')
+            r = self.run_sh()
+            self.assert_refused_nothing_written(r, out)
+            self.assertIn("invalid IPv4", r.stderr, out)
+
+    def test_tailscale_only_first_line_used(self):
+        self.fake("tailscale", body='printf "100.64.0.7\\nfd7a::1\\n"')
+        self.assertEqual(self.run_sh().returncode, 0)
+        self.assertIn("100.64.0.7", self.plist()["ProgramArguments"])
 
     def test_tailscale_resolved_ip_is_validated(self):
         self.fake("tailscale", body='printf "192.168.9.9\\n"')
@@ -171,6 +222,32 @@ class InstallTest(unittest.TestCase):
         for bad in ("a&b", "a<b"):
             r = self.run_sh("--base-dir", os.path.join(self.tmp, bad))
             self.assertNotEqual(r.returncode, 0, bad)
+
+    def test_control_characters_refused_per_source(self):
+        for ctl in ("\n", "\t", "\r", "\x01"):
+            cases = {
+                "base-dir": ("--base-dir", os.path.join(self.tmp, "b" + ctl + "x")),
+                "label": ("--label", "dev.x" + ctl + "y"),
+                "plist-dir": ("--plist-dir", os.path.join(self.tmp, "p" + ctl + "x")),
+                "host": ("--host", "100.64.0.1" + ctl),
+            }
+            for name, args in cases.items():
+                r = subprocess.run(
+                    ["/bin/sh", SCRIPT, "--base-dir", self.base, "--plist-dir", self.plist_dir]
+                    + [a for a in args],
+                    capture_output=True, text=True, timeout=60,
+                    env={"PATH": self.bin + ":" + self.pi_dir + ":/usr/bin:/bin"})
+                self.assertNotEqual(r.returncode, 0, (name, ctl))
+                self.assertFalse(os.path.exists(self.base) and name != "base-dir", (name, ctl))
+                self.assertFalse(os.path.exists(os.path.join(self.tmp, "b" + ctl + "x")), (name, ctl))
+                self.assertFalse(os.path.exists(os.path.join(self.tmp, "p" + ctl + "x")), (name, ctl))
+                self.assertFalse(os.path.exists(self.plist_dir), (name, ctl))
+            weird = self.fake("p" + ctl + "i", dir=self.pi_dir)
+            r = self.run_sh("--pi", weird)
+            self.assertNotEqual(r.returncode, 0, ("pi", ctl))
+            self.assertFalse(os.path.exists(self.plist_dir), ("pi", ctl))
+            self.assertFalse(os.path.exists(self.base), ("pi", ctl))
+            self.assertEqual(self.calls("dart"), [])
 
     def test_modes(self):
         r = self.run_sh()

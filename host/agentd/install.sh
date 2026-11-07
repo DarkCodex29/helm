@@ -20,6 +20,7 @@ BASE_DIR=${HELM_AGENTD_DIR:-$HOME/.helm-agentd}
 LABEL=dev.helm.agentd
 PLIST_DIR=$HOME/Library/LaunchAgents
 HOST=
+HOST_SET=0
 PORT=7480
 PI=
 DRY=0
@@ -37,7 +38,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --load) LOAD=1 ;;
     --allow-non-tailnet) ALLOW_NON_TAILNET=1 ;;
-    --host) need "$@"; HOST=$2; shift ;;
+    --host) need "$@"; HOST=$2; HOST_SET=1; shift ;;
     --port) need "$@"; PORT=$2; shift ;;
     --pi) need "$@"; PI=$2; shift ;;
     --base-dir) need "$@"; BASE_DIR=$2; shift ;;
@@ -57,6 +58,9 @@ esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "--port needs a number from 1 to 65535"
 
 # --- bind address -----------------------------------------------------------
+if [ "$HOST_SET" -eq 1 ] && [ -z "$HOST" ]; then
+  die "--host needs an IPv4 address (empty value given)"
+fi
 if [ -z "$HOST" ]; then
   command -v tailscale >/dev/null 2>&1 ||
     die "tailscale not found on PATH: install it, or pass --host IP" 69
@@ -65,17 +69,22 @@ if [ -z "$HOST" ]; then
     die "tailscale gave no IPv4 address: is it connected? (or pass --host IP)" 69
 fi
 
-# Strict dotted quad. -f: no globbing of the unvalidated value.
+# Canonical dotted decimal only: 4 octets, each 0 or 1-255 without leading
+# zeros, no whitespace, no leading/trailing dot. The case filter runs first so
+# a newline can never slip past the line-oriented grep.
+bad_ip() { die "invalid IPv4 address (need canonical a.b.c.d): $(printf '%s' "$HOST" | tr -c '0-9a-zA-Z.:' '?')"; }
+case $HOST in
+  ''|*[!0-9.]*|.*|*.) bad_ip ;;
+esac
+printf '%s\n' "$HOST" |
+  grep -Eq '^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$' || bad_ip
 set -f
 oldifs=$IFS; IFS=.
 set -- $HOST
 IFS=$oldifs
-[ $# -eq 4 ] || die "invalid IPv4 address: $HOST"
+[ $# -eq 4 ] || bad_ip
 for octet in "$@"; do
-  case $octet in
-    ''|*[!0-9]*) die "invalid IPv4 address: $HOST" ;;
-  esac
-  [ ${#octet} -le 3 ] && [ "$octet" -le 255 ] || die "invalid IPv4 address: $HOST"
+  [ "$octet" -le 255 ] || bad_ip
 done
 # expr exits 1 when the result is 0, which set -e would turn into a silent death.
 A=$(expr "$1" + 0 || true)
@@ -111,9 +120,12 @@ SESSION_DIR=$BASE_DIR/sessions
 TOKEN_FILE=$BASE_DIR/token
 PLIST="$PLIST_DIR/$LABEL.plist"
 
-# Values end up inside sed and XML: refuse the characters that would break it.
+# Values end up inside sed and XML: refuse the characters that would break it,
+# including newlines and any control character.
 for value in "$BASE_DIR" "$LABEL" "$PI" "$PLIST_DIR" "$HOST"; do
   case $value in
+    *[[:cntrl:]]*)
+      die "refusing value with control characters (newline, tab, ...)" ;;
     *'|'*|*'&'*|*'<'*|*'>'*|*'\'*|*'"'*)
       die "refusing value with special characters: $value" ;;
   esac

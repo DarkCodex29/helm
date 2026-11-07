@@ -245,6 +245,13 @@ host/agentd/install.sh --load      # igual, y además ejecuta launchctl bootstra
 - **El token** vive en `~/.helm-agentd/token` (`0600`). Lo crea el daemon al primer arranque;
   el instalador nunca lo crea, lo lee ni lo imprime, solo muestra la ruta. El teléfono lo
   copia **una sola vez** por la conexión SFTP existente y lo guarda en el Keychain del iPhone.
+- **Reintentos.** El plist fija `ThrottleInterval` en 10: si el daemon sale con error (por
+  ejemplo 69 o 78: Pi no encontrado o puerto ocupado), launchd lo reintenta como mucho cada
+  10 s, nunca en bucle cerrado. Si se reinicia sin parar, mirá `~/.helm-agentd/agentd.err` y
+  `agentd.out`.
+- **Validación.** `--host` y la IP de `tailscale ip -4` deben ser un IPv4 canónico `a.b.c.d`
+  (sin ceros a la izquierda, sin puntos sobrantes ni espacios); un `--host ''` vacío es un
+  error de uso. Los valores con saltos de línea o caracteres de control se rechazan.
 - Etiqueta `dev.helm.agentd`. No detiene ni descarga ningún agente existente. Es idempotente.
   Tests: `python3 -m unittest discover -s host/agentd/tests`.
 
