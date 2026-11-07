@@ -52,6 +52,27 @@ void main() {
       },
     );
 
+    test('drops host-supplied names that would escape the listed directory '
+        '(separators, empty), keeping only safe siblings', () async {
+      final session = FakeSftpSession(
+        directories: {
+          '/home/gian': [
+            fakeSftpName('notes.md', mode: FakeSftpModes.file),
+            fakeSftpName('../../etc/passwd', mode: FakeSftpModes.file),
+            fakeSftpName('a/b', mode: FakeSftpModes.file),
+            fakeSftpName('/abs', mode: FakeSftpModes.file),
+            fakeSftpName('', mode: FakeSftpModes.file),
+          ],
+        },
+      );
+      final service = SftpFileService.withOpener(() async => session);
+
+      final listing = await service.list('/home/gian') as RemoteListingLoaded;
+
+      expect(listing.entries.map((e) => e.name), ['notes.md']);
+      expect(listing.entries.single.path, '/home/gian/notes.md');
+    });
+
     test('keeps a dotfile that is not the self or parent entry', () async {
       final session = FakeSftpSession(
         directories: {

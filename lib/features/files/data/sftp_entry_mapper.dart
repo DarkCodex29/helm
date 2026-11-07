@@ -9,6 +9,7 @@ library;
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/features/files/domain/remote_entry.dart';
 import 'package:helm/features/files/domain/remote_path.dart';
+import 'package:helm/features/files/domain/remote_write_outcome.dart';
 
 /// Names the SFTP protocol reserves for the directory itself and its
 /// parent.
@@ -27,6 +28,17 @@ const _dotEntries = {'.', '..'};
 /// shortcut — would hide every dotfile in a developer's home directory,
 /// which is most of what is interesting there.
 bool isDotEntry(String filename) => _dotEntries.contains(filename);
+
+/// Whether a listing entry's [filename] cannot be a direct child of the
+/// listed directory: empty, or containing a separator (`../../x`, `a/b`).
+///
+/// The names come from the HOST, and the paths built from them later feed
+/// download, delete and rename — so a hostile or broken server must not be
+/// able to point those outside the directory the user opened. Reuses
+/// [validateRemoteName]'s policy rather than restating it; the `.` and `..`
+/// entries are handled separately by [isDotEntry] and never reach here.
+bool isUnsafeListingName(String filename) =>
+    validateRemoteName(filename) != null;
 
 /// What kind of entry the server described.
 ///

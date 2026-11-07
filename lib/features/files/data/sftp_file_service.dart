@@ -91,6 +91,9 @@ class SftpFileService {
     final entries = <RemoteEntry>[];
     for (final name in names) {
       if (isDotEntry(name.filename)) continue;
+      // Host-supplied: dropped, not thrown, so one hostile name cannot
+      // hide the rest of the directory.
+      if (isUnsafeListingName(name.filename)) continue;
 
       final kind = resolveRemoteEntryKind(
         mode: name.attr.mode,
