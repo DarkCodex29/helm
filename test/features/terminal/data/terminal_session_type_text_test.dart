@@ -191,6 +191,80 @@ void main() {
     });
   });
 
+  // Text from outside helm reaches a raw-mode agent TUI, where every
+  // control byte is a key binding, not text: Ctrl-C aborts the agent's
+  // turn, Ctrl-Z suspends it, ESC sequences rewrite what the owner sees
+  // at the prompt so what he reviews is not what Enter will submit.
+  group('typeAtPrompt - control characters never reach the host', () {
+    test('C0, DEL and C1 control characters are removed', () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+
+      result.session.typeAtPrompt(
+        'git\x1b[2K status\x03\x1a\x04\x15\x7f\u009b\x00',
+      );
+
+      expect(_decode(result.remote), 'git[2K status');
+
+      await result.session.dispose();
+    });
+
+    test('a tab becomes a space, so it cannot trigger completion', () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+
+      result.session.typeAtPrompt('git\tstatus');
+
+      expect(_decode(result.remote), 'git status');
+
+      await result.session.dispose();
+    });
+
+    test('text made only of control characters writes nothing', () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+
+      result.session.typeAtPrompt('\x03\x1b');
+
+      expect(result.remote.writes, isEmpty);
+
+      await result.session.dispose();
+    });
+  });
+
+  group('typeAtPrompt - bracketed paste when the remote asked for it', () {
+    test('wraps the text in paste markers when the remote enabled '
+        'bracketed paste mode', () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+      result.session.terminal.setBracketedPasteMode(true);
+
+      result.session.typeAtPrompt('git status');
+
+      expect(_decode(result.remote), '\x1b[200~git status\x1b[201~');
+
+      await result.session.dispose();
+    });
+
+    test('an embedded end-of-paste marker cannot close the paste early',
+        () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+      result.session.terminal.setBracketedPasteMode(true);
+
+      result.session.typeAtPrompt('hi\x1b[201~\x03rm -rf x');
+
+      expect(_decode(result.remote), '\x1b[200~hi[201~rm -rf x\x1b[201~');
+
+      await result.session.dispose();
+    });
+
+    test('sends plain text when the remote never enabled the mode', () async {
+      final result = await _session(adapter: FakeAgentAdapter());
+
+      result.session.typeAtPrompt('git status');
+
+      expect(_decode(result.remote), 'git status');
+
+      await result.session.dispose();
+    });
+  });
+
   group('typeAtPrompt - empty text is a no-op', () {
     test('an empty string writes nothing', () async {
       final result = await _session(adapter: FakeAgentAdapter());

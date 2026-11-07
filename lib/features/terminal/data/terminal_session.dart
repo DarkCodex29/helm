@@ -222,6 +222,10 @@ final class AttachExitUnknown extends AttachExitOutcome {
 /// seconds, on a connection that is already open.
 const kAgentPollInterval = Duration(seconds: 10);
 
+/// C0 controls (except tab, LF and CR, which typeAtPrompt maps to spaces
+/// first), DEL, and C1 controls. Each one is a keystroke to a remote TUI.
+final _controlCharacters = RegExp('[\x00-\x08\x0b-\x1f\x7f-\x9f]');
+
 /// How long each `agent wait` is armed on the HOST before it gives up and
 /// is re-armed.
 ///
@@ -1169,6 +1173,14 @@ class TerminalSession {
   ///
   /// Also a no-op for empty or whitespace-only text — nothing worth
   /// reviewing at a prompt.
+  ///
+  /// Every other control character (C0, DEL, C1) is removed, and a tab
+  /// becomes a space: at a raw-mode agent TUI each of them is a key, not
+  /// text. Ctrl-C would abort the agent's turn, Ctrl-Z suspend it, and an
+  /// ESC sequence could rewrite the prompt line so the owner reviews
+  /// something other than what Enter submits. When the remote enabled
+  /// bracketed paste mode, the text is also wrapped in paste markers; with
+  /// ESC already gone, the text cannot close that paste early.
   void typeAtPrompt(String text) {
     final sessionRef = _session;
     if (sessionRef == null ||
@@ -1176,10 +1188,17 @@ class TerminalSession {
       return;
     }
 
-    final flattened = text.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+    final flattened = text
+        .replaceAll(RegExp(r'[\r\n]+'), ' ')
+        .replaceAll('\t', ' ')
+        .replaceAll(_controlCharacters, '')
+        .trim();
     if (flattened.isEmpty) return;
 
-    sessionRef.write(utf8.encode(flattened));
+    final payload = terminal.bracketedPasteMode
+        ? '\x1b[200~$flattened\x1b[201~'
+        : flattened;
+    sessionRef.write(utf8.encode(payload));
   }
 
   /// When the last output activity was observed for the CURRENT connection
