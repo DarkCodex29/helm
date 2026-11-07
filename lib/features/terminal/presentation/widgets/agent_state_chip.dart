@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
 import 'package:helm/core/theme/app_theme.dart';
+import 'package:helm/features/agentd/domain/agentd_tab_state.dart';
 
 /// Visual vocabulary for [AgentState], shared by the tab badge and the
 /// drawer list so the two can never disagree about what a state looks like.
@@ -196,6 +197,85 @@ class AgentRow extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Badge for a state reported by `helm-agentd`. Reuses the herdr styles
+/// (needs you = blocked, working, idle) and adds one for `thinking`. Kept
+/// apart from [AgentBadge] so an agentd value never goes through the herdr
+/// label/urgency helpers.
+class AgentdBadge extends StatelessWidget {
+  const AgentdBadge({super.key, required this.state});
+
+  final AgentdUiState state;
+
+  static const _thinking = AgentStateStyle._(
+    AppTheme.primary,
+    Icons.psychology,
+  );
+
+  static (String, AgentStateStyle) _look(AgentdUiState s) => switch (s) {
+    AgentdUiState.needsYou => ('Needs you', AgentStateStyle._blocked),
+    AgentdUiState.working => ('Working', AgentStateStyle._working),
+    AgentdUiState.thinking => ('Thinking', _thinking),
+    AgentdUiState.idle => ('Idle', AgentStateStyle._idle),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, style) = _look(state);
+    final isUrgent = state == AgentdUiState.needsYou;
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: Container(
+          width: 14,
+          height: 14,
+          margin: const EdgeInsets.only(right: 5),
+          decoration: BoxDecoration(
+            color: style.color.withValues(alpha: isUrgent ? 1.0 : 0.18),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: style.color.withValues(alpha: 0.6)),
+          ),
+          child: Icon(
+            style.icon,
+            size: 9,
+            color: isUrgent ? AppTheme.background : style.color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small non-circular hint that the daemon cannot report a state, with the
+/// reason as tooltip and semantics label.
+class AgentdHint extends StatelessWidget {
+  const AgentdHint({super.key, required this.hint});
+
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: hint,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: hint,
+        excludeFromSemantics: true,
+        child: const Padding(
+          padding: EdgeInsets.only(right: 5),
+          child: Icon(
+            AppTheme.warningIcon,
+            size: 12,
+            color: AppTheme.onSurfaceFaint,
           ),
         ),
       ),

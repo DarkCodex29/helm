@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/features/agentd/data/agentd_providers.dart';
+import 'package:helm/features/agentd/domain/agentd_tab_state.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/theme/app_theme.dart';
 import 'package:helm/features/connection/domain/connection_status.dart';
@@ -121,23 +124,29 @@ class TerminalTabBar extends StatelessWidget {
             // Agent state, glanceable without opening the drawer — the
             // point of putting it here at all.
             //
-            // Listening (rather than reading `tab.session` state during
-            // build) is also what ARMS the session's agent poll: it only
-            // queries the host while something is actually observing, so
-            // this builder is both the consumer and the trigger. See
-            // TerminalSession._syncAgentPolling.
+            // Precedence: a state measured by helm-agentd wins; a daemon
+            // that cannot tell shows a small hint; otherwise the PTY (herdr)
+            // badge renders exactly as before.
+            //
+            // The herdr listener stays mounted in EVERY branch: listening to
+            // `agentsNotifier` is what arms the host poll, and the PTY lane
+            // must keep working underneath helm-agentd, which can drop at
+            // any moment. Only what is drawn changes, never what is observed.
             ValueListenableBuilder<AgentSnapshot>(
               valueListenable: tab.session.agentsNotifier,
-              builder: (context, snapshot, _) {
-                final state = mostUrgentAgentState(snapshot);
-                // Null for every snapshot nobody measured — an unsupported
-                // multiplexer, an unreachable agent server, or a session
-                // that has not been asked yet. A badge is a positive claim
-                // about the host; drawing one there would assert a state
-                // helm does not have.
-                if (state == null) return const SizedBox.shrink();
-                return AgentBadge(state: state);
-              },
+              builder: (context, snapshot, _) => Consumer(
+                builder: (context, ref, _) {
+                  final agentd = ref.watch(
+                    agentdTabStateProvider(tab.profile.id),
+                  );
+                  return switch (agentd) {
+                    AgentdTabKnown(:final state) => AgentdBadge(state: state),
+                    AgentdTabUnavailable(:final hint) =>
+                      AgentdHint(hint: hint),
+                    AgentdTabAbsent() => _herdrBadge(snapshot),
+                  };
+                },
+              ),
             ),
             Flexible(
               child: Text(
@@ -167,6 +176,17 @@ class TerminalTabBar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// The PTY (herdr) badge for [snapshot]. The listener that produces the
+  /// snapshot, and so arms the session's agent poll, lives in the caller.
+  /// See TerminalSession._syncAgentPolling.
+  Widget _herdrBadge(AgentSnapshot snapshot) {
+    final state = mostUrgentAgentState(snapshot);
+    // Null for every snapshot nobody measured: a badge is a positive claim
+    // about the host.
+    if (state == null) return const SizedBox.shrink();
+    return AgentBadge(state: state);
   }
 
   Widget _buildAddButton() {
