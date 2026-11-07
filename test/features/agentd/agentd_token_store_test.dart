@@ -110,6 +110,47 @@ void main() {
     });
   });
 
+  group('storage failures', () {
+    Future<Object> thrownBy(Future<Object?> Function() f) async {
+      try {
+        await f();
+      } catch (e) {
+        return e;
+      }
+      fail('did not throw');
+    }
+
+    test(
+      'every public method throws a fixed typed exception, no text',
+      () async {
+        final s = AgentdTokenStore(storage: _ThrowingAll());
+        for (final f in <Future<Object?> Function()>[
+          () => s.write('p1', _token),
+          () => s.read('p1'),
+          () => s.delete('p1'),
+        ]) {
+          final e = await thrownBy(f);
+          expect(e, isA<AgentdTokenStoreException>());
+          expect(e.toString(), isNot(contains(_token)));
+          expect(e.toString(), isNot(contains('FAKEfake')));
+          expect(e.toString(), isNot(contains('p1')));
+          expect(e.toString(), isNot(contains('StateError')));
+        }
+      },
+    );
+
+    test('the exception has no chained cause', () async {
+      final s = AgentdTokenStore(storage: _ThrowingAll());
+      final e = await thrownBy(() => s.write('p1', _token));
+      expect(e, isA<AgentdTokenStoreException>());
+      // Only a kind: nothing that could hold the original error.
+      expect(
+        e.toString(),
+        'AgentdTokenStoreException(${(e as AgentdTokenStoreException).kind.name})',
+      );
+    });
+  });
+
   group('provisionFromHost', () {
     test('stores a valid token, trimmed, from the home directory', () async {
       final sftp = _sftpWith(utf8.encode('$_token\n'));
@@ -202,6 +243,42 @@ void main() {
       expect(outcomes.first.toString(), 'TokenStored()');
     });
   });
+}
+
+class _ThrowingAll extends FakeSecureStorage {
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) => throw StateError('write failed key=$key value=$value');
+
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) => throw StateError('read failed $_token');
+
+  @override
+  Future<void> delete({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) => throw StateError('delete failed $_token');
 }
 
 class _ThrowingStorage extends FakeSecureStorage {

@@ -40,15 +40,33 @@ class TokenProvisionFailed extends TokenProvisionOutcome {
   String toString() => 'TokenProvisionFailed($cause)';
 }
 
+enum AgentdTokenStoreFailure { read, write, delete }
+
+/// The keystore failed. Only says which operation: never the original error
+/// (its text may hold the token), never a cause.
+class AgentdTokenStoreException implements Exception {
+  const AgentdTokenStoreException(this.kind);
+  final AgentdTokenStoreFailure kind;
+  @override
+  String toString() => 'AgentdTokenStoreException(${kind.name})';
+}
+
 /// The daemon token, in the platform keystore, one item per profile.
 ///
 /// The token is only ever handed to the `hello` frame: it is never logged,
 /// never shown, and never part of an exception message.
 class AgentdTokenStore {
-  AgentdTokenStore({FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage();
+  AgentdTokenStore({
+    FlutterSecureStorage? storage,
+    void Function(String profileId)? onChanged,
+  }) : _storage = storage ?? const FlutterSecureStorage(),
+       _onChanged = onChanged;
 
   final FlutterSecureStorage _storage;
+
+  /// Called after a token was written or deleted (so a client built from the
+  /// old value can be rebuilt). Gets the profile id only.
+  final void Function(String profileId)? _onChanged;
 
   /// New items are not migrated from anything, so they use the stricter
   /// class: readable after the first unlock, never moved to another device.
@@ -70,8 +88,16 @@ class AgentdTokenStore {
   /// padding = 43 characters).
   static bool looksLikeToken(String token) => _shape.hasMatch(token);
 
-  Future<String?> read(String profileId) =>
-      _storage.read(key: storageKey(profileId), iOptions: iosOptions);
+  Future<String?> read(String profileId) async {
+    try {
+      return await _storage.read(
+        key: storageKey(profileId),
+        iOptions: iosOptions,
+      );
+    } catch (_) {
+      throw const AgentdTokenStoreException(AgentdTokenStoreFailure.read);
+    }
+  }
 
   /// Throws a [FormatException] (without the value) when [token] is not
   /// token-shaped.
@@ -79,15 +105,26 @@ class AgentdTokenStore {
     if (!looksLikeToken(token)) {
       throw const FormatException('not a helm-agentd token');
     }
-    await _storage.write(
-      key: storageKey(profileId),
-      value: token,
-      iOptions: iosOptions,
-    );
+    try {
+      await _storage.write(
+        key: storageKey(profileId),
+        value: token,
+        iOptions: iosOptions,
+      );
+    } catch (_) {
+      throw const AgentdTokenStoreException(AgentdTokenStoreFailure.write);
+    }
+    _onChanged?.call(profileId);
   }
 
-  Future<void> delete(String profileId) =>
-      _storage.delete(key: storageKey(profileId), iOptions: iosOptions);
+  Future<void> delete(String profileId) async {
+    try {
+      await _storage.delete(key: storageKey(profileId), iOptions: iosOptions);
+    } catch (_) {
+      throw const AgentdTokenStoreException(AgentdTokenStoreFailure.delete);
+    }
+    _onChanged?.call(profileId);
+  }
 
   /// Copies the token ONCE over [sftp] from `~/.helm-agentd/token`.
   Future<TokenProvisionOutcome> provisionFromHost(

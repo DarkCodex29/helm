@@ -111,3 +111,23 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   (backup `~/helm-notifier/backup-20261107-094650`). Deferred: an Android
   "Open in ntfy" button (needs `url_launcher`), ruff findings, and two
   phones registering at the same instant.
+- **L9** — The independent verifier failed T1 on four findings plus three
+  test gaps; all fixed test-first (worker, uncommitted). (1) A command
+  `error` was matched by regex over free text, so another command's id in
+  the detail could reject the wrong command, and the bridge's answer failure
+  had no id (the answer hung to its timeout): `ErrorMessage` gained an
+  optional `requestId` (encoded only when set, decoded tolerantly), the
+  bridge sets it on every command and answer error, and the client
+  correlates by it; without it only an exact leading `request <id>:` /
+  `ask <id> ` prefix counts, never a scan of the body. (2) The client
+  provider did not rebuild on a token write/delete or a profile edit: the
+  token store now notifies (`agentdTokenVersionProvider`) and the endpoint
+  provider watches `profilesProvider`; the old client is closed on rebuild.
+  (3) `write()`/`read()`/`delete()` propagated storage exceptions whose text
+  can hold the token: they now throw `AgentdTokenStoreException(kind)` with
+  no text and no cause. (4) `WebSocket.connect(...).timeout` left a late
+  socket open: the client bounds the connect itself (injected timer) and
+  closes a socket that arrives after the timeout or after `close()`.
+  Added adversarial tests: stale-channel frame/close after a reconnect,
+  `close()` during an in-flight connect, duplicate `ready` not re-sending.
+  Unverified: Linux CI run, real WebSocket against a Tailscale address.

@@ -1,6 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:helm/core/constants/app_constants.dart';
+import 'package:helm/features/connection/data/connection_profile_repository.dart';
+import 'package:helm/features/connection/domain/connection_profile.dart';
+import 'package:helm/features/settings/presentation/settings_provider.dart';
+import '../../helpers/fake_secure_storage.dart';
+import 'package:helm/features/agentd/data/agentd_client.dart';
 import 'package:helm/features/agentd/data/agentd_providers.dart';
 import 'package:helm/features/agentd/data/agentd_token_store.dart';
 import 'package:helm/features/agentd/domain/agentd_connection_state.dart';
@@ -89,4 +98,98 @@ void main() {
     client.connect(); // final: ignored
     expect(client.state, isA<AgentdDisconnected>());
   });
+
+  group('reactivity', () {
+    Future<ProviderContainer> live(FakeSecureStorage storage) async {
+      final c = ProviderContainer(
+        overrides: [agentdSecureStorageProvider.overrideWithValue(storage)],
+      );
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    Future<AgentdClient?> client(ProviderContainer c) => c
+        .read(agentdClientProvider('p1').future)
+        .timeout(const Duration(seconds: 5));
+
+    /// Observes closing: connect() makes the state flip, close() ends it.
+    Future<void> expectClosed(AgentdClient old) async {
+      old.connect(); // ignored when already closed
+      expect(old.state, isA<AgentdDisconnected>());
+      await expectLater(
+        old.send('x'),
+        throwsA(
+          isA<AgentdCommandException>().having(
+            (e) => e.kind,
+            'kind',
+            AgentdCommandError.closed,
+          ),
+        ),
+      );
+    }
+
+    setUp(() {
+      SharedPreferences.setMockInitialValues({
+        AppConstants.profilesStorageKey: [_profileJson('127.0.0.1')],
+      });
+    });
+
+    test('provisioning a new token rebuilds the client and closes the old '
+        'one', () async {
+      final storage = FakeSecureStorage();
+      final c = await live(storage);
+      final store = c.read(agentdTokenStoreProvider);
+      expect(await client(c), isNull);
+      await store.write('p1', _token);
+      final first = (await client(c))!;
+      await store.write('p1', _token2);
+      final second = (await client(c))!;
+      expect(identical(first, second), isFalse);
+      await expectClosed(first);
+      expect(second.state, isA<AgentdDisconnected>());
+    });
+
+    test(
+      'deleting the token resolves to null and closes the old one',
+      () async {
+        final storage = FakeSecureStorage();
+        final c = await live(storage);
+        final store = c.read(agentdTokenStoreProvider);
+        await store.write('p1', _token);
+        final old = (await client(c))!;
+        await store.delete('p1');
+        expect(await client(c), isNull);
+        await expectClosed(old);
+      },
+    );
+
+    test('changing the profile host rebuilds the client', () async {
+      final storage = FakeSecureStorage({
+        AgentdTokenStore.storageKey('p1'): _token,
+      });
+      final c = await live(storage);
+      final old = (await client(c))!;
+      expect(old.endpoint.host, '127.0.0.1');
+      await ConnectionProfileRepository().update(
+        ConnectionProfile.fromJson(_profileMap('10.9.9.9')),
+      );
+      c.invalidate(profilesProvider); // what the edit screen does
+      final fresh = (await client(c))!;
+      expect(fresh.endpoint.host, '10.9.9.9');
+      expect(identical(old, fresh), isFalse);
+      await expectClosed(old);
+    });
+  });
 }
+
+const _token2 = 'GHIJghijGHIJghijGHIJghijGHIJghijGHIJghijGHI';
+
+Map<String, dynamic> _profileMap(String host) => {
+  'id': 'p1',
+  'name': 'Test',
+  'host': host,
+  'port': 22,
+  'username': 'someone',
+};
+
+String _profileJson(String host) => jsonEncode(_profileMap(host));
