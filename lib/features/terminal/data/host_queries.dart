@@ -86,7 +86,7 @@ class HostQueries {
   /// host costs exactly one abandoned channel no matter how many times a
   /// frustrated user taps the row.
   Future<MuxAgentFocusResult> focusAgent(String target) async {
-    if (_isDisposed()) return const MuxAgentFocusFailed('session_isDisposed()');
+    if (_isDisposed()) return const MuxAgentFocusFailed('session_disposed');
     if (_status() != ConnectionStatus.connected) {
       return const MuxAgentFocusFailed('not_connected');
     }
@@ -197,7 +197,7 @@ class HostQueries {
   /// the in-flight guard is released by the request settling rather than by
   /// this call giving up on it.
   Future<MuxTabFocusResult> focusTab(String tabId) async {
-    if (_isDisposed()) return const MuxTabFocusFailed('session_isDisposed()');
+    if (_isDisposed()) return const MuxTabFocusFailed('session_disposed');
     if (_status() != ConnectionStatus.connected) {
       return const MuxTabFocusFailed('not_connected');
     }

@@ -163,7 +163,14 @@ void main() {
 
       final result = await session.focusAgent('w1:p1');
 
-      expect(result, isA<MuxAgentFocusFailed>());
+      expect(
+        result,
+        isA<MuxAgentFocusFailed>().having(
+          (r) => r.code,
+          'code',
+          'session_disposed',
+        ),
+      );
       expect(adapter.focusTargets, isEmpty);
     });
 

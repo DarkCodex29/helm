@@ -336,7 +336,14 @@ void main() {
 
       final result = await session.focusTab('w1:t1');
 
-      expect(result, isA<MuxTabFocusFailed>());
+      expect(
+        result,
+        isA<MuxTabFocusFailed>().having(
+          (r) => r.code,
+          'code',
+          'session_disposed',
+        ),
+      );
       expect(adapter.focusedTabs, isEmpty);
     });
 
