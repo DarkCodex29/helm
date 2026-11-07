@@ -33,8 +33,45 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # The root analyzer also walks packages/**, and it needs each nested
+      # package's own package_config to resolve its imports. Without this
+      # step `flutter analyze` reports hundreds of unresolved-import errors.
+      - name: Resolve nested packages for the root analyzer
+        run: dart pub get
+        working-directory: packages/helm_protocol
+
       - name: Analyze
         run: flutter analyze
 
       - name: Test
         run: flutter test
+
+  # Pure-Dart packages: analyzed and tested on their own, without Flutter's
+  # test runner, so a Flutter import can never creep into them unnoticed.
+  helm_protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/helm_protocol
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # subosito/flutter-action v2.21.0 (ships the Dart SDK we need)
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e
+        with:
+          flutter-version: 3.47.6
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Analyze
+        run: dart analyze --fatal-infos
+
+      - name: Test
+        run: dart test
