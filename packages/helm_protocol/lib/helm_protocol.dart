@@ -2,3 +2,4 @@
 library;
 
 export 'src/jsonl_codec.dart';
+export 'src/pi_records.dart';
