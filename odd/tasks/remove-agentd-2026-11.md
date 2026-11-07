@@ -28,9 +28,9 @@ terminal into the Mac; the Mac already runs the agents.
 | ID | Specs | Task | Route | Commit |
 |---|---|---|---|---|
 | T1 | S1, S4 | Disable the agentd LaunchAgent on the Mac; close port 7480 | parent | n/a (host) |
-| T2 | S1-S4 | Remove agentd from the app, `packages/helm_agentd`, `packages/helm_protocol`, `host/agentd`, CI and docs; keep S2 working | worker | uncommitted |
-| T3 | S3 | Verify, push to main, watch CI | parent + verify | |
-| T4 | S2 | Rebuild `--release` on the iPhone; smoke-check the terminal | parent | |
+| T2 | S1-S4 | Remove agentd from the app, `packages/helm_agentd`, `packages/helm_protocol`, `host/agentd`, CI and docs; keep S2 working | worker | b617b11 |
+| T3 | S3 | Verify, push to main, watch CI | parent + verify | b617b11 pushed; CI 42427357197 green |
+| T4 | S2 | Rebuild `--release` on the iPhone; smoke-check the terminal | parent | n/a (device) |
 
 ## Log
 
@@ -57,3 +57,12 @@ terminal into the Mac; the Mac already runs the agents.
   --output=none --set-exit-if-changed lib test` clean (270 files); `flutter
   analyze` no issues; `flutter test` +1659 all passed;
   `rg -i 'agentd|helm_protocol|7480'` outside `odd/`: no matches.
+- **L4** — T3: an independent verifier passed S1-S4 on `b617b11` (analyze
+  clean, format 270 files 0 changed, `flutter test` +1659, notifier 106
+  OK, no `agentd`/`helm_protocol`/`7480` outside `odd/`, herdr arming
+  assertions unchanged). Fast-forwarded to main and pushed; CI run
+  42427357197 green on its two jobs, `flutter` and `notifier`. T4: release
+  from `b617b11` installed on the iPhone 16; it reconnected the Mac tab on
+  its own, showing the herdr badge and the live herdr terminal with the
+  real agents (1 done, 2 working, 1 idle). The Maestro step that tapped
+  "New Session" failed only because the app had already reconnected.
