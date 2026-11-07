@@ -52,7 +52,7 @@ class SendTest(IsolatedEnv):
             seen["auth"] = req.get_header("Authorization")
             return Resp()
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
+        with mock.patch("netsafe.urlopen", fake_urlopen):
             name = fcm.send("tok", "T", "B", data={"k": "v"}, tag="p", validate_only=True)
         self.assertEqual(name, "projects/p/messages/1")
         self.assertEqual(seen["url"], "https://fcm.googleapis.com/v1/projects/fake-project-0000/messages:send")
@@ -65,7 +65,7 @@ class SendTest(IsolatedEnv):
             def __enter__(self): return self
             def __exit__(self, *a): return False
             def read(self): return b"<html>502</html>"
-        with mock.patch("urllib.request.urlopen", lambda req, timeout=None: Resp()), \
+        with mock.patch("netsafe.urlopen", lambda req, timeout=None: Resp()), \
              self.assertRaises(RuntimeError):
             fcm.send("tok", "T", "B")
 
@@ -92,7 +92,7 @@ class JwtSigningTest(IsolatedEnv):
     def test_openssl_invoked_with_sha256_sign_and_pem_path(self):
         calls = []
 
-        def fake_run(argv, input=None, capture_output=False):
+        def fake_run(argv, input=None, capture_output=False, **kw):
             calls.append((argv, input))
             return subprocess.CompletedProcess(argv, 0, stdout=b"\x01\x02sig", stderr=b"")
 
@@ -108,25 +108,87 @@ class JwtSigningTest(IsolatedEnv):
         self.assertEqual(b64d(signature), b"\x01\x02sig")
 
     def test_openssl_failure_raises(self):
-        def fake_run(argv, input=None, capture_output=False):
+        def fake_run(argv, input=None, capture_output=False, **kw):
             return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"boom")
         with mock.patch("subprocess.run", fake_run), self.assertRaises(RuntimeError):
             fcm.build_assertion(self.ACCOUNT, "key.pem", 1000)
 
-    def test_pem_is_written_once_with_mode_0600(self):
-        os.environ["HELM_NOTIFIER_PEM"] = os.path.join(self.dir, "k.pem")
-        path = fcm._private_key_pem(self.ACCOUNT)
-        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
-        with open(path, "w") as h:
-            h.write("changed")
-        fcm._private_key_pem(self.ACCOUNT)  # must not rewrite
-        with open(path) as h:
-            self.assertEqual(h.read(), "changed")
+    def _run_with_pem(self, outcome, account=None):
+        """Run the signer with a fake openssl; return what it observed."""
+        account = account or self.ACCOUNT
+        seen = {}
+
+        def fake_run(argv, input=None, capture_output=False, **kw):
+            pem = argv[-1]
+            seen.update(argv=argv, kw=kw, pem=pem,
+                        mode=stat.S_IMODE(os.stat(pem).st_mode),
+                        dir_mode=stat.S_IMODE(os.stat(os.path.dirname(pem)).st_mode))
+            with open(pem) as h:
+                seen["content"] = h.read()
+            if outcome == "timeout":
+                raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+            code = 0 if outcome == "ok" else 1
+            return subprocess.CompletedProcess(argv, code, stdout=b"sig", stderr=b"boom")
+
+        with mock.patch("subprocess.run", fake_run):
+            try:
+                with fcm._private_key_pem(account) as pem:
+                    fcm._sign_rs256(b"msg", pem)
+                seen["error"] = None
+            except RuntimeError as exc:
+                seen["error"] = exc
+        return seen
+
+    def test_pem_is_private_temp_and_removed_after_success(self):
+        seen = self._run_with_pem("ok")
+        self.assertIsNone(seen["error"])
+        self.assertEqual(seen["mode"], 0o600)
+        self.assertEqual(seen["dir_mode"], 0o700)
+        self.assertEqual(seen["content"], self.ACCOUNT["private_key"])
+        self.assertFalse(os.path.exists(seen["pem"]))
+        self.assertFalse(os.path.exists(os.path.dirname(seen["pem"])))
+
+    def test_pem_is_removed_after_openssl_failure(self):
+        seen = self._run_with_pem("fail")
+        self.assertIsInstance(seen["error"], RuntimeError)
+        self.assertFalse(os.path.exists(seen["pem"]))
+
+    def test_openssl_timeout_is_a_clear_error_without_key_material(self):
+        seen = self._run_with_pem("timeout")
+        self.assertIsInstance(seen["error"], RuntimeError)
+        self.assertIn("timed out", str(seen["error"]))
+        self.assertNotIn(self.ACCOUNT["private_key"], str(seen["error"]))
+        self.assertFalse(os.path.exists(seen["pem"]))
+
+    def test_openssl_runs_with_a_timeout_and_no_key_in_argv(self):
+        seen = self._run_with_pem("ok")
+        self.assertIsNotNone(seen["kw"].get("timeout"))
+        self.assertLessEqual(seen["kw"]["timeout"], 30)
+        for arg in seen["argv"]:
+            self.assertNotIn(self.ACCOUNT["private_key"], arg)
+
+    def test_a_preexisting_pem_is_never_reused(self):
+        stale = os.path.join(self.dir, "fcm-sa.pem")
+        with open(stale, "w") as h:
+            h.write("STALE-LOOSE-PEM")
+        os.chmod(stale, 0o644)
+        seen = self._run_with_pem("ok")
+        self.assertEqual(seen["content"], self.ACCOUNT["private_key"])
+        self.assertNotEqual(seen["pem"], stale)
+
+    def test_redirect_to_http_is_refused(self):
+        import urllib.request
+        import netsafe
+        handler = netsafe.HttpsOnlyRedirect()
+        req = urllib.request.Request("https://example.invalid/a", data=b"x", method="POST")
+        with self.assertRaises(RuntimeError):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://example.invalid/b")
+        ok = handler.redirect_request(req, None, 302, "Found", {}, "https://example.invalid/b")
+        self.assertIsNotNone(ok)
 
     def test_access_token_mints_through_mocked_openssl_and_http(self):
         fcm._cached.update({"token": None, "expires_at": 0})
         os.environ["HELM_NOTIFIER_CREDENTIALS"] = self.write("sa.json", json.dumps(self.ACCOUNT))
-        os.environ["HELM_NOTIFIER_PEM"] = os.path.join(self.dir, "k.pem")
 
         class Resp:
             def __enter__(self): return self
@@ -139,10 +201,10 @@ class JwtSigningTest(IsolatedEnv):
             sent["url"], sent["body"] = req.full_url, req.data.decode()
             return Resp()
 
-        def fake_run(argv, input=None, capture_output=False):
+        def fake_run(argv, input=None, capture_output=False, **kw):
             return subprocess.CompletedProcess(argv, 0, stdout=b"sig", stderr=b"")
 
-        with mock.patch("subprocess.run", fake_run), mock.patch("urllib.request.urlopen", fake_urlopen):
+        with mock.patch("subprocess.run", fake_run), mock.patch("netsafe.urlopen", fake_urlopen):
             self.assertEqual(fcm.access_token(), "minted-access-token")
             self.assertEqual(fcm.access_token(), "minted-access-token")  # cached
         self.assertEqual(sent["url"], fcm.TOKEN_URL)

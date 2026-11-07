@@ -240,7 +240,12 @@ nunca en el repo. Para generar la credencial una vez:
 `python3 host/notifier/provision_fcm.py --project <id-de-tu-proyecto-firebase>`.
 
 El log rota solo (1 MB × 3, `notifier.log` en el directorio de instalación) y no registra
-tokens, credenciales ni el texto de los mensajes.
+tokens, credenciales ni el texto de los mensajes. Todo queda en `0600`: el plist fija
+`Umask` 077, `install.sh` pre-crea `notifier.out` y `notifier.err` en `0600`, y al arrancar
+el daemon ajusta a `0600` un log o respaldo que ya existiera. La clave privada ya no se deja
+en disco: se escribe en un directorio temporal `0700` solo mientras `openssl` firma (con
+timeout de 15 s) y se borra enseguida. Las respuestas HTTP que redirigen a `http://` se
+rechazan.
 
 **Migrar una instalación anterior es manual.** El instalador no detiene ni recarga el
 agente viejo. Orden: `launchctl bootout` del agente anterior, `install.sh`, comprobar que

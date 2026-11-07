@@ -30,6 +30,8 @@ import urllib.error
 import urllib.request
 
 import config
+import hlog
+import netsafe
 
 
 def configstore_path():
@@ -78,18 +80,30 @@ def access_token():
     return token
 
 
+def _safe_detail(exc):
+    """A short, scrubbed reason from an HTTP error body; never the raw body."""
+    try:
+        error = json.loads(exc.read().decode(errors="replace"))["error"]
+        parts = [str(error.get("status") or ""), str(error.get("message") or "")]
+        text = hlog.clip(" ".join(p for p in parts if p), 200)
+    except Exception:
+        return ""
+    return ": " + text if text else ""
+
+
 def call(method, url, token, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with netsafe.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode()[:400]
-        fail("%s %s -> HTTP %d\n%s" % (method, url, exc.code, detail))
+        fail("%s -> HTTP %d%s" % (method, exc.code, _safe_detail(exc)))
+    except (RuntimeError, urllib.error.URLError) as exc:
+        fail("%s failed: %s" % (method, hlog.clip(exc, 120)))
 
 
 def main(argv=None):

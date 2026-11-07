@@ -57,7 +57,34 @@ class EventFilteringTest(IsolatedEnv):
 
     def test_pane_is_the_notification_tag(self):
         notifier.handle_event("default", event(pane="w3:p2"), {})
-        self.assertEqual(self.deliver.call_args.kwargs["tag"], "w3:p2")
+        self.assertEqual(self.deliver.call_args.kwargs["tag"], "default/w3:p2")
+
+    def test_tag_is_scoped_by_session(self):
+        notifier.handle_event("one", event(pane="w1:p1"), {})
+        tag_one = self.deliver.call_args.kwargs["tag"]
+        notifier.handle_event("two", event(pane="w1:p1"), {})
+        self.assertNotEqual(tag_one, self.deliver.call_args.kwargs["tag"])
+
+    def test_idle_working_idle_alerts_twice(self):
+        for status in ("idle", "working", "idle"):
+            notifier.handle_event("default", event(status=status), {})
+        self.assertEqual(self.deliver.call_count, 2)
+
+    def test_idle_idle_alerts_once(self):
+        for status in ("idle", "idle"):
+            notifier.handle_event("default", event(status=status), {})
+        self.assertEqual(self.deliver.call_count, 1)
+
+    def test_same_pane_id_in_two_sessions_is_independent(self):
+        self.assertTrue(notifier.handle_event("one", event(pane="w1:p1"), {}))
+        self.assertTrue(notifier.handle_event("two", event(pane="w1:p1"), {}))
+        self.assertFalse(notifier.handle_event("one", event(pane="w1:p1"), {}))
+        self.assertEqual(self.deliver.call_count, 2)
+
+    def test_blocked_working_blocked_alerts_twice(self):
+        for status in ("blocked", "working", "blocked"):
+            notifier.handle_event("default", event(status=status), {})
+        self.assertEqual(self.deliver.call_count, 2)
 
     def test_agent_name_falls_back_to_known_panes(self):
         msg = {"event": "pane.agent_status_changed",
@@ -153,7 +180,7 @@ class DeliverRoutingTest(IsolatedEnv):
         push.assert_called_once()
 
     def test_push_without_topic_is_a_noop(self):
-        with mock.patch("urllib.request.urlopen") as urlopen:
+        with mock.patch("netsafe.urlopen") as urlopen:
             notifier.push("T", "B")
         urlopen.assert_not_called()
 

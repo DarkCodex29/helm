@@ -222,3 +222,27 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   malformed token entries are dropped; non-https or non-JSON FCM responses
   raise RuntimeError. Migrating the live install is a manual step for the
   owner and was not done.
+- **L16** — Independent verifier FAILed the T5 port (S2, S5, S6); all findings
+  fixed test-first (22 RED tests on the old code, suite now 84 green on
+  `/usr/bin/python3` 3.9). (1) High: titles were clipped before the log scrub,
+  so a registered secret cut at 40 chars leaked its prefix; `hlog.clip` now
+  scrubs first. (2) High: `working` was ignored before the dedupe update, so
+  idle -> working -> idle lost the second completion; every status is now
+  recorded keyed by `(session, pane)` and the FCM tag is `session/pane`.
+  (3) Medium: the private-key PEM persisted and an existing file was trusted;
+  it is now a 0600 file in a fresh 0700 `tempfile` dir, removed in `finally`,
+  never reused, and `openssl` runs with a 15 s timeout (timeout becomes a
+  `RuntimeError` with no key material); `HELM_NOTIFIER_PEM` is gone.
+  (4) Medium: existing log files/backups are chmod'ed 0600 at startup, the
+  plist template sets `Umask` 63 (077), and `install.sh` pre-creates
+  `notifier.out`/`notifier.err` at 0600 (not in dry-run). (5) Medium:
+  `install.sh --load` called a word-split string and broke on paths with
+  spaces; it now runs `launchctl bootstrap "gui/$(id -u)" "$PLIST"` directly
+  (tested with a fake `launchctl` on PATH, exactly 3 args, plist dir with a
+  space). (6) Medium: provisioning prints the status code plus a scrubbed,
+  200-char-clipped reason, never the raw body; new `netsafe.py` opener
+  refuses any non-https redirect and is used by fcm, ntfy and provisioning.
+  Kept: `install.sh` rejects `&`, `<`, `>`, `|`, quotes and backslash in
+  substituted values, now covered by a test. Still manual for the owner:
+  migrating the live agent; the live install is untouched.
+

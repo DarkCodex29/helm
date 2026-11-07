@@ -24,6 +24,7 @@ import urllib.request
 
 import config
 import hlog
+import netsafe
 from hlog import clip, log
 
 # Optional on purpose: a daemon whose only job is telling a human something
@@ -53,8 +54,10 @@ NOTIFY_ON = {
 RESCAN_SECONDS = 30
 
 # The last state each pane was reported in, so a repeat is not re-announced.
-# Keyed by pane: two agents reaching `idle` together are two pieces of news.
+# Keyed by (session, pane): pane ids repeat across sessions, and two agents
+# reaching `idle` together are two pieces of news.
 _last_state = {}
+_state_lock = threading.Lock()
 
 
 def run(args, timeout=10):
@@ -187,7 +190,7 @@ def push(title, body, priority="5", tags="warning"):
         req.add_header("Title", title)
         req.add_header("Priority", priority)
         req.add_header("Tags", tags)
-        urllib.request.urlopen(req, timeout=10).read()  # noqa: S310 (fixed https URL)
+        netsafe.urlopen(req, timeout=10).read()
         log(f"pushed[ntfy {priority}]: {clip(title)}")
     except Exception as exc:
         log("push failed: " + type(exc).__name__)
@@ -252,17 +255,24 @@ def handle_event(session, msg, names):
         return False
     data = msg.get("data", {})
     state = data.get("agent_status")
+    pane = data.get("pane_id", "?")
+    key = (session, pane)
+
+    # Every status is recorded, `working` included: idle -> working -> idle is
+    # a new completion and must alert again. Same pane, same state, twice
+    # running is not news.
+    if isinstance(state, str):
+        with _state_lock:
+            previous = _last_state.get(key)
+            _last_state[key] = state
+        if previous == state:
+            return False
+
     rule = NOTIFY_ON.get(state)
     if not rule:
         return False
 
-    pane = data.get("pane_id", "?")
     agent = data.get("agent") or names.get(pane, "agent")
-
-    # Same pane, same state, twice running is not news.
-    if _last_state.get(pane) == state:
-        return False
-    _last_state[pane] = state
 
     place, area, doing, agent = describe(session, pane, agent)
     title, body, payload = build_alert(
@@ -271,9 +281,9 @@ def handle_event(session, msg, names):
     deliver(
         title, body,
         priority=rule["priority"], tags=rule["tags"],
-        # One slot per pane: otherwise a second agent's alert replaces the
-        # first one's and the user never learns it happened.
-        tag=pane, data=payload,
+        # One slot per (session, pane): otherwise a second agent's alert
+        # replaces the first one's and the user never learns it happened.
+        tag=session + "/" + pane, data=payload,
     )
     return True
 

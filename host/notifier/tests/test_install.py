@@ -42,6 +42,59 @@ class InstallScriptTest(IsolatedEnv):
             self.assertEqual(oct(os.stat(os.path.join(target, name)).st_mode & 0o777), "0o600", name)
         for secret in ("fcm-sa.json", "device-tokens.json", "topic"):
             self.assertFalse(os.path.exists(os.path.join(target, secret)))
+        for name in ("notifier.out", "notifier.err"):
+            path = os.path.join(target, name)
+            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600", name)
+
+    def test_preexisting_loose_out_err_are_tightened(self):
+        target = os.path.join(self.dir, "inst")
+        os.makedirs(target)
+        for name in ("notifier.out", "notifier.err"):
+            path = os.path.join(target, name)
+            with open(path, "w") as h:
+                h.write("x")
+            os.chmod(path, 0o644)
+        r = self.run_sh("--install-dir", target, "--plist-dir", os.path.join(self.dir, "a"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in ("notifier.out", "notifier.err"):
+            self.assertEqual(oct(os.stat(os.path.join(target, name)).st_mode & 0o777), "0o600", name)
+
+    def test_dry_run_does_not_create_out_err(self):
+        target = os.path.join(self.dir, "inst")
+        self.run_sh("--dry-run", "--install-dir", target, "--plist-dir", os.path.join(self.dir, "a"))
+        self.assertFalse(os.path.exists(target))
+
+    def test_load_passes_exactly_three_args_even_with_spaces(self):
+        fakebin = os.path.join(self.dir, "fake bin")
+        os.makedirs(fakebin)
+        record = os.path.join(self.dir, "argv.txt")
+        fake = os.path.join(fakebin, "launchctl")
+        with open(fake, "w") as h:
+            h.write('#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a" >> "$FAKE_RECORD"; done\n')
+        os.chmod(fake, 0o755)
+        plist_dir = os.path.join(self.dir, "my agents")
+        target = os.path.join(self.dir, "my inst")
+        env = {"PATH": fakebin + os.pathsep + os.environ["PATH"], "FAKE_RECORD": record}
+        r = self.run_sh("--load", "--install-dir", target, "--plist-dir", plist_dir, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.exists(record), "fake launchctl was not used")
+        with open(record) as h:
+            argv = h.read().split("\n")[:-1]
+        self.assertEqual(argv, ["bootstrap", "gui/" + str(os.getuid()),
+                                os.path.join(plist_dir, "dev.helm.notifier.plist")])
+
+    def test_template_sets_umask_077(self):
+        with open(os.path.join(NOTIFIER_DIR, "helm-notifier.plist.template")) as h:
+            text = h.read()
+        self.assertIn("<key>Umask</key>\n    <integer>63</integer>", text)
+
+    def test_xml_and_sed_special_characters_are_rejected(self):
+        for flag, value in (("--label", "a&b"), ("--label", "a<b"), ("--label", "a>b"),
+                            ("--install-dir", "/tmp/x&y"), ("--install-dir", "/tmp/x<y"),
+                            ("--python", "/usr/bin/py&thon"), ("--python", "/usr/bin/py<thon")):
+            r = self.run_sh("--dry-run", flag, value)
+            self.assertEqual(r.returncode, 64, (flag, value))
+            self.assertIn("refusing", r.stderr)
 
     def test_idempotent(self):
         target = os.path.join(self.dir, "inst")

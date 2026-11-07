@@ -5,7 +5,6 @@ environment and expect the next call to see it.
 
     HELM_NOTIFIER_DIR          install dir            (default ~/helm-notifier)
     HELM_NOTIFIER_CREDENTIALS  FCM service-account    (default <dir>/fcm-sa.json)
-    HELM_NOTIFIER_PEM          extracted private key  (default <dir>/fcm-sa.pem)
     HELM_NOTIFIER_TOKENS       device tokens          (default <dir>/device-tokens.json)
     HELM_NOTIFIER_LOG          rotating log           (default <dir>/notifier.log)
     HELM_NOTIFIER_TOPIC_FILE   ntfy topic, optional   (default <dir>/topic)
@@ -32,10 +31,6 @@ def _path(env_name, default_name):
 
 def credentials_path():
     return _path("HELM_NOTIFIER_CREDENTIALS", "fcm-sa.json")
-
-
-def pem_path():
-    return _path("HELM_NOTIFIER_PEM", "fcm-sa.pem")
 
 
 def tokens_path():

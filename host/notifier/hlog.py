@@ -7,7 +7,7 @@ body, the last 8 characters of device tokens, and the ntfy topic.
 Here:
   * RotatingFileHandler, 1 MB x 3 backups;
   * umask 077 before any file is created, so log, backups and token files are
-    0600;
+    0600, and existing log files/backups are chmod'ed to 0600 at startup;
   * a filter that scrubs registered secrets and token-shaped strings from
     every record, as a second line of defence behind "never pass them in";
   * `clip` for the little text that is logged (titles), body is omitted.
@@ -51,8 +51,12 @@ def scrub(text):
 
 
 def clip(text, limit=TEXT_LIMIT):
-    """One line, at most [limit] characters."""
-    flat = " ".join(str(text).split())
+    """One line, at most [limit] characters, secrets scrubbed FIRST.
+
+    Scrubbing after truncation would let a registered secret cut in half
+    escape the match and leave its prefix in the log.
+    """
+    flat = " ".join(scrub(str(text)).split())
     if len(flat) <= limit:
         return flat
     return flat[: limit - 1] + "\u2026"
@@ -68,6 +72,15 @@ class RedactFilter(logging.Filter):
 _logger = logging.getLogger("helm-notifier")
 
 
+def _tighten(path):
+    """0600 for an existing log file and its rotated backups."""
+    for candidate in [path] + ["%s.%d" % (path, i) for i in range(1, BACKUP_COUNT + 1)]:
+        try:
+            os.chmod(candidate, 0o600)
+        except OSError:
+            pass  # absent (or not ours): nothing to tighten
+
+
 def setup(path=None):
     """Configure the logger. Safe to call twice (handlers are replaced)."""
     os.umask(0o077)
@@ -79,6 +92,7 @@ def setup(path=None):
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, mode=0o700, exist_ok=True)
+        _tighten(path)
         # Created here, 0600, so the mode never depends on the handler.
         os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600))
         handler = logging.handlers.RotatingFileHandler(

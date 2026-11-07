@@ -26,6 +26,11 @@
 
     <!-- Only crash output lands here. Normal logging goes to the rotating
          file (HELM_NOTIFIER_LOG), so this file stays tiny. -->
+    <!-- 077: launchd creates the out/err files itself, before Python's own
+         umask could apply. install.sh also pre-creates them at 0600. -->
+    <key>Umask</key>
+    <integer>63</integer>
+
     <key>StandardOutPath</key>
     <string>__INSTALL_DIR__/notifier.out</string>
 

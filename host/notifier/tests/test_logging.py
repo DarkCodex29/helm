@@ -93,10 +93,33 @@ class RedactionTest(LoggingBase):
         self.assertNotIn("abcd5678", text)
         self.assertIn("device 1/1", text)
 
+    def test_clipped_title_never_leaks_a_secret_fragment(self):
+        import notifier
+        secret = "opaque.title.secret/ABCDEFGHIJKLMNOP0123456789xyz"  # noqa: S105
+        hlog.register_secret(secret)
+        title = secret + " · claude is done"
+        with mock.patch.object(notifier.fcm, "device_tokens", return_value=["tok-aaaaaaaa"]), \
+             mock.patch.object(notifier.fcm, "send"):
+            notifier.deliver(title, "b", "5", "w", {})
+        with mock.patch.object(notifier.fcm, "device_tokens", return_value=[]), \
+             mock.patch("netsafe.urlopen"):
+            os.environ["HELM_NOTIFIER_TOPIC"] = "some-topic-zzzz"
+            notifier.push(title, "b")
+        text = self.read()
+        self.assertIn("pushed[fcm x1]", text)
+        self.assertIn("pushed[ntfy", text)
+        for i in range(len(secret) - 7):
+            self.assertNotIn(secret[i:i + 8], text, secret[i:i + 8])
+
+    def test_clip_scrubs_before_truncating(self):
+        hlog.register_secret("abcdefghij" * 6)
+        out = hlog.clip("x" + "abcdefghij" * 6)
+        self.assertNotIn("abcdefgh", out)
+
     def test_ntfy_topic_is_never_logged(self):
         import notifier
         os.environ["HELM_NOTIFIER_TOPIC"] = "private-topic-name"
-        with mock.patch("urllib.request.urlopen", side_effect=OSError("private-topic-name")):
+        with mock.patch("netsafe.urlopen", side_effect=OSError("private-topic-name")):
             notifier.push("T", "B")
         self.assertNotIn("private-topic-name", self.read())
 
@@ -112,6 +135,18 @@ class RotationTest(LoggingBase):
 
     def test_log_file_is_0600_even_under_a_permissive_umask(self):
         self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
+
+    def test_setup_tightens_preexisting_log_and_backups(self):
+        self._close()
+        for name in ("n.log", "n.log.1", "n.log.3"):
+            path = os.path.join(self.dir, name)
+            with open(path, "w") as h:
+                h.write("old\n")
+            os.chmod(path, 0o644)
+        hlog.setup()
+        for name in ("n.log", "n.log.1", "n.log.3"):
+            mode = stat.S_IMODE(os.stat(os.path.join(self.dir, name)).st_mode)
+            self.assertEqual(mode, 0o600, name)
 
     def test_setup_sets_umask_077(self):
         os.umask(0o022)

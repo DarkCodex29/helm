@@ -18,7 +18,7 @@ PYTHON=/usr/bin/python3
 PLIST_DIR=$HOME/Library/LaunchAgents
 DRY=0
 LOAD=0
-FILES="notifier.py fcm.py hlog.py config.py provision_fcm.py"
+FILES="notifier.py fcm.py hlog.py config.py netsafe.py provision_fcm.py"
 
 usage() {
   sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
@@ -64,7 +64,8 @@ if [ "$DRY" -eq 1 ]; then
     say "install -m 0600 $SRC/$f $INSTALL_DIR/$f"
   done
   say "render $SRC/helm-notifier.plist.template -> $PLIST (mode 0644)"
-  say "launchctl bootstrap gui/\$(id -u) $PLIST   # run only with --load"
+  say "launchctl bootstrap gui/\$(id -u) \"$PLIST\"   # run only with --load"
+  say "pre-create $INSTALL_DIR/notifier.out and notifier.err (mode 0600)"
   exit 0
 fi
 
@@ -80,6 +81,13 @@ for f in $FILES; do
   chmod 0600 "$INSTALL_DIR/$f"
 done
 
+# launchd creates StandardOutPath/StandardErrorPath itself, so they exist
+# private before it ever starts the agent.
+for f in notifier.out notifier.err; do
+  : >> "$INSTALL_DIR/$f"
+  chmod 0600 "$INSTALL_DIR/$f"
+done
+
 mkdir -p "$PLIST_DIR"
 render > "$PLIST.tmp"
 chmod 0644 "$PLIST.tmp"
@@ -88,11 +96,11 @@ mv "$PLIST.tmp" "$PLIST"
 say "installed scripts in $INSTALL_DIR"
 say "wrote $PLIST"
 say "device tokens and the FCM credential are NOT installed by this script."
-CMD="launchctl bootstrap gui/$(id -u) $PLIST"
+SHOWN="launchctl bootstrap gui/$(id -u) \"$PLIST\""   # display only
 if [ "$LOAD" -eq 1 ]; then
-  say "running: $CMD"
-  $CMD
+  say "running: $SHOWN"
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
 else
   say "to start it, run:"
-  say "  $CMD"
+  say "  $SHOWN"
 fi

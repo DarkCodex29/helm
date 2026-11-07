@@ -22,10 +22,12 @@ token expires in an hour, a leaked server key never did.
 Paths come from `config` (environment), never from constants in this file.
 """
 import base64
+import contextlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -33,6 +35,7 @@ import urllib.request
 
 import config
 import hlog
+import netsafe
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 (endpoint URL, not a secret)
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -53,7 +56,7 @@ def _request_json(req, timeout=20):
     """
     if not req.full_url.startswith("https://"):
         raise RuntimeError("refusing non-https URL")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+    with netsafe.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode()
     try:
         parsed = json.loads(raw)
@@ -83,30 +86,47 @@ def _service_account():
     return account
 
 
-def _private_key_pem(account):
-    """The SA's private key on disk as PEM, written 0600 on first use.
+SIGN_TIMEOUT = 15
 
-    Extracted once instead of a temp file per signature: the token is
-    re-minted roughly every 50 minutes, and each of those would otherwise
-    create and delete a file containing a private key.
+
+@contextlib.contextmanager
+def _private_key_pem(account):
+    """The SA's private key as PEM in a private temp dir, gone on exit.
+
+    A fresh 0700 directory and 0600 file per signature (about once per 50
+    minutes): nothing persists, and a pre-existing file is never trusted or
+    reused.
     """
-    path = config.pem_path()
-    if not os.path.exists(path):
+    directory = tempfile.mkdtemp(prefix="helm-notifier-")  # 0700
+    path = os.path.join(directory, "key.pem")
+    try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as handle:
             handle.write(account["private_key"])
-    return path
+        yield path
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+        with contextlib.suppress(OSError):
+            os.rmdir(directory)
 
 
 def _sign_rs256(message, pem_path):
-    result = subprocess.run(
-        ["openssl", "dgst", "-sha256", "-sign", pem_path],
-        input=message,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", pem_path],
+            input=message,
+            capture_output=True,
+            timeout=SIGN_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "openssl signing timed out after %ds" % SIGN_TIMEOUT
+        ) from None
     if result.returncode != 0:
         raise RuntimeError(
-            "openssl signing failed: " + result.stderr.decode(errors="replace")
+            "openssl signing failed: "
+            + hlog.clip(result.stderr.decode(errors="replace"), 120)
         )
     return result.stdout
 
@@ -136,7 +156,8 @@ def access_token():
         return _cached["token"]
 
     account = _service_account()
-    assertion = build_assertion(account, _private_key_pem(account), now)
+    with _private_key_pem(account) as pem_path:
+        assertion = build_assertion(account, pem_path, now)
 
     body = urllib.parse.urlencode(
         {
@@ -242,7 +263,7 @@ def _selftest():
         print("  unexpected success -- FCM accepted a bogus token")
         return 1
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode()[:200]
+        detail = hlog.clip(exc.read().decode(errors="replace"), 200)
         if exc.code in (401, 403):
             print(f"  AUTH FAILED ({exc.code}): {detail}")
             return 1
