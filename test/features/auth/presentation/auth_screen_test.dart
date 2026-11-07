@@ -28,55 +28,54 @@ void main() {
   );
 
   group('AuthScreen biometric gate', () {
-    testWidgets(
-      'never prompts when biometrics are unavailable',
-      (tester) async {
-        final service = FakeBiometricService(available: false);
+    testWidgets('never prompts when biometrics are unavailable', (
+      tester,
+    ) async {
+      final service = FakeBiometricService(available: false);
 
-        await pumpAuthScreen(tester, service);
+      await pumpAuthScreen(tester, service);
 
-        expect(
-          service.isAvailableCallCount,
-          greaterThan(0),
-          reason: 'availability must have been resolved for this to be a '
-              'meaningful assertion',
-        );
-        expect(
-          service.authenticateCallCount,
-          0,
-          reason: 'prompting with no biometric enrolled falls back to the '
-              'device passcode, stranding the user behind a modal they '
-              'cannot satisfy; the router redirect must run instead',
-        );
-      },
-    );
+      expect(
+        service.isAvailableCallCount,
+        greaterThan(0),
+        reason:
+            'availability must have been resolved for this to be a '
+            'meaningful assertion',
+      );
+      expect(
+        service.authenticateCallCount,
+        0,
+        reason:
+            'prompting with no biometric enrolled falls back to the '
+            'device passcode, stranding the user behind a modal they '
+            'cannot satisfy; the router redirect must run instead',
+      );
+    });
 
-    testWidgets(
-      'prompts exactly once when biometrics are available',
-      (tester) async {
-        final service = FakeBiometricService(authenticateResult: true);
+    testWidgets('prompts exactly once when biometrics are available', (
+      tester,
+    ) async {
+      final service = FakeBiometricService(authenticateResult: true);
 
-        await pumpAuthScreen(tester, service);
+      await pumpAuthScreen(tester, service);
 
-        expect(service.authenticateCallCount, 1);
-      },
-    );
+      expect(service.authenticateCallCount, 1);
+    });
 
-    testWidgets(
-      'does not re-prompt in a loop after a failed attempt',
-      (tester) async {
-        // A failed attempt lands the notifier back on AuthState.locked. A
-        // trigger that reacts to every emission -- rather than to the first
-        // locked resolution -- would prompt again here, forever.
-        final service = FakeBiometricService(authenticateResult: false);
+    testWidgets('does not re-prompt in a loop after a failed attempt', (
+      tester,
+    ) async {
+      // A failed attempt lands the notifier back on AuthState.locked. A
+      // trigger that reacts to every emission -- rather than to the first
+      // locked resolution -- would prompt again here, forever.
+      final service = FakeBiometricService(authenticateResult: false);
 
-        await pumpAuthScreen(tester, service);
-        await tester.pumpAndSettle();
-        await tester.pumpAndSettle();
+      await pumpAuthScreen(tester, service);
+      await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
 
-        expect(service.authenticateCallCount, 1);
-      },
-    );
+      expect(service.authenticateCallCount, 1);
+    });
 
     testWidgets(
       'prompts again when the retry button is tapped after a failure',
@@ -94,17 +93,16 @@ void main() {
       },
     );
 
-    testWidgets(
-      'offers no retry button when biometrics are unavailable',
-      (tester) async {
-        final service = FakeBiometricService(available: false);
+    testWidgets('offers no retry button when biometrics are unavailable', (
+      tester,
+    ) async {
+      final service = FakeBiometricService(available: false);
 
-        await pumpAuthScreen(tester, service);
+      await pumpAuthScreen(tester, service);
 
-        expect(find.text('No biometrics available'), findsOneWidget);
-        expect(authenticateButton, findsNothing);
-      },
-    );
+      expect(find.text('No biometrics available'), findsOneWidget);
+      expect(authenticateButton, findsNothing);
+    });
 
     testWidgets(
       'prompts once when the notifier already resolved before it mounts',

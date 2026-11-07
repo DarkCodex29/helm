@@ -105,21 +105,24 @@ void main() {
       expect(controller.state, const SessionHoldState.released());
     });
 
-    test('holding a second session replaces the first rather than stacking', () async {
-      final first = _session(name: 'helm-one');
-      final second = _session(name: 'helm-two');
+    test(
+      'holding a second session replaces the first rather than stacking',
+      () async {
+        final first = _session(name: 'helm-one');
+        final second = _session(name: 'helm-two');
 
-      await controller.hold(first.session);
-      await controller.hold(second.session);
+        await controller.hold(first.session);
+        await controller.hold(second.session);
 
-      expect(host.starts.map((s) => s.sessionName), ['helm-one', 'helm-two']);
-      expect(controller.state, const SessionHoldState.held('helm-two'));
+        expect(host.starts.map((s) => s.sessionName), ['helm-one', 'helm-two']);
+        expect(controller.state, const SessionHoldState.held('helm-two'));
 
-      // The first session is no longer watched: its disconnect must not
-      // tear down a hold that now belongs to the second.
-      first.status.value = ConnectionStatus.disconnected;
-      expect(controller.state, const SessionHoldState.held('helm-two'));
-    });
+        // The first session is no longer watched: its disconnect must not
+        // tear down a hold that now belongs to the second.
+        first.status.value = ConnectionStatus.disconnected;
+        expect(controller.state, const SessionHoldState.held('helm-two'));
+      },
+    );
 
     test('a platform that refuses is reported, not thrown', () async {
       host.startSucceeds = false;
@@ -286,51 +289,28 @@ void main() {
       expect(controller.state, const SessionHoldState.released());
     });
 
-    test(
-      'a platform that refuses an automatic hold reports unavailable, and '
-      'never a hold that is not there',
-      () async {
-        host.startSucceeds = false;
-        final s = _session();
-
-        await controller.holdOnConnect(s.session);
-
-        expect(controller.state, const SessionHoldState.unavailable());
-        expect(host.running, isFalse);
-      },
-    );
-
-    test(
-      'a hold the user turned off by hand does not come back for that '
-      'session - the preference decides what happens on the NEXT connect, '
-      'and never overrules the user in the moment',
-      () async {
-        final s = _session();
-
-        await controller.holdOnConnect(s.session);
-        expect(controller.state.isHolding, isTrue);
-
-        await controller.release();
-
-        // The same session, asked for again by the same automatic path.
-        await controller.holdOnConnect(s.session);
-
-        expect(host.starts, hasLength(1));
-        expect(controller.state, const SessionHoldState.released());
-      },
-    );
-
-    test('STOP in the notification refuses further automatic holds too', () async {
-      // The notification's own STOP button is the same gesture as the
-      // toolbar pin, reached through a different surface. Treating it as
-      // weaker would make a control the user can see from outside the app
-      // mean less than one they can only reach inside it.
+    test('a platform that refuses an automatic hold reports unavailable, and '
+        'never a hold that is not there', () async {
+      host.startSucceeds = false;
       final s = _session();
+
       await controller.holdOnConnect(s.session);
 
-      host.tapStopAction();
-      await pumpEventQueue();
+      expect(controller.state, const SessionHoldState.unavailable());
+      expect(host.running, isFalse);
+    });
 
+    test('a hold the user turned off by hand does not come back for that '
+        'session - the preference decides what happens on the NEXT connect, '
+        'and never overrules the user in the moment', () async {
+      final s = _session();
+
+      await controller.holdOnConnect(s.session);
+      expect(controller.state.isHolding, isTrue);
+
+      await controller.release();
+
+      // The same session, asked for again by the same automatic path.
       await controller.holdOnConnect(s.session);
 
       expect(host.starts, hasLength(1));
@@ -338,21 +318,38 @@ void main() {
     });
 
     test(
-      'turning one session off says nothing about another - the refusal is '
-      'per session, not a mode the whole app enters',
+      'STOP in the notification refuses further automatic holds too',
       () async {
-        final first = _session(name: 'helm-one');
-        final second = _session(name: 'helm-two');
+        // The notification's own STOP button is the same gesture as the
+        // toolbar pin, reached through a different surface. Treating it as
+        // weaker would make a control the user can see from outside the app
+        // mean less than one they can only reach inside it.
+        final s = _session();
+        await controller.holdOnConnect(s.session);
 
-        await controller.holdOnConnect(first.session);
-        await controller.release();
+        host.tapStopAction();
+        await pumpEventQueue();
 
-        await controller.holdOnConnect(second.session);
+        await controller.holdOnConnect(s.session);
 
-        expect(host.starts.map((s) => s.sessionName), ['helm-one', 'helm-two']);
-        expect(controller.state, const SessionHoldState.held('helm-two'));
+        expect(host.starts, hasLength(1));
+        expect(controller.state, const SessionHoldState.released());
       },
     );
+
+    test('turning one session off says nothing about another - the refusal is '
+        'per session, not a mode the whole app enters', () async {
+      final first = _session(name: 'helm-one');
+      final second = _session(name: 'helm-two');
+
+      await controller.holdOnConnect(first.session);
+      await controller.release();
+
+      await controller.holdOnConnect(second.session);
+
+      expect(host.starts.map((s) => s.sessionName), ['helm-one', 'helm-two']);
+      expect(controller.state, const SessionHoldState.held('helm-two'));
+    });
 
     test(
       'a hold that ended because the session disconnected is taken again on '
@@ -373,32 +370,29 @@ void main() {
       },
     );
 
-    test(
-      'asking for a hold by hand clears the refusal, so the preference is '
-      'honoured again afterwards',
-      () async {
-        final s = _session();
+    test('asking for a hold by hand clears the refusal, so the preference is '
+        'honoured again afterwards', () async {
+      final s = _session();
 
-        await controller.holdOnConnect(s.session);
-        await controller.release();
+      await controller.holdOnConnect(s.session);
+      await controller.release();
 
-        // The user changed their mind and tapped the pin back on. That is
-        // the exact opposite of the gesture that set the refusal, so the
-        // refusal must not survive it.
-        await controller.hold(s.session);
-        expect(controller.state.isHolding, isTrue);
+      // The user changed their mind and tapped the pin back on. That is
+      // the exact opposite of the gesture that set the refusal, so the
+      // refusal must not survive it.
+      await controller.hold(s.session);
+      expect(controller.state.isHolding, isTrue);
 
-        // Torn down by the connection dying, which declines nothing.
-        s.status.value = ConnectionStatus.disconnected;
-        await pumpEventQueue();
-        s.status.value = ConnectionStatus.connected;
+      // Torn down by the connection dying, which declines nothing.
+      s.status.value = ConnectionStatus.disconnected;
+      await pumpEventQueue();
+      s.status.value = ConnectionStatus.connected;
 
-        await controller.holdOnConnect(s.session);
+      await controller.holdOnConnect(s.session);
 
-        expect(host.starts, hasLength(3));
-        expect(controller.state.isHolding, isTrue);
-      },
-    );
+      expect(host.starts, hasLength(3));
+      expect(controller.state.isHolding, isTrue);
+    });
 
     test('a disposed controller holds nothing on connect', () async {
       final s = _session();

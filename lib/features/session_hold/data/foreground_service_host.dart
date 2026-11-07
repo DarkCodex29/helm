@@ -96,11 +96,9 @@ abstract interface class ForegroundServiceHost {
 /// `android.os.Process.myPid()` from both `MainActivity` and the service —
 /// see `SessionHoldService.kt`.
 class PlatformForegroundServiceHost implements ForegroundServiceHost {
-  PlatformForegroundServiceHost({
-    MethodChannel? methods,
-    EventChannel? events,
-  }) : _methods = methods ?? const MethodChannel(kSessionHoldMethodChannel),
-       _events = events ?? const EventChannel(kSessionHoldEventChannel);
+  PlatformForegroundServiceHost({MethodChannel? methods, EventChannel? events})
+    : _methods = methods ?? const MethodChannel(kSessionHoldMethodChannel),
+      _events = events ?? const EventChannel(kSessionHoldEventChannel);
 
   static final _log = HelmLogger('ForegroundServiceHost');
 
@@ -164,8 +162,6 @@ class PlatformForegroundServiceHost implements ForegroundServiceHost {
       // is a controller for which "no stop events" is survivable.
       _events
           .receiveBroadcastStream()
-          .handleError(
-            (Object e) => _log.w('Hold event channel error: $e'),
-          )
+          .handleError((Object e) => _log.w('Hold event channel error: $e'))
           .map((_) {});
 }

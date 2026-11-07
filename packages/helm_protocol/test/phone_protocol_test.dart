@@ -208,8 +208,9 @@ void main() {
     });
 
     test('error decoding tolerates a missing or mistyped requestId', () {
-      final old = decodeServerFrame('{"type":"error","code":"c","message":"m"}')
-          .message as ErrorMessage;
+      final old =
+          decodeServerFrame('{"type":"error","code":"c","message":"m"}').message
+              as ErrorMessage;
       expect(old.requestId, isNull);
       final odd = decodeServerFrame(
         '{"type":"error","code":"c","message":"m","requestId":7}',

@@ -59,8 +59,7 @@ class _HarnessState extends State<_Harness> {
   );
 }
 
-Widget _host(List<HostAdvisory> advisories) =>
-    _Harness(advisories: advisories);
+Widget _host(List<HostAdvisory> advisories) => _Harness(advisories: advisories);
 
 void main() {
   testWidgets('renders nothing when there is nothing to report', (
@@ -76,10 +75,7 @@ void main() {
     await tester.pumpWidget(_host(const [_warning, _info]));
 
     expect(find.text('zellij is not installed'), findsOneWidget);
-    expect(
-      find.textContaining('Available here: tmux, herdr.'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Available here: tmux, herdr.'), findsOneWidget);
     expect(find.text('herdr is not on the login PATH'), findsOneWidget);
   });
 

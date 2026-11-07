@@ -68,7 +68,10 @@ Future<TerminalSession> _session({
   );
   if (connect) {
     service.queueConnectSuccess(
-      SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
+      SSHConnectionResult(
+        client: _buildFakeClient(),
+        session: FakeSSHSession(),
+      ),
     );
     await session.connect('key');
     expect(session.status, ConnectionStatus.connected);
@@ -80,38 +83,38 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('focusAgent - the happy path is the only one that says it worked', () {
-    test('passes the agent target through to the multiplexer verbatim', () async {
-      final adapter = FakeAgentAdapter();
-      final session = await _session(adapter: adapter);
-
-      final result = await session.focusAgent('w3:p1');
-
-      expect(result, isA<MuxAgentFocused>());
-      // The PANE id, untouched. `AgentStatus.target` already carries the
-      // identifier herdr's focus accepts, so anything this layer did to it
-      // could only make it wrong.
-      expect(adapter.focusTargets, ['w3:p1']);
-
-      await session.dispose();
-    });
-
     test(
-      'a vanished target is reported as such and NOT as a failure to reach '
-      'the host - the drawer showed a row that is gone, which is a '
-      'different thing to tell the user',
+      'passes the agent target through to the multiplexer verbatim',
       () async {
-        final adapter = FakeAgentAdapter()
-          ..whenFocus(const MuxAgentFocusTargetNotFound());
+        final adapter = FakeAgentAdapter();
         final session = await _session(adapter: adapter);
 
-        final result = await session.focusAgent('w9:p9');
+        final result = await session.focusAgent('w3:p1');
 
-        expect(result, isA<MuxAgentFocusTargetNotFound>());
-        expect(result, isNot(isA<MuxAgentFocused>()));
+        expect(result, isA<MuxAgentFocused>());
+        // The PANE id, untouched. `AgentStatus.target` already carries the
+        // identifier herdr's focus accepts, so anything this layer did to it
+        // could only make it wrong.
+        expect(adapter.focusTargets, ['w3:p1']);
 
         await session.dispose();
       },
     );
+
+    test('a vanished target is reported as such and NOT as a failure to reach '
+        'the host - the drawer showed a row that is gone, which is a '
+        'different thing to tell the user', () async {
+      final adapter = FakeAgentAdapter()
+        ..whenFocus(const MuxAgentFocusTargetNotFound());
+      final session = await _session(adapter: adapter);
+
+      final result = await session.focusAgent('w9:p9');
+
+      expect(result, isA<MuxAgentFocusTargetNotFound>());
+      expect(result, isNot(isA<MuxAgentFocused>()));
+
+      await session.dispose();
+    });
 
     test('a multiplexer-level failure is passed through intact', () async {
       final adapter = FakeAgentAdapter()
@@ -128,21 +131,18 @@ void main() {
   });
 
   group('focusAgent - every refusal reports that it did NOT happen', () {
-    test(
-      'an agent-blind multiplexer FAILS rather than pretending, and is '
-      'never asked in the first place',
-      () async {
-        final adapter = FakeAgentlessAdapter(id: MultiplexerId.tmux);
-        final session = await _session(adapter: adapter);
+    test('an agent-blind multiplexer FAILS rather than pretending, and is '
+        'never asked in the first place', () async {
+      final adapter = FakeAgentlessAdapter(id: MultiplexerId.tmux);
+      final session = await _session(adapter: adapter);
 
-        final result = await session.focusAgent('w1:p1');
+      final result = await session.focusAgent('w1:p1');
 
-        expect(result, isA<MuxAgentFocusFailed>());
-        expect(result, isNot(isA<MuxAgentFocused>()));
+      expect(result, isA<MuxAgentFocusFailed>());
+      expect(result, isNot(isA<MuxAgentFocused>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test('a disconnected session never touches the host', () async {
       final adapter = FakeAgentAdapter();
@@ -167,21 +167,18 @@ void main() {
       expect(adapter.focusTargets, isEmpty);
     });
 
-    test(
-      'an adapter that throws degrades to FAILED instead of blowing up '
-      'inside a button callback',
-      () async {
-        final adapter = _ThrowingFocusAdapter();
-        final session = await _session(adapter: adapter);
+    test('an adapter that throws degrades to FAILED instead of blowing up '
+        'inside a button callback', () async {
+      final adapter = _ThrowingFocusAdapter();
+      final session = await _session(adapter: adapter);
 
-        final result = await session.focusAgent('w1:p1');
+      final result = await session.focusAgent('w1:p1');
 
-        expect(result, isA<MuxAgentFocusFailed>());
-        expect(result, isNot(isA<MuxAgentFocused>()));
+      expect(result, isA<MuxAgentFocusFailed>());
+      expect(result, isNot(isA<MuxAgentFocused>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 
   group('focusAgent - the channel budget, which a thumb sets the rate of', () {
@@ -221,87 +218,79 @@ void main() {
       },
     );
 
-    test(
-      'a second tap while one focus is still in flight opens NO second '
-      'channel - a repeated tap on a wedged host must not spend the '
-      'connection the terminal itself needs',
-      () async {
-        final adapter = FakeAgentAdapter()..whenFocusHangs();
-        final session = await _session(adapter: adapter);
+    test('a second tap while one focus is still in flight opens NO second '
+        'channel - a repeated tap on a wedged host must not spend the '
+        'connection the terminal itself needs', () async {
+      final adapter = FakeAgentAdapter()..whenFocusHangs();
+      final session = await _session(adapter: adapter);
 
+      unawaited(session.focusAgent('w1:p1'));
+      await pumpEventQueue();
+      final second = await session.focusAgent('w1:p1');
+
+      expect(adapter.focusTargets, ['w1:p1']);
+      // Dropped is not done. Reporting FOCUSED here would close the
+      // drawer on the strength of a call that was never made.
+      expect(second, isA<MuxAgentFocusFailed>());
+      expect(second, isNot(isA<MuxAgentFocused>()));
+
+      adapter.releaseFocus();
+      await session.dispose();
+    });
+
+    test('a focus ABANDONED at the timeout still holds the guard, so a wedged '
+        'host leaks at most ONE remote invocation however often the row is '
+        'tapped - the 773888f failure with a thumb as its trigger', () async {
+      final adapter = FakeAgentAdapter()..whenFocusHangs();
+      final session = await _session(adapter: adapter);
+
+      FakeAsync().run((async) {
         unawaited(session.focusAgent('w1:p1'));
-        await pumpEventQueue();
-        final second = await session.focusAgent('w1:p1');
+        async.flushMicrotasks();
+        expect(adapter.focusTargets, hasLength(1));
 
-        expect(adapter.focusTargets, ['w1:p1']);
-        // Dropped is not done. Reporting FOCUSED here would close the
-        // drawer on the strength of a call that was never made.
-        expect(second, isA<MuxAgentFocusFailed>());
-        expect(second, isNot(isA<MuxAgentFocused>()));
+        // The call site gives up here. The REMOTE command does not: the
+        // channel is still open.
+        async.elapse(kAgentFocusTimeout + const Duration(seconds: 1));
+        async.flushMicrotasks();
 
-        adapter.releaseFocus();
-        await session.dispose();
-      },
-    );
-
-    test(
-      'a focus ABANDONED at the timeout still holds the guard, so a wedged '
-      'host leaks at most ONE remote invocation however often the row is '
-      'tapped - the 773888f failure with a thumb as its trigger',
-      () async {
-        final adapter = FakeAgentAdapter()..whenFocusHangs();
-        final session = await _session(adapter: adapter);
-
-        FakeAsync().run((async) {
+        // Five more taps after the abandonment. Every one of them must
+        // find the guard still held.
+        for (var i = 0; i < 5; i++) {
           unawaited(session.focusAgent('w1:p1'));
+          async.elapse(const Duration(seconds: 1));
           async.flushMicrotasks();
-          expect(adapter.focusTargets, hasLength(1));
+        }
 
-          // The call site gives up here. The REMOTE command does not: the
-          // channel is still open.
-          async.elapse(kAgentFocusTimeout + const Duration(seconds: 1));
-          async.flushMicrotasks();
+        expect(
+          adapter.focusTargets,
+          hasLength(1),
+          reason:
+              'the guard is released by the QUERY settling, never by '
+              'the caller giving up on it',
+        );
+      });
 
-          // Five more taps after the abandonment. Every one of them must
-          // find the guard still held.
-          for (var i = 0; i < 5; i++) {
-            unawaited(session.focusAgent('w1:p1'));
-            async.elapse(const Duration(seconds: 1));
-            async.flushMicrotasks();
-          }
+      adapter.releaseFocus();
+      await session.dispose();
+    });
 
-          expect(
-            adapter.focusTargets,
-            hasLength(1),
-            reason: 'the guard is released by the QUERY settling, never by '
-                'the caller giving up on it',
-          );
-        });
+    test('the guard is released once the host answers, so a slow-but-alive '
+        'host does not permanently disable focusing', () async {
+      final adapter = FakeAgentAdapter()..whenFocusHangs();
+      final session = await _session(adapter: adapter);
 
-        adapter.releaseFocus();
-        await session.dispose();
-      },
-    );
+      final first = session.focusAgent('w1:p1');
+      await pumpEventQueue();
+      adapter.releaseFocus();
+      expect(await first, isA<MuxAgentFocused>());
 
-    test(
-      'the guard is released once the host answers, so a slow-but-alive '
-      'host does not permanently disable focusing',
-      () async {
-        final adapter = FakeAgentAdapter()..whenFocusHangs();
-        final session = await _session(adapter: adapter);
+      adapter.whenFocus(const MuxAgentFocused());
+      expect(await session.focusAgent('w3:p1'), isA<MuxAgentFocused>());
+      expect(adapter.focusTargets, ['w1:p1', 'w3:p1']);
 
-        final first = session.focusAgent('w1:p1');
-        await pumpEventQueue();
-        adapter.releaseFocus();
-        expect(await first, isA<MuxAgentFocused>());
-
-        adapter.whenFocus(const MuxAgentFocused());
-        expect(await session.focusAgent('w3:p1'), isA<MuxAgentFocused>());
-        expect(adapter.focusTargets, ['w1:p1', 'w3:p1']);
-
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 }
 

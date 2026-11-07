@@ -118,34 +118,39 @@ void main() {
       expect(result, PushToTalkStartResult.denied);
     });
 
-    test('a non-permission start failure is distinguished from denial', () async {
-      final fake = FakeVoiceRecorder()
-        ..startResult = const VoiceRecordingStartFailed('device busy');
-      final pushToTalk = PushToTalkRecorder(fake);
+    test(
+      'a non-permission start failure is distinguished from denial',
+      () async {
+        final fake = FakeVoiceRecorder()
+          ..startResult = const VoiceRecordingStartFailed('device busy');
+        final pushToTalk = PushToTalkRecorder(fake);
 
-      final result = await pushToTalk.onPressStart();
+        final result = await pushToTalk.onPressStart();
 
-      expect(result, PushToTalkStartResult.failed);
-    });
+        expect(result, PushToTalkStartResult.failed);
+      },
+    );
   });
 
   group('a press that is torn down while start() is still in flight', () {
-    test('dispose() mid-start cancels once start resolves, never stops',
-        () async {
-      final fake = FakeVoiceRecorder()..startGate = Completer<void>();
-      final pushToTalk = PushToTalkRecorder(fake);
+    test(
+      'dispose() mid-start cancels once start resolves, never stops',
+      () async {
+        final fake = FakeVoiceRecorder()..startGate = Completer<void>();
+        final pushToTalk = PushToTalkRecorder(fake);
 
-      final pending = pushToTalk.onPressStart();
-      pushToTalk.dispose();
-      expect(fake.cancelCalls, 0);
+        final pending = pushToTalk.onPressStart();
+        pushToTalk.dispose();
+        expect(fake.cancelCalls, 0);
 
-      fake.startGate!.complete();
-      await pending;
-      await Future<void>.delayed(Duration.zero);
+        fake.startGate!.complete();
+        await pending;
+        await Future<void>.delayed(Duration.zero);
 
-      expect(fake.cancelCalls, 1);
-      expect(fake.stopCalls, 0);
-    });
+        expect(fake.cancelCalls, 1);
+        expect(fake.stopCalls, 0);
+      },
+    );
 
     test('dispose() mid-start with a denied start cancels nothing', () async {
       final fake = FakeVoiceRecorder()

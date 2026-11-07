@@ -42,29 +42,26 @@ void main() {
       expect(rebuilt.dismissalKey, _zellijSubstituted.dismissalKey);
     });
 
-    test(
-      'differs when the SAME check reports something different, so a '
-      'genuinely new finding is never born already dismissed',
-      () {
-        // Same id, different substance: the profile was changed from
-        // zellij to tmux and the host has neither.
-        const tmuxSubstituted = HostAdvisory(
-          id: HostAdvisoryId.multiplexerSubstituted,
-          severity: HostAdvisorySeverity.warning,
-          title: 'tmux is not installed',
-          detail: 'Attached with herdr instead. Available here: herdr.',
-          remediationCopy: 'Install tmux on the host.',
-        );
+    test('differs when the SAME check reports something different, so a '
+        'genuinely new finding is never born already dismissed', () {
+      // Same id, different substance: the profile was changed from
+      // zellij to tmux and the host has neither.
+      const tmuxSubstituted = HostAdvisory(
+        id: HostAdvisoryId.multiplexerSubstituted,
+        severity: HostAdvisorySeverity.warning,
+        title: 'tmux is not installed',
+        detail: 'Attached with herdr instead. Available here: herdr.',
+        remediationCopy: 'Install tmux on the host.',
+      );
 
-        expect(
-          tmuxSubstituted.dismissalKey,
-          isNot(_zellijSubstituted.dismissalKey),
-          reason:
-              'keying on HostAdvisoryId alone would hide this new finding '
-              'behind a dismissal the user made about a different one',
-        );
-      },
-    );
+      expect(
+        tmuxSubstituted.dismissalKey,
+        isNot(_zellijSubstituted.dismissalKey),
+        reason:
+            'keying on HostAdvisoryId alone would hide this new finding '
+            'behind a dismissal the user made about a different one',
+      );
+    });
 
     test('differs when only the title changed', () {
       // Today's two advisory sources happen to move title and detail

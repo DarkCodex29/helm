@@ -119,13 +119,14 @@ String _paneListSuccess(List<Map<String, Object?>> panes) =>
     '{"id":"cli:pane:list","result":{"type":"pane_list","panes":'
     '${_encode(panes)}}}';
 
-String _encode(List<Map<String, Object?>> panes) => '[${panes.map((p) {
-  final fields = p.entries.map((e) {
-    final value = e.value;
-    return '"${e.key}":${value is String ? '"$value"' : value}';
-  }).join(',');
-  return '{$fields}';
-}).join(',')}]';
+String _encode(List<Map<String, Object?>> panes) =>
+    '[${panes.map((p) {
+      final fields = p.entries.map((e) {
+        final value = e.value;
+        return '"${e.key}":${value is String ? '"$value"' : value}';
+      }).join(',');
+      return '{$fields}';
+    }).join(',')}]';
 
 /// One pane in the shape a resurrected-empty session reported: never
 /// touched, sitting in $HOME.
@@ -198,28 +199,25 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('refreshSessionVitality - reachability', () {
-    test(
-      'a multiplexer that cannot list panes reports UNSUPPORTED naming '
-      'itself, never a verdict',
-      () async {
-        final connected = await _connect(
-          runner: _runner(probeOutput: _probeTmuxOnly),
-        );
-        final session = connected.session;
+    test('a multiplexer that cannot list panes reports UNSUPPORTED naming '
+        'itself, never a verdict', () async {
+      final connected = await _connect(
+        runner: _runner(probeOutput: _probeTmuxOnly),
+      );
+      final session = connected.session;
 
-        await session.refreshSessionVitality();
+      await session.refreshSessionVitality();
 
-        final vitality = session.sessionVitalityNotifier.value;
-        expect(vitality, isA<SessionVitalityUnsupported>());
-        expect(
-          (vitality as SessionVitalityUnsupported).muxId,
-          MultiplexerId.tmux,
-        );
-        expect(vitality, isNot(isA<SessionVitalityKnown>()));
+      final vitality = session.sessionVitalityNotifier.value;
+      expect(vitality, isA<SessionVitalityUnsupported>());
+      expect(
+        (vitality as SessionVitalityUnsupported).muxId,
+        MultiplexerId.tmux,
+      );
+      expect(vitality, isNot(isA<SessionVitalityKnown>()));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test('a dead pane server reports UNREACHABLE, never a verdict', () async {
       final connected = await _connect(
@@ -246,57 +244,51 @@ void main() {
       await session.dispose();
     });
 
-    test(
-      'the StateError listPanes raises for an unrecognized herdr error '
-      'degrades to UNREACHABLE instead of escaping',
-      () async {
-        final connected = await _connect(
-          runner: _runner(
-            paneListStderr:
-                '{"id":"cli:pane:list","error":{"code":"session_not_found",'
-                '"message":"no such session"}}',
-            paneListExit: 1,
-          ),
-        );
-        final session = connected.session;
+    test('the StateError listPanes raises for an unrecognized herdr error '
+        'degrades to UNREACHABLE instead of escaping', () async {
+      final connected = await _connect(
+        runner: _runner(
+          paneListStderr:
+              '{"id":"cli:pane:list","error":{"code":"session_not_found",'
+              '"message":"no such session"}}',
+          paneListExit: 1,
+        ),
+      );
+      final session = connected.session;
 
-        await session.refreshSessionVitality();
+      await session.refreshSessionVitality();
 
-        expect(
-          session.sessionVitalityNotifier.value,
-          isA<SessionVitalityUnreachable>(),
-        );
+      expect(
+        session.sessionVitalityNotifier.value,
+        isA<SessionVitalityUnreachable>(),
+      );
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
-    test(
-      'a second call while one is still in flight does NOT open a second '
-      'channel - the guard is what bounds the leak `.timeout` would '
-      'otherwise create, exactly as it does for the agent poll',
-      () async {
-        final gated = _GatedHostCommandRunner(_runner(), _paneListCommand);
-        final connected = await _connect(runner: gated);
-        final session = connected.session;
+    test('a second call while one is still in flight does NOT open a second '
+        'channel - the guard is what bounds the leak `.timeout` would '
+        'otherwise create, exactly as it does for the agent poll', () async {
+      final gated = _GatedHostCommandRunner(_runner(), _paneListCommand);
+      final connected = await _connect(runner: gated);
+      final session = connected.session;
 
-        final first = session.refreshSessionVitality();
-        await session.refreshSessionVitality();
-        expect(gated.gatedCalls, 1);
+      final first = session.refreshSessionVitality();
+      await session.refreshSessionVitality();
+      expect(gated.gatedCalls, 1);
 
-        gated.release();
-        await first;
+      gated.release();
+      await first;
 
-        // The gate answers with a bare non-zero exit and no error envelope,
-        // which is an unrecognized failure — it must degrade, not escape.
-        expect(
-          session.sessionVitalityNotifier.value,
-          isA<SessionVitalityUnreachable>(),
-        );
+      // The gate answers with a bare non-zero exit and no error envelope,
+      // which is an unrecognized failure — it must degrade, not escape.
+      expect(
+        session.sessionVitalityNotifier.value,
+        isA<SessionVitalityUnreachable>(),
+      );
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test('an unconnected session publishes nothing at all', () async {
       final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
@@ -317,36 +309,28 @@ void main() {
   });
 
   group('refreshSessionVitality - the verdict', () {
-    test(
-      'the measured resurrected-empty session reads as VIRGIN: untouched '
-      'panes at home, and an authoritative empty agent list',
-      () async {
-        final connected = await _connect(
-          runner: _runner(
-            paneListStdout: _paneListSuccess([
-              _pane(),
-              _pane(paneId: 'w1:p2'),
-            ]),
-          ),
-        );
-        final session = connected.session;
-        await session.refreshAgents();
+    test('the measured resurrected-empty session reads as VIRGIN: untouched '
+        'panes at home, and an authoritative empty agent list', () async {
+      final connected = await _connect(
+        runner: _runner(
+          paneListStdout: _paneListSuccess([_pane(), _pane(paneId: 'w1:p2')]),
+        ),
+      );
+      final session = connected.session;
+      await session.refreshAgents();
 
-        await session.refreshSessionVitality();
+      await session.refreshSessionVitality();
 
-        final vitality = session.sessionVitalityNotifier.value;
-        expect(vitality, isA<SessionVitalityKnown>());
-        expect((vitality as SessionVitalityKnown).shape, SessionShape.virgin);
+      final vitality = session.sessionVitalityNotifier.value;
+      expect(vitality, isA<SessionVitalityKnown>());
+      expect((vitality as SessionVitalityKnown).shape, SessionShape.virgin);
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
     test('a pane past its initial revision reads as LIVED-IN', () async {
       final connected = await _connect(
-        runner: _runner(
-          paneListStdout: _paneListSuccess([_pane(revision: 9)]),
-        ),
+        runner: _runner(paneListStdout: _paneListSuccess([_pane(revision: 9)])),
       );
       final session = connected.session;
       await session.refreshAgents();
@@ -377,104 +361,92 @@ void main() {
       await session.dispose();
     });
 
-    test(
-      'the query is scoped to the attached session, so the verdict cannot '
-      'describe herdr\'s default session instead',
-      () async {
-        final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
-        final connected = await _connect(runner: runner);
-        final session = connected.session;
-        await session.refreshAgents();
+    test('the query is scoped to the attached session, so the verdict cannot '
+        'describe herdr\'s default session instead', () async {
+      final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
+      final connected = await _connect(runner: runner);
+      final session = connected.session;
+      await session.refreshAgents();
 
-        await session.refreshSessionVitality();
+      await session.refreshSessionVitality();
 
-        expect(runner.runCalls, contains(_paneListCommand));
+      expect(runner.runCalls, contains(_paneListCommand));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
-    test(
-      'a host that never reported its home directory is INDETERMINATE - and '
-      'costs NO round-trip, because home cannot arrive later on a '
-      'connection that already probed',
-      () async {
-        final runner = _runner(
-          probeOutput: _probeWithoutHome,
-          paneListStdout: _paneListSuccess([_pane()]),
-        );
-        final connected = await _connect(runner: runner);
-        final session = connected.session;
-        await session.refreshAgents();
+    test('a host that never reported its home directory is INDETERMINATE - and '
+        'costs NO round-trip, because home cannot arrive later on a '
+        'connection that already probed', () async {
+      final runner = _runner(
+        probeOutput: _probeWithoutHome,
+        paneListStdout: _paneListSuccess([_pane()]),
+      );
+      final connected = await _connect(runner: runner);
+      final session = connected.session;
+      await session.refreshAgents();
 
-        await session.refreshSessionVitality();
+      await session.refreshSessionVitality();
 
-        expect(
-          session.sessionVitalityNotifier.value,
-          isA<SessionVitalityIndeterminate>(),
-        );
-        expect(runner.runCalls, isNot(contains(_paneListCommand)));
+      expect(
+        session.sessionVitalityNotifier.value,
+        isA<SessionVitalityIndeterminate>(),
+      );
+      expect(runner.runCalls, isNot(contains(_paneListCommand)));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
   });
 
   group('the one-shot trigger', () {
-    test(
-      'an authoritative agent snapshot drives the verdict exactly once per '
-      'connection - a later poll must not re-ask a question whose answer '
-      'cannot change',
-      () async {
-        final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
-        final connected = await _connect(runner: runner);
-        final session = connected.session;
+    test('an authoritative agent snapshot drives the verdict exactly once per '
+        'connection - a later poll must not re-ask a question whose answer '
+        'cannot change', () async {
+      final runner = _runner(paneListStdout: _paneListSuccess([_pane()]));
+      final connected = await _connect(runner: runner);
+      final session = connected.session;
 
-        await session.refreshAgents();
-        await pumpEventQueue();
-        expect(runner.runCalls.where((c) => c == _paneListCommand), hasLength(1));
+      await session.refreshAgents();
+      await pumpEventQueue();
+      expect(runner.runCalls.where((c) => c == _paneListCommand), hasLength(1));
 
-        await session.refreshAgents();
-        await pumpEventQueue();
-        expect(runner.runCalls.where((c) => c == _paneListCommand), hasLength(1));
+      await session.refreshAgents();
+      await pumpEventQueue();
+      expect(runner.runCalls.where((c) => c == _paneListCommand), hasLength(1));
 
-        await session.dispose();
-      },
-    );
+      await session.dispose();
+    });
 
-    test(
-      'an agent snapshot that is NOT authoritative never triggers the '
-      'query: a verdict built on it could not be VIRGIN anyway',
-      () async {
-        final runner = FakeHostCommandRunner()
-          ..whenRunScript(
-            probeScriptV1,
-            HostCommandResult(stdout: _probeWithHome, exitCode: 0),
-          )
-          ..whenRun(
-            _agentListCommand,
-            HostCommandResult(
-              stderr:
-                  '{"id":"cli:agent:list","error":'
-                  '{"code":"server_not_running","message":"no server"}}',
-              exitCode: 1,
-            ),
-          );
-        final connected = await _connect(runner: runner);
-        final session = connected.session;
-
-        await session.refreshAgents();
-        await pumpEventQueue();
-
-        expect(runner.runCalls, isNot(contains(_paneListCommand)));
-        expect(
-          session.sessionVitalityNotifier.value,
-          isA<SessionVitalityNotProbed>(),
+    test('an agent snapshot that is NOT authoritative never triggers the '
+        'query: a verdict built on it could not be VIRGIN anyway', () async {
+      final runner = FakeHostCommandRunner()
+        ..whenRunScript(
+          probeScriptV1,
+          HostCommandResult(stdout: _probeWithHome, exitCode: 0),
+        )
+        ..whenRun(
+          _agentListCommand,
+          HostCommandResult(
+            stderr:
+                '{"id":"cli:agent:list","error":'
+                '{"code":"server_not_running","message":"no server"}}',
+            exitCode: 1,
+          ),
         );
+      final connected = await _connect(runner: runner);
+      final session = connected.session;
 
-        await session.dispose();
-      },
-    );
+      await session.refreshAgents();
+      await pumpEventQueue();
+
+      expect(runner.runCalls, isNot(contains(_paneListCommand)));
+      expect(
+        session.sessionVitalityNotifier.value,
+        isA<SessionVitalityNotProbed>(),
+      );
+
+      await session.dispose();
+    });
 
     test(
       'disconnecting reverts the verdict to NOT PROBED - a stale VIRGIN on '

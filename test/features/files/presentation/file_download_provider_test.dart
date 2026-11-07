@@ -53,9 +53,8 @@ void main() {
     return notifier..debugUseViewer(viewer);
   }
 
-  FakeSftpSession sessionWith(String path, {int size = 4096}) => FakeSftpSession(
-    files: {path: FakeRemoteFile(List<int>.filled(size, 7))},
-  );
+  FakeSftpSession sessionWith(String path, {int size = 4096}) =>
+      FakeSftpSession(files: {path: FakeRemoteFile(List<int>.filled(size, 7))});
 
   group('a download that is opened', () {
     test('ends in opened, having handed over the downloaded file', () async {
@@ -131,17 +130,20 @@ void main() {
       expect(notifier.state.status, isNot(FileDownloadStatus.failed));
     });
 
-    test('keeps the downloaded file so the user is not at a dead end', () async {
-      final notifier = notifierWith((_) async => ViewerOutcome.noViewer);
+    test(
+      'keeps the downloaded file so the user is not at a dead end',
+      () async {
+        final notifier = notifierWith((_) async => ViewerOutcome.noViewer);
 
-      await notifier.start(
-        serviceFor(sessionWith('/home/gian/report.docx')),
-        _entry('/home/gian/report.docx'),
-      );
+        await notifier.start(
+          serviceFor(sessionWith('/home/gian/report.docx')),
+          _entry('/home/gian/report.docx'),
+        );
 
-      expect(notifier.state.file, isNotNull);
-      expect(notifier.state.file!.existsSync(), isTrue);
-    });
+        expect(notifier.state.file, isNotNull);
+        expect(notifier.state.file!.existsSync(), isTrue);
+      },
+    );
 
     test('a viewer that fails outright is a failure, NOT noViewer', () async {
       final notifier = notifierWith((_) async => ViewerOutcome.failed);
@@ -188,7 +190,9 @@ void main() {
     test('a refused file surfaces the reason it was refused', () async {
       final notifier = notifierWith((_) async => ViewerOutcome.opened);
       final session = FakeSftpSession(
-        files: {'/root/secret.txt': FakeRemoteFile(const [1, 2, 3])},
+        files: {
+          '/root/secret.txt': FakeRemoteFile(const [1, 2, 3]),
+        },
         deniedPaths: {'/root/secret.txt'},
       );
 

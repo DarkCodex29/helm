@@ -91,20 +91,22 @@ void main() {
     expect(session.tracksAgents, isTrue);
   });
 
-  test('a session with no multiplexer attached does not track agents',
-      () async {
-    // A plain shell can never produce an agent alert. Asking here would
-    // spend one of Android's few prompts on a capability this host does
-    // not have.
-    final session = await _connect(
-      tmuxSessionName: null,
-      adapter: FakeAgentAdapter(),
-    );
-    addTearDown(session.dispose);
+  test(
+    'a session with no multiplexer attached does not track agents',
+    () async {
+      // A plain shell can never produce an agent alert. Asking here would
+      // spend one of Android's few prompts on a capability this host does
+      // not have.
+      final session = await _connect(
+        tmuxSessionName: null,
+        adapter: FakeAgentAdapter(),
+      );
+      addTearDown(session.dispose);
 
-    expect(session.status, ConnectionStatus.connected);
-    expect(session.tracksAgents, isFalse);
-  });
+      expect(session.status, ConnectionStatus.connected);
+      expect(session.tracksAgents, isFalse);
+    },
+  );
 
   test('a disposed session stops tracking', () async {
     // Registration is triggered from the tab-open path, so a session that

@@ -29,10 +29,15 @@ class _RecordingRunner implements HostCommandRunner {
 
   @override
   Future<HostCommandResult> run(String command, {Duration? timeout}) async =>
-      throw StateError('register() must not use run(); see AD in the class doc');
+      throw StateError(
+        'register() must not use run(); see AD in the class doc',
+      );
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     scripts.add(script);
     return HostCommandResult(exitCode: exitCode, stderr: stderr);
   }
@@ -62,22 +67,24 @@ void main() {
       expect(runner.scripts, hasLength(1));
     });
 
-    test('carries the token inside a quoted heredoc, not a shell word',
-        () async {
-      final runner = _RecordingRunner();
+    test(
+      'carries the token inside a quoted heredoc, not a shell word',
+      () async {
+        final runner = _RecordingRunner();
 
-      await registrar.register(token: _realisticToken, runner: runner);
-      final script = runner.scripts.single;
+        await registrar.register(token: _realisticToken, runner: runner);
+        final script = runner.scripts.single;
 
-      // A QUOTED delimiter is what makes the body literal. An unquoted one
-      // would expand `$` and backticks in a value this app does not own.
-      expect(script, contains("<<'$kTokenHeredocDelimiter'"));
-      // The token appears exactly once, on its own line, inside that body.
-      expect(script, contains('\n$_realisticToken\n'));
-      // And never as an argument to anything.
-      expect(script, isNot(contains('"$_realisticToken"')));
-      expect(script, isNot(contains("'$_realisticToken'")));
-    });
+        // A QUOTED delimiter is what makes the body literal. An unquoted one
+        // would expand `$` and backticks in a value this app does not own.
+        expect(script, contains("<<'$kTokenHeredocDelimiter'"));
+        // The token appears exactly once, on its own line, inside that body.
+        expect(script, contains('\n$_realisticToken\n'));
+        // And never as an argument to anything.
+        expect(script, isNot(contains('"$_realisticToken"')));
+        expect(script, isNot(contains("'$_realisticToken'")));
+      },
+    );
 
     test('writes the token to a file the merge program then reads', () async {
       final runner = _RecordingRunner();
@@ -120,34 +127,36 @@ void main() {
       expect(runner.scripts, isEmpty);
     });
 
-    test('refuses shell metacharacters even though the heredoc absorbs them',
-        () async {
-      // Defence in depth. The heredoc already neutralises these — measured
-      // — but an allowlist means a future change to the delivery mechanism
-      // cannot quietly turn them back into code.
-      for (final hostile in [
-        r'tok$(whoami)',
-        'tok`id`',
-        "tok'quote",
-        'tok"quote',
-        'tok;rm -rf /',
-        r'tok\backslash',
-        'tok with space',
-      ]) {
-        final runner = _RecordingRunner();
-        final outcome = await registrar.register(
-          token: hostile,
-          runner: runner,
-        );
+    test(
+      'refuses shell metacharacters even though the heredoc absorbs them',
+      () async {
+        // Defence in depth. The heredoc already neutralises these — measured
+        // — but an allowlist means a future change to the delivery mechanism
+        // cannot quietly turn them back into code.
+        for (final hostile in [
+          r'tok$(whoami)',
+          'tok`id`',
+          "tok'quote",
+          'tok"quote',
+          'tok;rm -rf /',
+          r'tok\backslash',
+          'tok with space',
+        ]) {
+          final runner = _RecordingRunner();
+          final outcome = await registrar.register(
+            token: hostile,
+            runner: runner,
+          );
 
-        expect(
-          outcome,
-          TokenRegistrationOutcome.rejectedLocally,
-          reason: 'should reject $hostile',
-        );
-        expect(runner.scripts, isEmpty, reason: 'should not send $hostile');
-      }
-    });
+          expect(
+            outcome,
+            TokenRegistrationOutcome.rejectedLocally,
+            reason: 'should reject $hostile',
+          );
+          expect(runner.scripts, isEmpty, reason: 'should not send $hostile');
+        }
+      },
+    );
 
     test('refuses an empty or blank token', () async {
       final runner = _RecordingRunner();
@@ -163,8 +172,7 @@ void main() {
       expect(runner.scripts, isEmpty);
     });
 
-    test('refuses an implausibly long token rather than shipping it',
-        () async {
+    test('refuses an implausibly long token rather than shipping it', () async {
       final runner = _RecordingRunner();
 
       final outcome = await registrar.register(
@@ -190,7 +198,10 @@ void main() {
 
   group('DeviceTokenRegistrar.register - failure never reaches the caller', () {
     test('reports a non-zero exit without throwing', () async {
-      final runner = _RecordingRunner(exitCode: 127, stderr: 'python3: not found');
+      final runner = _RecordingRunner(
+        exitCode: 127,
+        stderr: 'python3: not found',
+      );
 
       final outcome = await registrar.register(
         token: _realisticToken,
@@ -209,32 +220,36 @@ void main() {
       expect(outcome, TokenRegistrationOutcome.transportFailed);
     });
 
-    test('reports a timed-out script as a host failure, not a success',
-        () async {
-      // A timed-out result carries a null exit code. Reading "not non-zero"
-      // as success would claim a registration that may never have run.
-      final runner = FakeHostCommandRunner();
-      final script = buildTokenRegistrationScript(_realisticToken);
-      runner.whenRunScript(script, const HostCommandResult(timedOut: true));
+    test(
+      'reports a timed-out script as a host failure, not a success',
+      () async {
+        // A timed-out result carries a null exit code. Reading "not non-zero"
+        // as success would claim a registration that may never have run.
+        final runner = FakeHostCommandRunner();
+        final script = buildTokenRegistrationScript(_realisticToken);
+        runner.whenRunScript(script, const HostCommandResult(timedOut: true));
 
-      final outcome = await registrar.register(
-        token: _realisticToken,
-        runner: runner,
-      );
+        final outcome = await registrar.register(
+          token: _realisticToken,
+          runner: runner,
+        );
 
-      expect(outcome, TokenRegistrationOutcome.hostRefused);
-    });
+        expect(outcome, TokenRegistrationOutcome.hostRefused);
+      },
+    );
 
-    test('bounds the call, so a wedged host cannot hold the connect path',
-        () async {
-      late Duration? seen;
-      final runner = _TimeoutSpy((t) => seen = t);
+    test(
+      'bounds the call, so a wedged host cannot hold the connect path',
+      () async {
+        late Duration? seen;
+        final runner = _TimeoutSpy((t) => seen = t);
 
-      await registrar.register(token: _realisticToken, runner: runner);
+        await registrar.register(token: _realisticToken, runner: runner);
 
-      expect(seen, isNotNull);
-      expect(seen!.inSeconds, greaterThan(0));
-    });
+        expect(seen, isNotNull);
+        expect(seen!.inSeconds, greaterThan(0));
+      },
+    );
   });
 
   // ── Execution tests ────────────────────────────────────────────────────
@@ -243,128 +258,130 @@ void main() {
   // that runs on the Mac, so asserting on the script string would only be
   // testing a string. These run the real script through a real /bin/sh in a
   // throwaway HOME and read the file that comes out.
-  group('the generated script, executed for real', () {
-    late Directory home;
+  group(
+    'the generated script, executed for real',
+    () {
+      late Directory home;
 
-    setUp(() async {
-      home = await Directory.systemTemp.createTemp('helm_token_test');
-      await Directory('${home.path}/helm-notifier').create(recursive: true);
-    });
+      setUp(() async {
+        home = await Directory.systemTemp.createTemp('helm_token_test');
+        await Directory('${home.path}/helm-notifier').create(recursive: true);
+      });
 
-    tearDown(() async {
-      if (home.existsSync()) await home.delete(recursive: true);
-    });
+      tearDown(() async {
+        if (home.existsSync()) await home.delete(recursive: true);
+      });
 
-    // Process.run cannot feed stdin, so the script is started and written.
-    Future<ProcessResult> shell(String script) async {
-      final process = await Process.start(
-        '/bin/sh',
-        ['-s'],
-        environment: {'HOME': home.path},
-      );
-      process.stdin.write(script);
-      await process.stdin.close();
-      final stdout = await process.stdout.transform(utf8.decoder).join();
-      final stderr = await process.stderr.transform(utf8.decoder).join();
-      final code = await process.exitCode;
-      return ProcessResult(process.pid, code, stdout, stderr);
-    }
+      // Process.run cannot feed stdin, so the script is started and written.
+      Future<ProcessResult> shell(String script) async {
+        final process = await Process.start(
+          '/bin/sh',
+          ['-s'],
+          environment: {'HOME': home.path},
+        );
+        process.stdin.write(script);
+        await process.stdin.close();
+        final stdout = await process.stdout.transform(utf8.decoder).join();
+        final stderr = await process.stderr.transform(utf8.decoder).join();
+        final code = await process.exitCode;
+        return ProcessResult(process.pid, code, stdout, stderr);
+      }
 
-    File tokensFile() => File('${home.path}/helm-notifier/device-tokens.json');
+      File tokensFile() =>
+          File('${home.path}/helm-notifier/device-tokens.json');
 
-    List<String> readTokens() {
-      final decoded = jsonDecode(tokensFile().readAsStringSync());
-      return List<String>.from((decoded as Map)['tokens'] as List);
-    }
+      List<String> readTokens() {
+        final decoded = jsonDecode(tokensFile().readAsStringSync());
+        return List<String>.from((decoded as Map)['tokens'] as List);
+      }
 
-    test('creates the file when it does not exist yet', () async {
-      expect(tokensFile().existsSync(), isFalse);
+      test('creates the file when it does not exist yet', () async {
+        expect(tokensFile().existsSync(), isFalse);
 
-      final result = await shell(buildTokenRegistrationScript('token-alpha'));
+        final result = await shell(buildTokenRegistrationScript('token-alpha'));
 
-      expect(result.exitCode, 0, reason: result.stderr.toString());
-      expect(readTokens(), ['token-alpha']);
-    });
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(readTokens(), ['token-alpha']);
+      });
 
-    test('creates the directory when it does not exist either', () async {
-      await Directory('${home.path}/helm-notifier').delete(recursive: true);
+      test('creates the directory when it does not exist either', () async {
+        await Directory('${home.path}/helm-notifier').delete(recursive: true);
 
-      final result = await shell(buildTokenRegistrationScript('token-alpha'));
+        final result = await shell(buildTokenRegistrationScript('token-alpha'));
 
-      expect(result.exitCode, 0, reason: result.stderr.toString());
-      expect(readTokens(), ['token-alpha']);
-    });
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(readTokens(), ['token-alpha']);
+      });
 
-    test("preserves another device's token instead of clobbering it",
-        () async {
-      // The tablet registered first. The phone registering must not evict it.
-      tokensFile().writeAsStringSync('{"tokens": ["tablet-token"]}');
+      test("preserves another device's token instead of clobbering it", () async {
+        // The tablet registered first. The phone registering must not evict it.
+        tokensFile().writeAsStringSync('{"tokens": ["tablet-token"]}');
 
-      await shell(buildTokenRegistrationScript('phone-token'));
+        await shell(buildTokenRegistrationScript('phone-token'));
 
-      expect(readTokens(), ['tablet-token', 'phone-token']);
-    });
+        expect(readTokens(), ['tablet-token', 'phone-token']);
+      });
 
-    test('registering the same token twice does not duplicate it', () async {
-      await shell(buildTokenRegistrationScript('token-alpha'));
-      await shell(buildTokenRegistrationScript('token-alpha'));
+      test('registering the same token twice does not duplicate it', () async {
+        await shell(buildTokenRegistrationScript('token-alpha'));
+        await shell(buildTokenRegistrationScript('token-alpha'));
 
-      expect(readTokens(), ['token-alpha']);
-    });
+        expect(readTokens(), ['token-alpha']);
+      });
 
-    test('a token refresh adds the new token beside the old one', () async {
-      await shell(buildTokenRegistrationScript('token-before-refresh'));
-      await shell(buildTokenRegistrationScript('token-after-refresh'));
+      test('a token refresh adds the new token beside the old one', () async {
+        await shell(buildTokenRegistrationScript('token-before-refresh'));
+        await shell(buildTokenRegistrationScript('token-after-refresh'));
 
-      expect(readTokens(), ['token-before-refresh', 'token-after-refresh']);
-    });
+        expect(readTokens(), ['token-before-refresh', 'token-after-refresh']);
+      });
 
-    test('produces exactly the shape fcm.py reads', () async {
-      await shell(buildTokenRegistrationScript('token-alpha'));
+      test('produces exactly the shape fcm.py reads', () async {
+        await shell(buildTokenRegistrationScript('token-alpha'));
 
-      final decoded = jsonDecode(tokensFile().readAsStringSync());
-      expect(decoded, isA<Map<String, dynamic>>());
-      expect((decoded as Map).keys, ['tokens']);
-      expect(decoded['tokens'], isA<List<dynamic>>());
-    });
+        final decoded = jsonDecode(tokensFile().readAsStringSync());
+        expect(decoded, isA<Map<String, dynamic>>());
+        expect((decoded as Map).keys, ['tokens']);
+        expect(decoded['tokens'], isA<List<dynamic>>());
+      });
 
-    test('repairs a corrupt file rather than failing forever', () async {
-      // A half-written file would otherwise wedge registration for good,
-      // and the token in hand is worth more than the unreadable bytes.
-      tokensFile().writeAsStringSync('{"tokens": [ this is not json');
+      test('repairs a corrupt file rather than failing forever', () async {
+        // A half-written file would otherwise wedge registration for good,
+        // and the token in hand is worth more than the unreadable bytes.
+        tokensFile().writeAsStringSync('{"tokens": [ this is not json');
 
-      final result = await shell(buildTokenRegistrationScript('token-alpha'));
+        final result = await shell(buildTokenRegistrationScript('token-alpha'));
 
-      expect(result.exitCode, 0, reason: result.stderr.toString());
-      expect(readTokens(), ['token-alpha']);
-    });
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(readTokens(), ['token-alpha']);
+      });
 
-    test('leaves no file containing the token behind', () async {
-      await shell(buildTokenRegistrationScript('token-alpha'));
+      test('leaves no file containing the token behind', () async {
+        await shell(buildTokenRegistrationScript('token-alpha'));
 
-      final leftovers = Directory('${home.path}/helm-notifier')
-          .listSync()
-          .map((e) => e.path.split('/').last)
-          .toList();
+        final leftovers = Directory(
+          '${home.path}/helm-notifier',
+        ).listSync().map((e) => e.path.split('/').last).toList();
 
-      expect(leftovers, ['device-tokens.json']);
-    });
+        expect(leftovers, ['device-tokens.json']);
+      });
 
-    test('a token full of shell metacharacters lands verbatim', () async {
-      // Proves the heredoc really is a zero-quoting-layer seam. The
-      // registrar rejects this token before it ever gets here; the script
-      // is exercised directly to show the delivery mechanism itself holds.
-      const hostile = r'''tok'single"double$(whoami)`id`;rm''';
+      test('a token full of shell metacharacters lands verbatim', () async {
+        // Proves the heredoc really is a zero-quoting-layer seam. The
+        // registrar rejects this token before it ever gets here; the script
+        // is exercised directly to show the delivery mechanism itself holds.
+        const hostile = r'''tok'single"double$(whoami)`id`;rm''';
 
-      final result = await shell(buildTokenRegistrationScript(hostile));
+        final result = await shell(buildTokenRegistrationScript(hostile));
 
-      expect(result.exitCode, 0, reason: result.stderr.toString());
-      expect(readTokens(), [hostile]);
-    });
-  },
-      skip: _pythonMissing
-          ? 'python3 is not on PATH; the remote merge program cannot run'
-          : false);
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(readTokens(), [hostile]);
+      });
+    },
+    skip: _pythonMissing
+        ? 'python3 is not on PATH; the remote merge program cannot run'
+        : false,
+  );
 }
 
 /// A runner that only records the [Duration] it was handed.
@@ -378,7 +395,10 @@ class _TimeoutSpy implements HostCommandRunner {
       const HostCommandResult(exitCode: 0);
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     onTimeout(timeout);
     return const HostCommandResult(exitCode: 0);
   }

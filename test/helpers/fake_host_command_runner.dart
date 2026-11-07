@@ -39,7 +39,10 @@ class FakeHostCommandRunner implements HostCommandRunner {
   }
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     runScriptCalls.add(script);
     final result = _runScriptResults[script];
     if (result == null) {

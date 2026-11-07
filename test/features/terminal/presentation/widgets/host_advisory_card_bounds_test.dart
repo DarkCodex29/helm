@@ -159,7 +159,9 @@ void main() {
     ) async {
       await _pump(tester, advisories: const [_substituted, _offPath]);
 
-      final terminal = tester.getRect(find.byKey(const ValueKey('terminal-area')));
+      final terminal = tester.getRect(
+        find.byKey(const ValueKey('terminal-area')),
+      );
       final card = tester.getRect(find.byType(HostAdvisoryCard));
 
       expect(card.top, greaterThanOrEqualTo(terminal.top));
@@ -343,10 +345,7 @@ void main() {
           home: Scaffold(
             body: HostAdvisoryCard(
               advisories: const [_substituted, _offPath],
-              dismissed: {
-                _substituted.dismissalKey,
-                _offPath.dismissalKey,
-              },
+              dismissed: {_substituted.dismissalKey, _offPath.dismissalKey},
               maxHeight: 400,
               onDismiss: (_) {},
             ),

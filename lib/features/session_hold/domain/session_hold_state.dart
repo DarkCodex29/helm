@@ -32,8 +32,7 @@ class SessionHoldState {
   const SessionHoldState._(this.status, this.sessionName);
 
   /// Nothing held.
-  const SessionHoldState.released()
-    : this._(SessionHoldStatus.released, null);
+  const SessionHoldState.released() : this._(SessionHoldStatus.released, null);
 
   /// [sessionName] is being held open.
   const SessionHoldState.held(String sessionName)

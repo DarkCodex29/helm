@@ -30,15 +30,12 @@ void main() {
       expect(fake.runCalls, ['a', 'b']);
     });
 
-    test(
-      'throws when a command has no scripted result, so an unexpected '
-      'call fails loudly instead of returning empty output',
-      () async {
-        final fake = FakeHostCommandRunner();
+    test('throws when a command has no scripted result, so an unexpected '
+        'call fails loudly instead of returning empty output', () async {
+      final fake = FakeHostCommandRunner();
 
-        expect(() => fake.run('unregistered'), throwsStateError);
-      },
-    );
+      expect(() => fake.run('unregistered'), throwsStateError);
+    });
   });
 
   group('runScript', () {
@@ -54,31 +51,25 @@ void main() {
       expect(result.stdout, 'helm-probe/1');
     });
 
-    test(
-      'throws when a script has no scripted result, matching run\'s '
-      'fail-loudly contract',
-      () async {
-        final fake = FakeHostCommandRunner();
+    test('throws when a script has no scripted result, matching run\'s '
+        'fail-loudly contract', () async {
+      final fake = FakeHostCommandRunner();
 
-        expect(() => fake.runScript('unregistered'), throwsStateError);
-      },
-    );
+      expect(() => fake.runScript('unregistered'), throwsStateError);
+    });
   });
 
-  test(
-    'satisfies the HostCommandRunner contract so a caller behaves the '
-    'same as it would against a live transport adapter given the same '
-    'result (Swappable Transport Implementations)',
-    () async {
-      Future<String> useRunner(HostCommandRunner runner) async {
-        final result = await runner.run('echo hi');
-        return result.stdout;
-      }
+  test('satisfies the HostCommandRunner contract so a caller behaves the '
+      'same as it would against a live transport adapter given the same '
+      'result (Swappable Transport Implementations)', () async {
+    Future<String> useRunner(HostCommandRunner runner) async {
+      final result = await runner.run('echo hi');
+      return result.stdout;
+    }
 
-      final fake = FakeHostCommandRunner()
-        ..whenRun('echo hi', const HostCommandResult(stdout: 'hi'));
+    final fake = FakeHostCommandRunner()
+      ..whenRun('echo hi', const HostCommandResult(stdout: 'hi'));
 
-      expect(await useRunner(fake), 'hi');
-    },
-  );
+    expect(await useRunner(fake), 'hi');
+  });
 }

@@ -92,37 +92,41 @@ void main() {
       expect(container.read(tabsProvider).tabs.single.profile.id, 'p-default');
     });
 
-    test('focuses the tab already on that session instead of opening a second',
-        () async {
-      // resolveSessionName already owns this rule; the point of the test is
-      // that the notification path goes THROUGH it rather than around it.
-      // Two tabs on one session render the same screen and fight over the
-      // remote PTY size.
-      _seedProfiles([_defaultProfile]);
-      ssh.queueConnectError(Exception('no host in a unit test'));
-      ssh.queueConnectError(Exception('no host in a unit test'));
+    test(
+      'focuses the tab already on that session instead of opening a second',
+      () async {
+        // resolveSessionName already owns this rule; the point of the test is
+        // that the notification path goes THROUGH it rather than around it.
+        // Two tabs on one session render the same screen and fight over the
+        // remote PTY size.
+        _seedProfiles([_defaultProfile]);
+        ssh.queueConnectError(Exception('no host in a unit test'));
+        ssh.queueConnectError(Exception('no host in a unit test'));
 
-      final notifier = container.read(tabsProvider.notifier);
-      await notifier.addTab(_defaultProfile, tmuxSessionName: 'work');
-      await notifier.addTab(_defaultProfile, tmuxSessionName: 'other');
-      expect(container.read(tabsProvider).activeIndex, 1);
+        final notifier = container.read(tabsProvider.notifier);
+        await notifier.addTab(_defaultProfile, tmuxSessionName: 'work');
+        await notifier.addTab(_defaultProfile, tmuxSessionName: 'other');
+        expect(container.read(tabsProvider).activeIndex, 1);
 
-      await notifier.openSessionNamed('work');
+        await notifier.openSessionNamed('work');
 
-      expect(container.read(tabsProvider).tabs, hasLength(2));
-      expect(container.read(tabsProvider).activeIndex, 0);
-    });
+        expect(container.read(tabsProvider).tabs, hasLength(2));
+        expect(container.read(tabsProvider).activeIndex, 0);
+      },
+    );
 
-    test('opens nothing when no profile is saved, and does not throw',
-        () async {
-      _seedProfiles([]);
+    test(
+      'opens nothing when no profile is saved, and does not throw',
+      () async {
+        _seedProfiles([]);
 
-      await expectLater(
-        container.read(tabsProvider.notifier).openSessionNamed('orphan'),
-        completes,
-      );
-      expect(container.read(tabsProvider).tabs, isEmpty);
-    });
+        await expectLater(
+          container.read(tabsProvider.notifier).openSessionNamed('orphan'),
+          completes,
+        );
+        expect(container.read(tabsProvider).tabs, isEmpty);
+      },
+    );
 
     test('opens nothing for an empty session name', () async {
       // A malformed payload degrades to the ordinary home screen rather

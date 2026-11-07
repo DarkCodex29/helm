@@ -121,9 +121,7 @@ class _AdvisoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isWarning = advisory.severity == HostAdvisorySeverity.warning;
-    final accent = isWarning
-        ? AppTheme.warning
-        : AppTheme.onSurfaceMuted;
+    final accent = isWarning ? AppTheme.warning : AppTheme.onSurfaceMuted;
     final remediation = advisory.remediationCopy;
 
     return Padding(

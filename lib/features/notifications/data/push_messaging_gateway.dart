@@ -121,8 +121,9 @@ class FirebasePushMessagingGateway implements PushMessagingGateway {
   /// Deferring it to [initialize] puts the throw inside the one place
   /// that already treats "Firebase is not available here" as an ordinary
   /// outcome: see `PushNotificationService.start`.
-  FirebasePushMessagingGateway({required FirebaseOptions Function() resolveOptions})
-    : _resolveOptions = resolveOptions;
+  FirebasePushMessagingGateway({
+    required FirebaseOptions Function() resolveOptions,
+  }) : _resolveOptions = resolveOptions;
 
   final FirebaseOptions Function() _resolveOptions;
 
@@ -192,6 +193,5 @@ class FirebasePushMessagingGateway implements PushMessagingGateway {
 }
 
 extension _WhereType on Stream<PushMessage?> {
-  Stream<PushMessage> whereType() =>
-      where((m) => m != null).map((m) => m!);
+  Stream<PushMessage> whereType() => where((m) => m != null).map((m) => m!);
 }

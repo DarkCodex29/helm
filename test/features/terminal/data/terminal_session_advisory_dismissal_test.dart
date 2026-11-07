@@ -190,44 +190,41 @@ void main() {
     },
   );
 
-  test(
-    'a genuinely DIFFERENT finding from the same check still arrives '
-    'undismissed',
-    () async {
-      final f = _fixture(multiplexer: 'zellij')
-        ..queueDial()
-        ..answerProbeWith(_herdrOnlyOffPathProbe);
-      await f.session.connect('key');
+  test('a genuinely DIFFERENT finding from the same check still arrives '
+      'undismissed', () async {
+    final f = _fixture(multiplexer: 'zellij')
+      ..queueDial()
+      ..answerProbeWith(_herdrOnlyOffPathProbe);
+    await f.session.connect('key');
 
-      final zellijFinding = f.session.advisoriesNotifier.value
-          .where((a) => a.id == HostAdvisoryId.multiplexerSubstituted)
-          .single;
-      f.session.dismissAdvisory(zellijFinding);
+    final zellijFinding = f.session.advisoriesNotifier.value
+        .where((a) => a.id == HostAdvisoryId.multiplexerSubstituted)
+        .single;
+    f.session.dismissAdvisory(zellijFinding);
 
-      // Same check fires again, but tmux has since been installed, so
-      // the substitution now names a different multiplexer entirely.
-      f.dropLink();
-      f
-        ..queueDial()
-        ..answerProbeWith(_tmuxInstalledProbe);
-      await f.session.connect('key');
+    // Same check fires again, but tmux has since been installed, so
+    // the substitution now names a different multiplexer entirely.
+    f.dropLink();
+    f
+      ..queueDial()
+      ..answerProbeWith(_tmuxInstalledProbe);
+    await f.session.connect('key');
 
-      final newFinding = f.session.advisoriesNotifier.value
-          .where((a) => a.id == HostAdvisoryId.multiplexerSubstituted)
-          .single;
+    final newFinding = f.session.advisoriesNotifier.value
+        .where((a) => a.id == HostAdvisoryId.multiplexerSubstituted)
+        .single;
 
-      expect(
-        newFinding.dismissalKey,
-        isNot(zellijFinding.dismissalKey),
-        reason: 'a different substitution is a different finding',
-      );
-      expect(
-        f.session.dismissedAdvisoriesNotifier.value,
-        isNot(contains(newFinding.dismissalKey)),
-        reason: 'dismissing one finding must never pre-silence the next',
-      );
-    },
-  );
+    expect(
+      newFinding.dismissalKey,
+      isNot(zellijFinding.dismissalKey),
+      reason: 'a different substitution is a different finding',
+    );
+    expect(
+      f.session.dismissedAdvisoriesNotifier.value,
+      isNot(contains(newFinding.dismissalKey)),
+      reason: 'dismissing one finding must never pre-silence the next',
+    );
+  });
 
   test('dismissing twice is idempotent', () async {
     final f = _fixture(multiplexer: 'zellij')

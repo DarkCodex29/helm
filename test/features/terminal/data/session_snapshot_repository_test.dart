@@ -29,88 +29,73 @@ import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 
 void main() {
   group('Legacy Field Still Readable', () {
-    test(
-      'a record containing only the legacy tmuxSessionName key loads with '
-      'its value available under the new sessionRef field',
-      () {
-        final snapshot = TabSnapshot.fromJson({
-          'profileId': 'profile-1',
-          'profileName': 'Mac Studio',
-          'tmuxSessionName': 'helm-work',
-        });
+    test('a record containing only the legacy tmuxSessionName key loads with '
+        'its value available under the new sessionRef field', () {
+      final snapshot = TabSnapshot.fromJson({
+        'profileId': 'profile-1',
+        'profileName': 'Mac Studio',
+        'tmuxSessionName': 'helm-work',
+      });
 
-        expect(snapshot.sessionRef, 'helm-work');
-      },
-    );
+      expect(snapshot.sessionRef, 'helm-work');
+    });
   });
 
   group('Legacy Key Is Not Deleted', () {
-    test(
-      'saving a record loaded from a legacy-only JSON emits both the '
-      'tmuxSessionName and sessionRef keys',
-      () {
-        final snapshot = TabSnapshot.fromJson({
-          'profileId': 'profile-1',
-          'profileName': 'Mac Studio',
-          'tmuxSessionName': 'helm-work',
-        });
+    test('saving a record loaded from a legacy-only JSON emits both the '
+        'tmuxSessionName and sessionRef keys', () {
+      final snapshot = TabSnapshot.fromJson({
+        'profileId': 'profile-1',
+        'profileName': 'Mac Studio',
+        'tmuxSessionName': 'helm-work',
+      });
 
-        final json = snapshot.toJson();
+      final json = snapshot.toJson();
 
-        expect(json.containsKey('tmuxSessionName'), isTrue);
-        expect(json.containsKey('sessionRef'), isTrue);
-      },
-    );
+      expect(json.containsKey('tmuxSessionName'), isTrue);
+      expect(json.containsKey('sessionRef'), isTrue);
+    });
 
-    test(
-      'saving a newly created record (constructed directly, sessionRef '
-      'set) still emits both keys',
-      () {
-        const snapshot = TabSnapshot(
-          profileId: 'profile-new',
-          profileName: 'New Profile',
-          tmuxSessionName: 'legacy-name',
-          sessionRef: 'neutral-name',
-        );
+    test('saving a newly created record (constructed directly, sessionRef '
+        'set) still emits both keys', () {
+      const snapshot = TabSnapshot(
+        profileId: 'profile-new',
+        profileName: 'New Profile',
+        tmuxSessionName: 'legacy-name',
+        sessionRef: 'neutral-name',
+      );
 
-        final json = snapshot.toJson();
+      final json = snapshot.toJson();
 
-        expect(json.containsKey('tmuxSessionName'), isTrue);
-        expect(json.containsKey('sessionRef'), isTrue);
-        expect(json['sessionRef'], 'neutral-name');
-      },
-    );
+      expect(json.containsKey('tmuxSessionName'), isTrue);
+      expect(json.containsKey('sessionRef'), isTrue);
+      expect(json['sessionRef'], 'neutral-name');
+    });
   });
 
   group('Neutral Field Takes Precedence When Both Are Present', () {
-    test(
-      'when tmuxSessionName and sessionRef hold different values, the '
-      "resolved sessionRef equals the neutral field's own value",
-      () {
-        final snapshot = TabSnapshot.fromJson({
-          'profileId': 'profile-1',
-          'profileName': 'Mac Studio',
-          'tmuxSessionName': 'old-legacy-name',
-          'sessionRef': 'new-neutral-name',
-        });
+    test('when tmuxSessionName and sessionRef hold different values, the '
+        "resolved sessionRef equals the neutral field's own value", () {
+      final snapshot = TabSnapshot.fromJson({
+        'profileId': 'profile-1',
+        'profileName': 'Mac Studio',
+        'tmuxSessionName': 'old-legacy-name',
+        'sessionRef': 'new-neutral-name',
+      });
 
-        expect(snapshot.sessionRef, 'new-neutral-name');
-      },
-    );
+      expect(snapshot.sessionRef, 'new-neutral-name');
+    });
 
-    test(
-      'precedence holds regardless of key order in the source map',
-      () {
-        final snapshot = TabSnapshot.fromJson({
-          'profileId': 'profile-1',
-          'profileName': 'Mac Studio',
-          'sessionRef': 'neutral-wins',
-          'tmuxSessionName': 'legacy-loses',
-        });
+    test('precedence holds regardless of key order in the source map', () {
+      final snapshot = TabSnapshot.fromJson({
+        'profileId': 'profile-1',
+        'profileName': 'Mac Studio',
+        'sessionRef': 'neutral-wins',
+        'tmuxSessionName': 'legacy-loses',
+      });
 
-        expect(snapshot.sessionRef, 'neutral-wins');
-      },
-    );
+      expect(snapshot.sessionRef, 'neutral-wins');
+    });
   });
 
   group('Round-trip: snapshot written by the pre-migration app version', () {
@@ -139,52 +124,43 @@ void main() {
         '{"profileId":"profile-2","profileName":"Contabo VPS",'
         '"tmuxSessionName":"deploy-session"}';
 
-    test(
-      'FIXTURE_A loads with every field intact and the session name '
-      'available under sessionRef',
-      () {
-        final snapshot = TabSnapshot.fromJson(
-          jsonDecode(preMigrationJsonA) as Map<String, dynamic>,
-        );
+    test('FIXTURE_A loads with every field intact and the session name '
+        'available under sessionRef', () {
+      final snapshot = TabSnapshot.fromJson(
+        jsonDecode(preMigrationJsonA) as Map<String, dynamic>,
+      );
 
-        expect(snapshot.profileId, 'profile-1');
-        expect(snapshot.profileName, 'Mac Studio');
-        expect(snapshot.tmuxSessionName, 'helm-work');
-        expect(snapshot.sessionRef, 'helm-work');
-      },
-    );
+      expect(snapshot.profileId, 'profile-1');
+      expect(snapshot.profileName, 'Mac Studio');
+      expect(snapshot.tmuxSessionName, 'helm-work');
+      expect(snapshot.sessionRef, 'helm-work');
+    });
 
-    test(
-      'FIXTURE_B loads with every field intact and the session name '
-      'available under sessionRef',
-      () {
-        final snapshot = TabSnapshot.fromJson(
-          jsonDecode(preMigrationJsonB) as Map<String, dynamic>,
-        );
+    test('FIXTURE_B loads with every field intact and the session name '
+        'available under sessionRef', () {
+      final snapshot = TabSnapshot.fromJson(
+        jsonDecode(preMigrationJsonB) as Map<String, dynamic>,
+      );
 
-        expect(snapshot.profileId, 'profile-2');
-        expect(snapshot.profileName, 'Contabo VPS');
-        expect(snapshot.tmuxSessionName, 'deploy-session');
-        expect(snapshot.sessionRef, 'deploy-session');
-      },
-    );
+      expect(snapshot.profileId, 'profile-2');
+      expect(snapshot.profileName, 'Contabo VPS');
+      expect(snapshot.tmuxSessionName, 'deploy-session');
+      expect(snapshot.sessionRef, 'deploy-session');
+    });
 
-    test(
-      'loading then re-saving a pre-migration snapshot keeps every '
-      'original field value and adds the neutral key alongside the '
-      'untouched legacy key',
-      () {
-        final snapshot = TabSnapshot.fromJson(
-          jsonDecode(preMigrationJsonB) as Map<String, dynamic>,
-        );
+    test('loading then re-saving a pre-migration snapshot keeps every '
+        'original field value and adds the neutral key alongside the '
+        'untouched legacy key', () {
+      final snapshot = TabSnapshot.fromJson(
+        jsonDecode(preMigrationJsonB) as Map<String, dynamic>,
+      );
 
-        final resaved = snapshot.toJson();
+      final resaved = snapshot.toJson();
 
-        expect(resaved['profileId'], 'profile-2');
-        expect(resaved['profileName'], 'Contabo VPS');
-        expect(resaved['tmuxSessionName'], 'deploy-session');
-        expect(resaved['sessionRef'], 'deploy-session');
-      },
-    );
+      expect(resaved['profileId'], 'profile-2');
+      expect(resaved['profileName'], 'Contabo VPS');
+      expect(resaved['tmuxSessionName'], 'deploy-session');
+      expect(resaved['sessionRef'], 'deploy-session');
+    });
   });
 }

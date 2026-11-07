@@ -109,59 +109,62 @@ void main() {
       expect(session.statusNotifier.value, ConnectionStatus.connected);
     });
 
-    test(
-      'transitions to connecting synchronously, before the async '
-      'connectAndOpenShell call resolves',
-      () async {
-        final service = FakeSSHService();
-        service.queueConnectSuccess(
-          SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
-        );
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: RecordingTerminal(),
-        );
+    test('transitions to connecting synchronously, before the async '
+        'connectAndOpenShell call resolves', () async {
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+      );
 
-        final future = session.connect('key');
-        // No await yet: connect()'s body runs synchronously up to its
-        // first `await`, so the status flip must already be visible here.
-        expect(session.statusNotifier.value, ConnectionStatus.connecting);
+      final future = session.connect('key');
+      // No await yet: connect()'s body runs synchronously up to its
+      // first `await`, so the status flip must already be visible here.
+      expect(session.statusNotifier.value, ConnectionStatus.connecting);
 
-        await future;
-      },
-    );
+      await future;
+    });
 
-    test(
-      'calls sshService.connectAndOpenShell with the profile, the given '
-      'key, and the terminal current view size',
-      () async {
-        final service = FakeSSHService();
-        service.queueConnectSuccess(
-          SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
-        );
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: RecordingTerminal(),
-        );
+    test('calls sshService.connectAndOpenShell with the profile, the given '
+        'key, and the terminal current view size', () async {
+      final service = FakeSSHService();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+      );
 
-        await session.connect('private-key-pem');
+      await session.connect('private-key-pem');
 
-        expect(service.connectCalls, hasLength(1));
-        final call = service.connectCalls.single;
-        expect(call.profile, _testProfile);
-        expect(call.privateKeyPem, 'private-key-pem');
-        // Terminal()'s undisturbed defaults are 80x24.
-        expect(call.columns, 80);
-        expect(call.rows, 24);
-      },
-    );
+      expect(service.connectCalls, hasLength(1));
+      final call = service.connectCalls.single;
+      expect(call.profile, _testProfile);
+      expect(call.privateKeyPem, 'private-key-pem');
+      // Terminal()'s undisturbed defaults are 80x24.
+      expect(call.columns, 80);
+      expect(call.rows, 24);
+    });
 
     test('sets status to connected on success', () async {
       final service = FakeSSHService();
       service.queueConnectSuccess(
-        SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
       );
       final session = TerminalSession(
         profile: _testProfile,
@@ -177,131 +180,119 @@ void main() {
   });
 
   group('TerminalSession.connect - attach without a stdin race (5.3/5.4)', () {
-    test(
-      'attaches via an exec request with the pseudo-terminal allocated up '
-      'front, instead of writing the multiplexer command into an '
-      'already-open shell\'s stdin - session-attach spec\'s "Attach '
-      'Without a Stdin Race" requirement',
-      () async {
-        final service = FakeSSHService();
-        final shellSession = FakeSSHSession();
-        final attachSession = FakeSSHSession();
-        service.queueConnectSuccess(
-          SSHConnectionResult(
-            client: _buildFakeClient(),
-            session: shellSession,
-          ),
-        );
+    test('attaches via an exec request with the pseudo-terminal allocated up '
+        'front, instead of writing the multiplexer command into an '
+        'already-open shell\'s stdin - session-attach spec\'s "Attach '
+        'Without a Stdin Race" requirement', () async {
+      final service = FakeSSHService();
+      final shellSession = FakeSSHSession();
+      final attachSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: _buildFakeClient(), session: shellSession),
+      );
 
-        final openedCommands = <String>[];
-        final openedPtyConfigs = <SSHPtyConfig>[];
-        final terminal = RecordingTerminal();
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          tmuxSessionName: 'mysession',
-          terminal: terminal,
-          hostRunnerFactory: _unprobeableHost,
-          attachOpener: (client, command, pty) async {
-            openedCommands.add(command);
-            openedPtyConfigs.add(pty);
-            return attachSession;
-          },
-        );
+      final openedCommands = <String>[];
+      final openedPtyConfigs = <SSHPtyConfig>[];
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        tmuxSessionName: 'mysession',
+        terminal: terminal,
+        hostRunnerFactory: _unprobeableHost,
+        attachOpener: (client, command, pty) async {
+          openedCommands.add(command);
+          openedPtyConfigs.add(pty);
+          return attachSession;
+        },
+      );
 
-        await session.connect('key');
+      await session.connect('key');
 
-        // The attach command is quoted per design.md AD-3 and reaches the
-        // multiplexer as part of the exec+pty request itself. This profile
-        // records no multiplexer and the host is unprobeable, so the
-        // command is the host default's — herdr, under a bare binary name.
-        expect(openedCommands, ["herdr session attach 'mysession'"]);
-        expect(openedPtyConfigs, hasLength(1));
-        // Nothing is ever written into the shell session that
-        // connectAndOpenShell opened — that channel is never the target
-        // of the attach command.
-        expect(shellSession.writes, isEmpty);
-        expect(attachSession.writes, isEmpty);
+      // The attach command is quoted per design.md AD-3 and reaches the
+      // multiplexer as part of the exec+pty request itself. This profile
+      // records no multiplexer and the host is unprobeable, so the
+      // command is the host default's — herdr, under a bare binary name.
+      expect(openedCommands, ["herdr session attach 'mysession'"]);
+      expect(openedPtyConfigs, hasLength(1));
+      // Nothing is ever written into the shell session that
+      // connectAndOpenShell opened — that channel is never the target
+      // of the attach command.
+      expect(shellSession.writes, isEmpty);
+      expect(attachSession.writes, isEmpty);
 
-        // _bridgeIO must wire up the ATTACH session, not the discarded
-        // shell session.
-        attachSession.emitStdout(utf8.encode('from attached session'));
-        await Future.delayed(Duration.zero);
-        expect(terminal.writes, contains('from attached session'));
+      // _bridgeIO must wire up the ATTACH session, not the discarded
+      // shell session.
+      attachSession.emitStdout(utf8.encode('from attached session'));
+      await Future.delayed(Duration.zero);
+      expect(terminal.writes, contains('from attached session'));
 
-        terminal.onOutput?.call('ls\n');
-        expect(attachSession.writes, [utf8.encode('ls\n')]);
-        expect(shellSession.writes, isEmpty);
+      terminal.onOutput?.call('ls\n');
+      expect(attachSession.writes, [utf8.encode('ls\n')]);
+      expect(shellSession.writes, isEmpty);
 
-        // The shell connectAndOpenShell already opened is dead weight once
-        // attach replaces it with the exec+pty session — it must be closed,
-        // not abandoned, or every attach leaks an orphan remote shell
-        // process plus an undrained channel for the life of the connection.
-        expect(shellSession.closeCallCount, 1);
-      },
-    );
+      // The shell connectAndOpenShell already opened is dead weight once
+      // attach replaces it with the exec+pty session — it must be closed,
+      // not abandoned, or every attach leaks an orphan remote shell
+      // process plus an undrained channel for the life of the connection.
+      expect(shellSession.closeCallCount, 1);
+    });
 
-    test(
-      'writes nothing to the session stdin during connect() when '
-      'tmuxSessionName is null, and never invokes the attach opener '
-      'either, since there is no session reference to attach to',
-      () async {
-        final service = FakeSSHService();
-        final fakeSession = FakeSSHSession();
-        service.queueConnectSuccess(
-          SSHConnectionResult(client: _buildFakeClient(), session: fakeSession),
-        );
-        var attachOpenerCalls = 0;
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: RecordingTerminal(),
-          attachOpener: (client, command, pty) async {
-            attachOpenerCalls++;
-            return fakeSession;
-          },
-        );
+    test('writes nothing to the session stdin during connect() when '
+        'tmuxSessionName is null, and never invokes the attach opener '
+        'either, since there is no session reference to attach to', () async {
+      final service = FakeSSHService();
+      final fakeSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: _buildFakeClient(), session: fakeSession),
+      );
+      var attachOpenerCalls = 0;
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+        attachOpener: (client, command, pty) async {
+          attachOpenerCalls++;
+          return fakeSession;
+        },
+      );
 
-        await session.connect('key');
+      await session.connect('key');
 
-        expect(fakeSession.writes, isEmpty);
-        expect(attachOpenerCalls, 0);
-        // On this path result.session IS the terminal — it must never be
-        // closed, unlike the attach path's abandoned shell above.
-        expect(fakeSession.closeCallCount, 0);
-      },
-    );
+      expect(fakeSession.writes, isEmpty);
+      expect(attachOpenerCalls, 0);
+      // On this path result.session IS the terminal — it must never be
+      // closed, unlike the attach path's abandoned shell above.
+      expect(fakeSession.closeCallCount, 0);
+    });
   });
 
   group('TerminalSession.connect - failure path', () {
-    test(
-      'sets status to error, writes a message built from '
-      'SSHService.describeError, and rethrows',
-      () async {
-        final service = FakeSSHService();
-        service.queueConnectError(SSHAuthFailError('no supported methods'));
-        final terminal = RecordingTerminal();
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: terminal,
-        );
+    test('sets status to error, writes a message built from '
+        'SSHService.describeError, and rethrows', () async {
+      final service = FakeSSHService();
+      service.queueConnectError(SSHAuthFailError('no supported methods'));
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: terminal,
+      );
 
-        await expectLater(
-          session.connect('key'),
-          throwsA(isA<SSHAuthFailError>()),
-        );
+      await expectLater(
+        session.connect('key'),
+        throwsA(isA<SSHAuthFailError>()),
+      );
 
-        expect(session.statusNotifier.value, ConnectionStatus.error);
-        expect(
-          terminal.writes,
-          contains(
-            '\r\n[Helm] Connection failed: '
-            '${SSHService.describeError(SSHAuthFailError('x'))}\r\n',
-          ),
-        );
-      },
-    );
+      expect(session.statusNotifier.value, ConnectionStatus.error);
+      expect(
+        terminal.writes,
+        contains(
+          '\r\n[Helm] Connection failed: '
+          '${SSHService.describeError(SSHAuthFailError('x'))}\r\n',
+        ),
+      );
+    });
   });
 
   group('TerminalSession._bridgeIO - stdout/stderr to terminal', () {
@@ -348,12 +339,15 @@ void main() {
       expect(terminal.writes.single, contains('A'));
     });
 
-    test('a stdout stream error is logged and never reaches the terminal', () async {
-      fakeSession.errorStdout(Exception('boom'));
-      await Future.delayed(Duration.zero);
+    test(
+      'a stdout stream error is logged and never reaches the terminal',
+      () async {
+        fakeSession.errorStdout(Exception('boom'));
+        await Future.delayed(Duration.zero);
 
-      expect(terminal.writes, isEmpty);
-    });
+        expect(terminal.writes, isEmpty);
+      },
+    );
 
     test('closing the stdout stream does not throw', () async {
       await fakeSession.closeStdout();
@@ -370,31 +364,25 @@ void main() {
       expect(fakeSession.writes.single, utf8.encode('ls -la\n'));
     });
 
-    test(
-      'terminal.onOutput is a no-op once the connection is no longer '
-      'connected (the guard at terminal_session.dart:170-171)',
-      () {
-        session.statusNotifier.value = ConnectionStatus.disconnected;
+    test('terminal.onOutput is a no-op once the connection is no longer '
+        'connected (the guard at terminal_session.dart:170-171)', () {
+      session.statusNotifier.value = ConnectionStatus.disconnected;
 
-        terminal.onOutput?.call('ls -la\n');
+      terminal.onOutput?.call('ls -la\n');
 
-        expect(fakeSession.writes, isEmpty);
-      },
-    );
+      expect(fakeSession.writes, isEmpty);
+    });
 
-    test(
-      'terminal.onResize calls sshService.resizeTerminal with the live '
-      'session and the new size',
-      () {
-        terminal.resize(120, 40);
+    test('terminal.onResize calls sshService.resizeTerminal with the live '
+        'session and the new size', () {
+      terminal.resize(120, 40);
 
-        expect(service.resizeCalls, hasLength(1));
-        final call = service.resizeCalls.single;
-        expect(call.session, same(fakeSession));
-        expect(call.columns, 120);
-        expect(call.rows, 40);
-      },
-    );
+      expect(service.resizeCalls, hasLength(1));
+      final call = service.resizeCalls.single;
+      expect(call.session, same(fakeSession));
+      expect(call.columns, 120);
+      expect(call.rows, 40);
+    });
   });
 
   group('TerminalSession.onResize - direct calls', () {
@@ -413,34 +401,31 @@ void main() {
   });
 
   group('TerminalSession - disconnect via client.done', () {
-    test(
-      'a normal client.done completion runs _handleDisconnect: status '
-      'flips to disconnected and the terminal reports it',
-      () async {
-        final service = FakeSSHService();
-        final socket = FakeSSHSocket();
-        final client = SSHClient(socket, username: 'tester');
-        service.queueConnectSuccess(
-          SSHConnectionResult(client: client, session: FakeSSHSession()),
-        );
-        final terminal = RecordingTerminal();
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: terminal,
-        );
-        await session.connect('key');
+    test('a normal client.done completion runs _handleDisconnect: status '
+        'flips to disconnected and the terminal reports it', () async {
+      final service = FakeSSHService();
+      final socket = FakeSSHSocket();
+      final client = SSHClient(socket, username: 'tester');
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: client, session: FakeSSHSession()),
+      );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: terminal,
+      );
+      await session.connect('key');
 
-        socket.simulateRemoteClosed();
-        // client.done completes asynchronously off the socket's onDone
-        // event; give the microtask/event-loop queue a turn to drain.
-        await Future.delayed(Duration.zero);
-        await Future.delayed(Duration.zero);
+      socket.simulateRemoteClosed();
+      // client.done completes asynchronously off the socket's onDone
+      // event; give the microtask/event-loop queue a turn to drain.
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
 
-        expect(session.statusNotifier.value, ConnectionStatus.disconnected);
-        expect(terminal.writes, contains('\r\n[Helm] Disconnected\r\n'));
-      },
-    );
+      expect(session.statusNotifier.value, ConnectionStatus.disconnected);
+      expect(terminal.writes, contains('\r\n[Helm] Disconnected\r\n'));
+    });
 
     test(
       'an errored client.done completion also runs _handleDisconnect',
@@ -468,264 +453,240 @@ void main() {
       },
     );
 
+    test('_handleDisconnect is idempotent: the disconnect message is written '
+        'only once even if client.done-driven disconnects overlap with a '
+        'later dispose()', () async {
+      final service = FakeSSHService();
+      final socket = FakeSSHSocket();
+      final client = SSHClient(socket, username: 'tester');
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: client, session: FakeSSHSession()),
+      );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: terminal,
+      );
+      await session.connect('key');
+
+      socket.simulateRemoteClosed();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+      final disconnectWritesAfterFirst = terminal.writes
+          .where((w) => w.contains('Disconnected'))
+          .length;
+
+      await session.dispose();
+
+      final disconnectWritesAfterDispose = terminal.writes
+          .where((w) => w.contains('Disconnected'))
+          .length;
+
+      expect(disconnectWritesAfterFirst, 1);
+      expect(disconnectWritesAfterDispose, 1);
+    });
+  });
+
+  group('TerminalSession - attach exit status (C1: distinguishing detach '
+      'from a killed session)', () {
+    test('reports the ambiguous "session ended" message when the attach '
+        'session exits with code 0 and no signal -- detach and a session '
+        'kill with the multiplexer server still alive are '
+        'indistinguishable from exit status alone, per '
+        'AttachExitOutcome\'s doc comment', () async {
+      final service = FakeSSHService();
+      final attachSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        tmuxSessionName: 'mysession',
+        terminal: terminal,
+        hostRunnerFactory: _unprobeableHost,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
+
+      await attachSession.endWithExitCode(0);
+
+      expect(session.statusNotifier.value, ConnectionStatus.disconnected);
+      expect(
+        terminal.writes,
+        contains(
+          '\r\n[Helm] Disconnected - the session ended (you may have '
+          'detached, or it was closed on the host)\r\n',
+        ),
+      );
+    });
+
     test(
-      '_handleDisconnect is idempotent: the disconnect message is written '
-      'only once even if client.done-driven disconnects overlap with a '
-      'later dispose()',
+      'reports an abnormal-exit message with the exit code when the '
+      'attach session exits non-zero -- the only case verified to '
+      'distinguish a killed session from a detach (tmux `kill-server`)',
       () async {
         final service = FakeSSHService();
-        final socket = FakeSSHSocket();
-        final client = SSHClient(socket, username: 'tester');
+        final attachSession = FakeSSHSession();
         service.queueConnectSuccess(
-          SSHConnectionResult(client: client, session: FakeSSHSession()),
+          SSHConnectionResult(
+            client: _buildFakeClient(),
+            session: FakeSSHSession(),
+          ),
         );
         final terminal = RecordingTerminal();
         final session = TerminalSession(
           profile: _testProfile,
           sshService: service,
+          tmuxSessionName: 'mysession',
           terminal: terminal,
+          hostRunnerFactory: _unprobeableHost,
+          attachOpener: (client, command, pty) async => attachSession,
         );
         await session.connect('key');
 
-        socket.simulateRemoteClosed();
-        await Future.delayed(Duration.zero);
-        await Future.delayed(Duration.zero);
-        final disconnectWritesAfterFirst = terminal.writes
-            .where((w) => w.contains('Disconnected'))
-            .length;
+        await attachSession.endWithExitCode(1);
 
-        await session.dispose();
-
-        final disconnectWritesAfterDispose = terminal.writes
-            .where((w) => w.contains('Disconnected'))
-            .length;
-
-        expect(disconnectWritesAfterFirst, 1);
-        expect(disconnectWritesAfterDispose, 1);
+        expect(
+          terminal.writes,
+          contains(
+            '\r\n[Helm] Disconnected - the session exited abnormally '
+            '(exit code 1)\r\n',
+          ),
+        );
       },
     );
-  });
 
-  group(
-    'TerminalSession - attach exit status (C1: distinguishing detach '
-    'from a killed session)',
-    () {
-      test(
-        'reports the ambiguous "session ended" message when the attach '
-        'session exits with code 0 and no signal -- detach and a session '
-        'kill with the multiplexer server still alive are '
-        'indistinguishable from exit status alone, per '
-        'AttachExitOutcome\'s doc comment',
-        () async {
-          final service = FakeSSHService();
-          final attachSession = FakeSSHSession();
-          service.queueConnectSuccess(
-            SSHConnectionResult(
-              client: _buildFakeClient(),
-              session: FakeSSHSession(),
-            ),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            tmuxSessionName: 'mysession',
-            terminal: terminal,
-            hostRunnerFactory: _unprobeableHost,
-            attachOpener: (client, command, pty) async => attachSession,
-          );
-          await session.connect('key');
+    test('reports an abnormal-exit message with the signal name when the '
+        'attach session ends via an exit signal', () async {
+      final service = FakeSSHService();
+      final attachSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
+      );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        tmuxSessionName: 'mysession',
+        terminal: terminal,
+        hostRunnerFactory: _unprobeableHost,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
 
-          await attachSession.endWithExitCode(0);
-
-          expect(
-            session.statusNotifier.value,
-            ConnectionStatus.disconnected,
-          );
-          expect(
-            terminal.writes,
-            contains(
-              '\r\n[Helm] Disconnected - the session ended (you may have '
-              'detached, or it was closed on the host)\r\n',
-            ),
-          );
-        },
+      await attachSession.endWithExitSignal(
+        SSHSessionExitSignal(
+          signalName: 'KILL',
+          coreDumped: false,
+          errorMessage: '',
+          languageTag: '',
+        ),
       );
 
-      test(
-        'reports an abnormal-exit message with the exit code when the '
-        'attach session exits non-zero -- the only case verified to '
-        'distinguish a killed session from a detach (tmux `kill-server`)',
-        () async {
-          final service = FakeSSHService();
-          final attachSession = FakeSSHSession();
-          service.queueConnectSuccess(
-            SSHConnectionResult(
-              client: _buildFakeClient(),
-              session: FakeSSHSession(),
-            ),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            tmuxSessionName: 'mysession',
-            terminal: terminal,
-            hostRunnerFactory: _unprobeableHost,
-            attachOpener: (client, command, pty) async => attachSession,
-          );
-          await session.connect('key');
-
-          await attachSession.endWithExitCode(1);
-
-          expect(
-            terminal.writes,
-            contains(
-              '\r\n[Helm] Disconnected - the session exited abnormally '
-              '(exit code 1)\r\n',
-            ),
-          );
-        },
+      expect(
+        terminal.writes,
+        contains(
+          '\r\n[Helm] Disconnected - the session exited abnormally '
+          '(signal KILL)\r\n',
+        ),
       );
+    });
 
-      test(
-        'reports an abnormal-exit message with the signal name when the '
-        'attach session ends via an exit signal',
-        () async {
-          final service = FakeSSHService();
-          final attachSession = FakeSSHSession();
-          service.queueConnectSuccess(
-            SSHConnectionResult(
-              client: _buildFakeClient(),
-              session: FakeSSHSession(),
-            ),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            tmuxSessionName: 'mysession',
-            terminal: terminal,
-            hostRunnerFactory: _unprobeableHost,
-            attachOpener: (client, command, pty) async => attachSession,
-          );
-          await session.connect('key');
-
-          await attachSession.endWithExitSignal(
-            SSHSessionExitSignal(
-              signalName: 'KILL',
-              coreDumped: false,
-              errorMessage: '',
-              languageTag: '',
-            ),
-          );
-
-          expect(
-            terminal.writes,
-            contains(
-              '\r\n[Helm] Disconnected - the session exited abnormally '
-              '(signal KILL)\r\n',
-            ),
-          );
-        },
-      );
-
-      test(
-        'falls back to the pre-existing generic disconnect message when '
+    test('falls back to the pre-existing generic disconnect message when '
         'the attach session ends with no exit status at all -- e.g. an '
         'abrupt transport drop before any exit-status/exit-signal '
-        'request arrived',
-        () async {
-          final service = FakeSSHService();
-          final attachSession = FakeSSHSession();
-          service.queueConnectSuccess(
-            SSHConnectionResult(
-              client: _buildFakeClient(),
-              session: FakeSSHSession(),
-            ),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            tmuxSessionName: 'mysession',
-            terminal: terminal,
-            hostRunnerFactory: _unprobeableHost,
-            attachOpener: (client, command, pty) async => attachSession,
-          );
-          await session.connect('key');
-
-          await attachSession.endWithNoExitStatus();
-
-          expect(terminal.writes, contains('\r\n[Helm] Disconnected\r\n'));
-        },
+        'request arrived', () async {
+      final service = FakeSSHService();
+      final attachSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(
+          client: _buildFakeClient(),
+          session: FakeSSHSession(),
+        ),
       );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        tmuxSessionName: 'mysession',
+        terminal: terminal,
+        hostRunnerFactory: _unprobeableHost,
+        attachOpener: (client, command, pty) async => attachSession,
+      );
+      await session.connect('key');
 
-      test(
-        'the attach session ending wins over a later client.done firing '
+      await attachSession.endWithNoExitStatus();
+
+      expect(terminal.writes, contains('\r\n[Helm] Disconnected\r\n'));
+    });
+
+    test('the attach session ending wins over a later client.done firing '
         'for the same disconnect -- only the exit-status-classified '
-        'message is written, never a duplicate generic one',
-        () async {
-          final service = FakeSSHService();
-          final socket = FakeSSHSocket();
-          final client = SSHClient(socket, username: 'tester');
-          final attachSession = FakeSSHSession();
-          service.queueConnectSuccess(
-            SSHConnectionResult(client: client, session: FakeSSHSession()),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            tmuxSessionName: 'mysession',
-            terminal: terminal,
-            hostRunnerFactory: _unprobeableHost,
-            attachOpener: (c, command, pty) async => attachSession,
-          );
-          await session.connect('key');
-
-          await attachSession.endWithExitCode(0);
-          socket.simulateRemoteClosed();
-          await Future.delayed(Duration.zero);
-          await Future.delayed(Duration.zero);
-
-          final disconnectWrites = terminal.writes
-              .where((w) => w.contains('Disconnected'))
-              .toList();
-          expect(disconnectWrites, hasLength(1));
-          expect(
-            disconnectWrites.single,
-            '\r\n[Helm] Disconnected - the session ended (you may have '
-            'detached, or it was closed on the host)\r\n',
-          );
-        },
+        'message is written, never a duplicate generic one', () async {
+      final service = FakeSSHService();
+      final socket = FakeSSHSocket();
+      final client = SSHClient(socket, username: 'tester');
+      final attachSession = FakeSSHSession();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: client, session: FakeSSHSession()),
       );
-    },
-  );
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        tmuxSessionName: 'mysession',
+        terminal: terminal,
+        hostRunnerFactory: _unprobeableHost,
+        attachOpener: (c, command, pty) async => attachSession,
+      );
+      await session.connect('key');
+
+      await attachSession.endWithExitCode(0);
+      socket.simulateRemoteClosed();
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
+      final disconnectWrites = terminal.writes
+          .where((w) => w.contains('Disconnected'))
+          .toList();
+      expect(disconnectWrites, hasLength(1));
+      expect(
+        disconnectWrites.single,
+        '\r\n[Helm] Disconnected - the session ended (you may have '
+        'detached, or it was closed on the host)\r\n',
+      );
+    });
+  });
 
   group('TerminalSession.dispose', () {
-    test(
-      'cancels stream subscriptions, disconnects the client, and sets '
-      'status to disconnected',
-      () async {
-        final service = FakeSSHService();
-        final client = _buildFakeClient();
-        service.queueConnectSuccess(
-          SSHConnectionResult(client: client, session: FakeSSHSession()),
-        );
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: RecordingTerminal(),
-        );
-        await session.connect('key');
+    test('cancels stream subscriptions, disconnects the client, and sets '
+        'status to disconnected', () async {
+      final service = FakeSSHService();
+      final client = _buildFakeClient();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: client, session: FakeSSHSession()),
+      );
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+      );
+      await session.connect('key');
 
-        await session.dispose();
+      await session.dispose();
 
-        expect(service.disconnectCalls, [client]);
-        expect(session.statusNotifier.value, ConnectionStatus.disconnected);
-      },
-    );
+      expect(service.disconnectCalls, [client]);
+      expect(session.statusNotifier.value, ConnectionStatus.disconnected);
+    });
 
     test('is safe to call when never connected', () async {
       final service = FakeSSHService();
@@ -740,25 +701,22 @@ void main() {
       expect(service.disconnectCalls, isEmpty);
     });
 
-    test(
-      '[DISCOVERY] is NOT safe to call twice: the second call throws '
-      'because statusNotifier.dispose() (terminal_session.dart:153) is '
-      'unconditional -- there is no guard against disposing an '
-      'already-disposed ValueNotifier. Pinned as current behavior, not '
-      'fixed here.',
-      () async {
-        final service = FakeSSHService();
-        final session = TerminalSession(
-          profile: _testProfile,
-          sshService: service,
-          terminal: RecordingTerminal(),
-        );
+    test('[DISCOVERY] is NOT safe to call twice: the second call throws '
+        'because statusNotifier.dispose() (terminal_session.dart:153) is '
+        'unconditional -- there is no guard against disposing an '
+        'already-disposed ValueNotifier. Pinned as current behavior, not '
+        'fixed here.', () async {
+      final service = FakeSSHService();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+      );
 
-        await session.dispose();
+      await session.dispose();
 
-        await expectLater(session.dispose(), throwsFlutterError);
-      },
-    );
+      await expectLater(session.dispose(), throwsFlutterError);
+    });
   });
 
   group('TerminalSession.reconnect - guards', () {
@@ -793,110 +751,63 @@ void main() {
     });
   });
 
-  group(
-    'TerminalSession.reconnect - full body '
-    '(requires mocking flutter_secure_storage: see comment on '
-    '_secureStorageChannel above)',
-    () {
-      tearDown(() {
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(_secureStorageChannel, null);
-      });
+  group('TerminalSession.reconnect - full body '
+      '(requires mocking flutter_secure_storage: see comment on '
+      '_secureStorageChannel above)', () {
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(_secureStorageChannel, null);
+    });
 
-      test(
-        'tears down the old client/streams and writes "Reconnecting…" '
+    test('tears down the old client/streams and writes "Reconnecting…" '
         'before checking for a stored key, then reports "No SSH key '
-        'found" when none is stored',
-        () async {
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-              .setMockMethodCallHandler(_secureStorageChannel, (call) async {
+        'found" when none is stored', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(_secureStorageChannel, (call) async {
             if (call.method == 'read') return null;
             return null;
           });
 
-          final service = FakeSSHService();
-          final oldClient = _buildFakeClient();
-          service.queueConnectSuccess(
-            SSHConnectionResult(client: oldClient, session: FakeSSHSession()),
-          );
-          final terminal = RecordingTerminal();
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            terminal: terminal,
-          );
-          await session.connect('key');
-          // reconnect() no-ops while statusNotifier is connecting/connected
-          // (terminal_session.dart:96-99); simulate that the connection
-          // already dropped, as would happen before a real caller invokes
-          // reconnect().
-          session.statusNotifier.value = ConnectionStatus.disconnected;
-
-          await session.reconnect();
-
-          expect(terminal.writes, contains('\r\n[Helm] Reconnecting…\r\n'));
-          expect(service.disconnectCalls, [oldClient]);
-          expect(
-            terminal.writes,
-            contains('[Helm] No SSH key found - cannot reconnect\r\n'),
-          );
-          // No second connect attempt: reconnect() returns right after the
-          // "no key" message, per terminal_session.dart:119-122.
-          expect(service.connectCalls, hasLength(1));
-        },
+      final service = FakeSSHService();
+      final oldClient = _buildFakeClient();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: oldClient, session: FakeSSHSession()),
       );
-
-      test(
-        'forwards the stored private key into connect() when one exists',
-        () async {
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-              .setMockMethodCallHandler(_secureStorageChannel, (call) async {
-            if (call.method == 'read') return 'stored-pem-key';
-            return null;
-          });
-
-          final service = FakeSSHService();
-          final oldClient = _buildFakeClient();
-          service.queueConnectSuccess(
-            SSHConnectionResult(client: oldClient, session: FakeSSHSession()),
-          );
-          final session = TerminalSession(
-            profile: _testProfile,
-            sshService: service,
-            terminal: RecordingTerminal(),
-          );
-          await session.connect('key');
-          session.statusNotifier.value = ConnectionStatus.disconnected;
-
-          // The second connect (inside reconnect()) needs its own queued
-          // result.
-          service.queueConnectSuccess(
-            SSHConnectionResult(
-              client: _buildFakeClient(),
-              session: FakeSSHSession(),
-            ),
-          );
-
-          await session.reconnect();
-
-          expect(service.connectCalls, hasLength(2));
-          expect(service.connectCalls.last.privateKeyPem, 'stored-pem-key');
-        },
+      final terminal = RecordingTerminal();
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: terminal,
       );
-    },
-  );
+      await session.connect('key');
+      // reconnect() no-ops while statusNotifier is connecting/connected
+      // (terminal_session.dart:96-99); simulate that the connection
+      // already dropped, as would happen before a real caller invokes
+      // reconnect().
+      session.statusNotifier.value = ConnectionStatus.disconnected;
 
-  group('TerminalSession.reconnect - testability gap (discovery)', () {
+      await session.reconnect();
+
+      expect(terminal.writes, contains('\r\n[Helm] Reconnecting…\r\n'));
+      expect(service.disconnectCalls, [oldClient]);
+      expect(
+        terminal.writes,
+        contains('[Helm] No SSH key found - cannot reconnect\r\n'),
+      );
+      // No second connect attempt: reconnect() returns right after the
+      // "no key" message, per terminal_session.dart:119-122.
+      expect(service.connectCalls, hasLength(1));
+    });
+
     test(
-      '[DISCOVERY] with no secure-storage channel handler registered, '
-      'reconnect() propagates the resulting exception uncaught -- '
-      'SSHKeyService() is constructed directly inside reconnect() with no '
-      'injection point (unlike SSHService), and the '
-      '`await keyService.getPrivateKey()` call at terminal_session.dart:118 '
-      'sits outside any try/catch. This is a testability/robustness gap '
-      'in the current code, pinned here rather than fixed, since fixing '
-      'it is not part of this slice\'s scope.',
+      'forwards the stored private key into connect() when one exists',
       () async {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(_secureStorageChannel, (call) async {
+              if (call.method == 'read') return 'stored-pem-key';
+              return null;
+            });
+
         final service = FakeSSHService();
         final oldClient = _buildFakeClient();
         service.queueConnectSuccess(
@@ -910,8 +821,46 @@ void main() {
         await session.connect('key');
         session.statusNotifier.value = ConnectionStatus.disconnected;
 
-        await expectLater(session.reconnect(), throwsA(anything));
+        // The second connect (inside reconnect()) needs its own queued
+        // result.
+        service.queueConnectSuccess(
+          SSHConnectionResult(
+            client: _buildFakeClient(),
+            session: FakeSSHSession(),
+          ),
+        );
+
+        await session.reconnect();
+
+        expect(service.connectCalls, hasLength(2));
+        expect(service.connectCalls.last.privateKeyPem, 'stored-pem-key');
       },
     );
+  });
+
+  group('TerminalSession.reconnect - testability gap (discovery)', () {
+    test('[DISCOVERY] with no secure-storage channel handler registered, '
+        'reconnect() propagates the resulting exception uncaught -- '
+        'SSHKeyService() is constructed directly inside reconnect() with no '
+        'injection point (unlike SSHService), and the '
+        '`await keyService.getPrivateKey()` call at terminal_session.dart:118 '
+        'sits outside any try/catch. This is a testability/robustness gap '
+        'in the current code, pinned here rather than fixed, since fixing '
+        'it is not part of this slice\'s scope.', () async {
+      final service = FakeSSHService();
+      final oldClient = _buildFakeClient();
+      service.queueConnectSuccess(
+        SSHConnectionResult(client: oldClient, session: FakeSSHSession()),
+      );
+      final session = TerminalSession(
+        profile: _testProfile,
+        sshService: service,
+        terminal: RecordingTerminal(),
+      );
+      await session.connect('key');
+      session.statusNotifier.value = ConnectionStatus.disconnected;
+
+      await expectLater(session.reconnect(), throwsA(anything));
+    });
   });
 }

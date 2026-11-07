@@ -13,7 +13,8 @@ import 'package:helm/features/files/domain/download_destination.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _destination = DownloadDestination(
-  uri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
+  uri:
+      'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
   name: 'Helm',
 );
 

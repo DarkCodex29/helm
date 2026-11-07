@@ -79,28 +79,30 @@ void main() {
       expect(alert.doing, 'OC | Sincronizar archivos Mac a movil');
     });
 
-    test('treats a blank context value as absent, because FCM cannot say so',
-        () {
-      // FCM's data map is map<string,string> on the wire. The sender has
-      // no way to express "I do not know the workspace" other than by
-      // sending an empty string, so an empty string has to mean it — the
-      // alternative is a header line that renders as a bare separator.
-      final alert = SessionAlert.fromData(const {
-        'session': 'work',
-        'place': '',
-        'area': '   ',
-        'doing': '',
-        'pane_id': '',
-        'agent': '  ',
-      });
+    test(
+      'treats a blank context value as absent, because FCM cannot say so',
+      () {
+        // FCM's data map is map<string,string> on the wire. The sender has
+        // no way to express "I do not know the workspace" other than by
+        // sending an empty string, so an empty string has to mean it — the
+        // alternative is a header line that renders as a bare separator.
+        final alert = SessionAlert.fromData(const {
+          'session': 'work',
+          'place': '',
+          'area': '   ',
+          'doing': '',
+          'pane_id': '',
+          'agent': '  ',
+        });
 
-      expect(alert, isNotNull);
-      expect(alert!.place, isNull);
-      expect(alert.area, isNull);
-      expect(alert.doing, isNull);
-      expect(alert.paneId, isNull, reason: 'same wire contract, same rule');
-      expect(alert.agent, isNull);
-    });
+        expect(alert, isNotNull);
+        expect(alert!.place, isNull);
+        expect(alert.area, isNull);
+        expect(alert.doing, isNull);
+        expect(alert.paneId, isNull, reason: 'same wire contract, same rule');
+        expect(alert.agent, isNull);
+      },
+    );
 
     test('a payload carrying no context at all still yields an alert', () {
       final alert = SessionAlert.fromData(const {'session': 'work'});
@@ -164,8 +166,7 @@ void main() {
       expect(restored.doing, 'OC | Sincronizar archivos');
     });
 
-    test('omits absent context rather than writing nulls into the payload',
-        () {
+    test('omits absent context rather than writing nulls into the payload', () {
       const original = SessionAlert(sessionName: 'work');
 
       final payload = original.toPayload();

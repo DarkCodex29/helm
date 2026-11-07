@@ -130,32 +130,35 @@ void main() {
   });
 
   group('security: the remote audio is private to the owner', () {
-    test('pre-creates the remote file as 0600 before the upload opens it, '
-        'so SFTP\'s default-umask create cannot leave it world-readable', () async {
-      final path = await _createTempFile('.wav');
-      final remoteBasename = path.substring(path.lastIndexOf('/') + 1);
-      final session = FakeSftpSession();
-      final runner = _ScriptedHostCommandRunner(
-        stdout: 'hola',
-        session: session,
-      );
-      final transcriber = VoiceTranscriber(
-        uploadService: SftpUploadService.withOpener(() async => session),
-        hostRunner: runner,
-      );
+    test(
+      'pre-creates the remote file as 0600 before the upload opens it, '
+      'so SFTP\'s default-umask create cannot leave it world-readable',
+      () async {
+        final path = await _createTempFile('.wav');
+        final remoteBasename = path.substring(path.lastIndexOf('/') + 1);
+        final session = FakeSftpSession();
+        final runner = _ScriptedHostCommandRunner(
+          stdout: 'hola',
+          session: session,
+        );
+        final transcriber = VoiceTranscriber(
+          uploadService: SftpUploadService.withOpener(() async => session),
+          hostRunner: runner,
+        );
 
-      await transcriber.transcribe(VoiceRecording(path));
+        await transcriber.transcribe(VoiceRecording(path));
 
-      final precreate = runner.runCalls.first;
-      final quoted = shellQuote('/tmp/$remoteBasename');
-      expect(precreate, contains('umask 077'));
-      expect(precreate, contains('chmod 600'));
-      expect(precreate, contains(quoted));
-      // Nothing had been uploaded when the pre-create ran...
-      expect(runner.uploadsOpenedAtCall.first, 0);
-      // ...and the upload happened afterwards.
-      expect(session.openedWritePaths, isNotEmpty);
-    });
+        final precreate = runner.runCalls.first;
+        final quoted = shellQuote('/tmp/$remoteBasename');
+        expect(precreate, contains('umask 077'));
+        expect(precreate, contains('chmod 600'));
+        expect(precreate, contains(quoted));
+        // Nothing had been uploaded when the pre-create ran...
+        expect(runner.uploadsOpenedAtCall.first, 0);
+        // ...and the upload happened afterwards.
+        expect(session.openedWritePaths, isNotEmpty);
+      },
+    );
 
     test('a failing pre-create yields a failure, never uploads, and still '
         'deletes the local file', () async {

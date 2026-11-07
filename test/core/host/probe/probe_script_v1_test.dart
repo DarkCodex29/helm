@@ -81,21 +81,18 @@ void main() {
         },
       );
 
-      test(
-        'delimiter-adjacent: leading/trailing raw TAB abutting the wire '
-        'grammar own field delimiter, with an interior backslash-then-TAB '
-        'adjacency',
-        () async {
-          // A single-class test can pass while composition breaks: this
-          // value starts AND ends with a raw TAB -- the exact byte the
-          // wire format uses as its own field delimiter -- and places a
-          // raw backslash directly before an interior TAB, stressing the
-          // real _esc() pipeline's ordering (backslash-escaping must run
-          // before TAB-escaping, or a `\` immediately followed by a
-          // not-yet-escaped TAB could be misread once escaping runs).
-          await _expectRoundTrip('\t\\\tdelimiter-edge\t');
-        },
-      );
+      test('delimiter-adjacent: leading/trailing raw TAB abutting the wire '
+          'grammar own field delimiter, with an interior backslash-then-TAB '
+          'adjacency', () async {
+        // A single-class test can pass while composition breaks: this
+        // value starts AND ends with a raw TAB -- the exact byte the
+        // wire format uses as its own field delimiter -- and places a
+        // raw backslash directly before an interior TAB, stressing the
+        // real _esc() pipeline's ordering (backslash-escaping must run
+        // before TAB-escaping, or a `\` immediately followed by a
+        // not-yet-escaped TAB could be misread once escaping runs).
+        await _expectRoundTrip('\t\\\tdelimiter-edge\t');
+      });
     },
     skip: hasPosixShell ? false : skipReason,
   );

@@ -404,9 +404,7 @@ class SftpDownloadService {
       // Cancelled so the library stops issuing reads for a transfer
       // nobody is consuming any more.
       unawaited(subscription.cancel());
-      completer.complete(
-        _PumpResult(status, written: written, error: error),
-      );
+      completer.complete(_PumpResult(status, written: written, error: error));
     }
 
     void armWatchdog() {

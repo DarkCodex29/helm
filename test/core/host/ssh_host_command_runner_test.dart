@@ -32,43 +32,43 @@ void main() {
       },
     );
 
-    test('reports timedOut=true when the command exceeds the timeout', () async {
-      final channel = _FakeSshCommandChannel(
-        done: Completer<void>().future,
-        exitCode: 0,
-      );
-      final runner = SshHostCommandRunner.withOpener((_) async => channel);
+    test(
+      'reports timedOut=true when the command exceeds the timeout',
+      () async {
+        final channel = _FakeSshCommandChannel(
+          done: Completer<void>().future,
+          exitCode: 0,
+        );
+        final runner = SshHostCommandRunner.withOpener((_) async => channel);
 
-      final result = await runner.run(
-        'sleep 100',
-        timeout: const Duration(milliseconds: 20),
-      );
+        final result = await runner.run(
+          'sleep 100',
+          timeout: const Duration(milliseconds: 20),
+        );
 
-      expect(result.timedOut, isTrue);
-      expect(result.exitCode, isNull);
-    });
+        expect(result.timedOut, isTrue);
+        expect(result.exitCode, isNull);
+      },
+    );
   });
 
   group('runScript', () {
-    test(
-      'opens exactly /bin/sh -s, writes the script to stdin, closes it, '
-      'and issues no other command',
-      () async {
-        final channel = _FakeSshCommandChannel(exitCode: 0);
-        final openedCommands = <String>[];
-        final runner = SshHostCommandRunner.withOpener((command) async {
-          openedCommands.add(command);
-          return channel;
-        });
+    test('opens exactly /bin/sh -s, writes the script to stdin, closes it, '
+        'and issues no other command', () async {
+      final channel = _FakeSshCommandChannel(exitCode: 0);
+      final openedCommands = <String>[];
+      final runner = SshHostCommandRunner.withOpener((command) async {
+        openedCommands.add(command);
+        return channel;
+      });
 
-        final result = await runner.runScript('echo probe');
+      final result = await runner.runScript('echo probe');
 
-        expect(openedCommands, ['/bin/sh -s']);
-        expect(utf8.decode(channel.stdinBytesWritten), 'echo probe');
-        expect(channel.stdinClosed, isTrue);
-        expect(result.exitCode, 0);
-      },
-    );
+      expect(openedCommands, ['/bin/sh -s']);
+      expect(utf8.decode(channel.stdinBytesWritten), 'echo probe');
+      expect(channel.stdinClosed, isTrue);
+      expect(result.exitCode, 0);
+    });
 
     test('returns the drained stdout of the executed script', () async {
       final channel = _FakeSshCommandChannel(
@@ -82,24 +82,21 @@ void main() {
       expect(result.stdout, 'helm-probe/1');
     });
 
-    test(
-      'delivers the real probe script via the fixed literal /bin/sh -s, '
-      'with no other command issued',
-      () async {
-        final channel = _FakeSshCommandChannel(exitCode: 0);
-        final openedCommands = <String>[];
-        final runner = SshHostCommandRunner.withOpener((command) async {
-          openedCommands.add(command);
-          return channel;
-        });
+    test('delivers the real probe script via the fixed literal /bin/sh -s, '
+        'with no other command issued', () async {
+      final channel = _FakeSshCommandChannel(exitCode: 0);
+      final openedCommands = <String>[];
+      final runner = SshHostCommandRunner.withOpener((command) async {
+        openedCommands.add(command);
+        return channel;
+      });
 
-        await runner.runScript(probeScriptV1);
+      await runner.runScript(probeScriptV1);
 
-        expect(openedCommands, ['/bin/sh -s']);
-        expect(utf8.decode(channel.stdinBytesWritten), probeScriptV1);
-        expect(channel.stdinClosed, isTrue);
-      },
-    );
+      expect(openedCommands, ['/bin/sh -s']);
+      expect(utf8.decode(channel.stdinBytesWritten), probeScriptV1);
+      expect(channel.stdinClosed, isTrue);
+    });
   });
 
   group('draining outlives the channel closing', () {
@@ -168,30 +165,27 @@ void main() {
       expect(result.stderr, 'boom');
     });
 
-    test(
-      'a timeout still wins, so a stream that never closes cannot hang the '
-      'caller',
-      () async {
-        // Waiting for the streams must not reintroduce an unbounded wait:
-        // the timeout has to cover the drain, not just the channel.
-        final stdout = StreamController<Uint8List>();
-        final channel = _LateDeliveryChannel(
-          stdout: stdout,
-          done: Completer<void>().future,
-          exitCode: 0,
-        );
-        final runner = SshHostCommandRunner.withOpener((_) async => channel);
+    test('a timeout still wins, so a stream that never closes cannot hang the '
+        'caller', () async {
+      // Waiting for the streams must not reintroduce an unbounded wait:
+      // the timeout has to cover the drain, not just the channel.
+      final stdout = StreamController<Uint8List>();
+      final channel = _LateDeliveryChannel(
+        stdout: stdout,
+        done: Completer<void>().future,
+        exitCode: 0,
+      );
+      final runner = SshHostCommandRunner.withOpener((_) async => channel);
 
-        final result = await runner.run(
-          'sleep 100',
-          timeout: const Duration(milliseconds: 20),
-        );
+      final result = await runner.run(
+        'sleep 100',
+        timeout: const Duration(milliseconds: 20),
+      );
 
-        expect(result.timedOut, isTrue);
-        expect(result.exitCode, isNull);
-        await stdout.close();
-      },
-    );
+      expect(result.timedOut, isTrue);
+      expect(result.exitCode, isNull);
+      await stdout.close();
+    });
   });
 }
 

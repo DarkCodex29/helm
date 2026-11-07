@@ -94,8 +94,10 @@ void main() {
         sessionRef: 'neutral-name',
       );
 
-      expect((_resolve(profile: both) as OpenSession).sessionName,
-          'neutral-name');
+      expect(
+        (_resolve(profile: both) as OpenSession).sessionName,
+        'neutral-name',
+      );
     });
 
     test('a blank session reference is not a name', () {
@@ -124,10 +126,7 @@ void main() {
         sessionRef: '  my-work  ',
       );
 
-      expect(
-        (_resolve(profile: padded) as OpenSession).sessionName,
-        'my-work',
-      );
+      expect((_resolve(profile: padded) as OpenSession).sessionName, 'my-work');
     });
   });
 
@@ -148,8 +147,7 @@ void main() {
 
     test('a blank explicit request falls through to the profile', () {
       expect(
-        (_resolve(profile: _named, requested: '  ') as OpenSession)
-            .sessionName,
+        (_resolve(profile: _named, requested: '  ') as OpenSession).sessionName,
         'my-work',
       );
     });
@@ -222,20 +220,17 @@ void main() {
   });
 
   group('two tabs never share one session', () {
-    test(
-      'opening a NAMED profile that is already open focuses the tab that '
-      'has it, rather than attaching twice',
-      () {
-        final result = _resolve(
-          profile: _named,
-          openTabs: const [(tabId: 'tab-7', sessionName: 'my-work')],
-        );
+    test('opening a NAMED profile that is already open focuses the tab that '
+        'has it, rather than attaching twice', () {
+      final result = _resolve(
+        profile: _named,
+        openTabs: const [(tabId: 'tab-7', sessionName: 'my-work')],
+      );
 
-        expect(result, isA<FocusOpenTab>());
-        expect((result as FocusOpenTab).tabId, 'tab-7');
-        expect(result.sessionName, 'my-work');
-      },
-    );
+      expect(result, isA<FocusOpenTab>());
+      expect((result as FocusOpenTab).tabId, 'tab-7');
+      expect(result.sessionName, 'my-work');
+    });
 
     test('an explicitly requested session already open is focused too', () {
       // Crash recovery replaying a snapshot twice, or a shortcut opened
