@@ -295,13 +295,13 @@ class AgentBridge implements Bridge {
     String? requestId,
     PiCommand Function() build,
   ) {
-    if (requestId != null && !_requestIds.add(requestId)) {
+    if (requestId != null && !_requestIds.begin(requestId)) {
       client.send(AckMessage(requestId: requestId, duplicate: true));
       return;
     }
     final label = requestId == null ? 'command' : 'request $requestId';
     void fail(String code, String detail) {
-      if (requestId != null) _requestIds.forget(requestId);
+      if (requestId != null) _requestIds.fail(requestId);
       client.send(ErrorMessage(code: code, message: '$label: $detail'));
     }
 
@@ -315,6 +315,7 @@ class AgentBridge implements Bridge {
       (r) {
         if (!r.success) return fail('rejected', r.error ?? 'Pi rejected it');
         if (requestId != null) {
+          _requestIds.complete(requestId);
           client.send(AckMessage(requestId: requestId, duplicate: false));
         }
       },

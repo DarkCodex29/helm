@@ -140,5 +140,25 @@ void main() {
       expect(c.add('a'), isFalse);
       expect(c.add('b'), isTrue);
     });
+
+    test('an in-flight id is never evicted, however many others pass', () {
+      final c = RequestIdCache(capacity: 3);
+      expect(c.begin('slow'), isTrue);
+      for (var i = 0; i < 10; i++) {
+        expect(c.begin('id$i'), isTrue);
+        c.complete('id$i');
+      }
+      expect(c.begin('slow'), isFalse, reason: 'still in flight');
+    });
+
+    test('a completed id is a duplicate; a failed one can be retried', () {
+      final c = RequestIdCache();
+      expect(c.begin('ok'), isTrue);
+      c.complete('ok');
+      expect(c.begin('ok'), isFalse);
+      expect(c.begin('bad'), isTrue);
+      c.fail('bad');
+      expect(c.begin('bad'), isTrue);
+    });
   });
 }
