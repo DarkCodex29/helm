@@ -179,6 +179,45 @@ void main() {
       expect([e.code, e.message], ['c', 'm']);
     });
 
+    test('error requestId round trips, and is omitted when null', () {
+      final withId =
+          srt(const ErrorMessage(code: 'c', message: 'm', requestId: 'r1'))
+              as ErrorMessage;
+      expect(withId.requestId, 'r1');
+      final without =
+          srt(const ErrorMessage(code: 'c', message: 'm')) as ErrorMessage;
+      expect(without.requestId, isNull);
+      final json =
+          jsonDecode(
+                encodeServerFrame(
+                  1,
+                  const ErrorMessage(code: 'c', message: 'm'),
+                ),
+              )
+              as Map;
+      expect(json.keys, unorderedEquals(['type', 'seq', 'code', 'message']));
+      final wire =
+          jsonDecode(
+                encodeServerFrame(
+                  1,
+                  const ErrorMessage(code: 'c', message: 'm', requestId: 'r1'),
+                ),
+              )
+              as Map;
+      expect(wire['requestId'], 'r1');
+    });
+
+    test('error decoding tolerates a missing or mistyped requestId', () {
+      final old = decodeServerFrame('{"type":"error","code":"c","message":"m"}')
+          .message as ErrorMessage;
+      expect(old.requestId, isNull);
+      final odd = decodeServerFrame(
+        '{"type":"error","code":"c","message":"m","requestId":7}',
+      ).message;
+      expect(odd, isA<ErrorMessage>());
+      expect((odd as ErrorMessage).requestId, isNull);
+    });
+
     test('optional fields are omitted from the wire', () {
       final json =
           jsonDecode(

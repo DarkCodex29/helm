@@ -324,6 +324,7 @@ void main() {
         expect(b.of<AskResolvedMessage>().single.requestId, 'q1');
         final late = a.of<ErrorMessage>().single;
         expect(late.code, 'ask_resolved');
+        expect(late.requestId, 'q1');
         expect(b.of<ErrorMessage>(), isEmpty);
         expect(a.of<AgentStateMessage>().last.state, AgentState.idle);
       },
@@ -350,6 +351,7 @@ void main() {
         await boot();
         bridge.onMessage(a, const ClientUiResponse.confirmed('ghost', true));
         expect(a.of<ErrorMessage>().single.code, 'unknown_ask');
+        expect(a.of<ErrorMessage>().single.requestId, 'ghost');
         expect(
           proc.written.where((w) => w['type'] == 'extension_ui_response'),
           isEmpty,
@@ -495,6 +497,7 @@ void main() {
         await until(() => a.of<ErrorMessage>().isNotEmpty, what: 'error');
         final e = a.of<ErrorMessage>().single;
         expect(e.code, 'rejected');
+        expect(e.requestId, 'r1');
         expect(e.message, contains('r1'));
         expect(e.message, contains('no model'));
         expect(a.of<AckMessage>(), isEmpty);
@@ -519,10 +522,32 @@ void main() {
         await until(() => a.of<ErrorMessage>().isNotEmpty, what: 'error');
         final e = a.of<ErrorMessage>().single;
         expect(e.code, 'not_running');
+        expect(e.requestId, 'r9');
         expect(e.message, contains('r9'));
         expect(proc.written, hasLength(before));
       },
     );
+
+    test('an answer the supervisor cannot take carries the ask id', () async {
+      await boot();
+      await emit(_ask('q1'));
+      await h.sup.shutdown();
+      bridge.onMessage(a, const ClientUiResponse.confirmed('q1', true));
+      final e = a.of<ErrorMessage>().last;
+      expect(e.requestId, 'q1');
+    });
+
+    test('a command without a requestId has an error without one', () async {
+      await boot();
+      proc.exit(1);
+      await until(
+        () => a.labels.contains('state:restarting'),
+        what: 'restarting',
+      );
+      bridge.onMessage(a, const ClientAbort(requestId: null));
+      await until(() => a.of<ErrorMessage>().isNotEmpty, what: 'error');
+      expect(a.of<ErrorMessage>().single.requestId, isNull);
+    });
 
     test('ui_response while the supervisor is down is an error', () async {
       await boot();
