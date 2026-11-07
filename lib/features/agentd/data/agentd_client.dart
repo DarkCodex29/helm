@@ -48,12 +48,11 @@ class _IoChannel implements AgentdChannel {
 }
 
 /// Default connector: dart:io WebSocket with a bounded connect.
-Future<AgentdChannel> connectWebSocket(Uri uri) async {
-  final ws = await WebSocket.connect(
-    uri.toString(),
-  ).timeout(const Duration(seconds: 10));
-  return _IoChannel(ws);
-}
+///
+/// The client bounds the connect itself and closes a socket that arrives
+/// late, so this does not need its own timeout.
+Future<AgentdChannel> connectWebSocket(Uri uri) async =>
+    _IoChannel(await WebSocket.connect(uri.toString()));
 
 /// Something noteworthy that is not an error; never carries message text.
 sealed class AgentdDiagnostic {
@@ -135,6 +134,7 @@ class AgentdClient {
     AgentdConnect? connect,
     AgentdTimerFactory? timers,
     this.commandTimeout = const Duration(seconds: 15),
+    this.connectTimeout = const Duration(seconds: 10),
     String Function()? newRequestId,
     Duration Function(int attempt)? backoff,
   }) : _token = token,
@@ -145,6 +145,7 @@ class AgentdClient {
 
   final AgentdEndpoint endpoint;
   final Duration commandTimeout;
+  final Duration connectTimeout;
   final String _token;
   final AgentdConnect _connect;
   final AgentdTimerFactory _timer;
@@ -166,6 +167,8 @@ class AgentdClient {
   AgentdChannel? _channel;
   StreamSubscription<String>? _sub;
   Timer? _reconnectTimer;
+  Timer? _connectGuard;
+  Completer<AgentdChannel>? _pendingConnect;
   bool _started = false;
   bool _closed = false;
   bool _ready = false;
@@ -204,12 +207,36 @@ class AgentdClient {
     _reconnectTimer = null;
     _setState(const AgentdConnecting());
     final AgentdChannel channel;
+    final attempt = Completer<AgentdChannel>();
+    _pendingConnect = attempt;
+    final connecting = _connect(endpoint.uri);
+    final guard = _timer(connectTimeout, () {
+      if (!attempt.isCompleted) attempt.completeError(TimeoutException(null));
+    });
+    _connectGuard = guard;
+    connecting.then<void>(
+      (c) {
+        if (attempt.isCompleted) {
+          // Arrived after the timeout (or after close): nobody owns it.
+          unawaited(_safeClose(c));
+        } else {
+          attempt.complete(c);
+        }
+      },
+      onError: (Object e) {
+        if (!attempt.isCompleted) attempt.completeError(e);
+      },
+    );
     try {
-      channel = await _connect(endpoint.uri);
+      channel = await attempt.future;
     } catch (_) {
+      guard.cancel();
+      _pendingConnect = null;
       if (!_closed) _scheduleReconnect();
       return;
     }
+    guard.cancel();
+    _pendingConnect = null;
     if (_closed) {
       unawaited(_safeClose(channel));
       return;
@@ -301,26 +328,34 @@ class AgentdClient {
     if (!c.completer.isCompleted) c.completer.complete();
   }
 
-  /// An `error` names its request in the message: `request <id>: ...` for
-  /// commands, `ask <id> ...` for answers. Returns whether one matched.
+  /// An `error` is matched to its command by `requestId` only. Errors from
+  /// a peer that does not send it fall back to the exact text prefix the
+  /// daemon writes (`request <id>:` / `ask <id> `) at the START of the
+  /// message; the body is never scanned. Returns whether one matched.
   bool _failMatching(proto.ErrorMessage e) {
-    for (final c in _commands.values.toList()) {
-      final id = c.kind == _Kind.answer ? c.key.substring(4) : c.key;
-      final word = c.kind == _Kind.answer ? 'ask' : 'request';
-      final pattern = RegExp('(^|\\W)$word ${RegExp.escape(id)}(\\W|\$)');
-      if (pattern.hasMatch(e.message)) {
-        _failCommand(
-          c,
-          AgentdCommandException(
-            AgentdCommandError.rejected,
-            code: e.code,
-            requestId: id,
-          ),
-        );
-        return true;
-      }
+    final _Command? target = e.requestId != null
+        ? (_commands[e.requestId!] ??
+              _commands[_keyFor(_Kind.answer, e.requestId!)])
+        : _byPrefix(e.message);
+    if (target == null) return false;
+    _failCommand(
+      target,
+      AgentdCommandException(
+        AgentdCommandError.rejected,
+        code: e.code,
+        requestId: _idOf(target),
+      ),
+    );
+    return true;
+  }
+
+  _Command? _byPrefix(String message) {
+    for (final c in _commands.values) {
+      final id = _idOf(c);
+      final prefix = c.kind == _Kind.answer ? 'ask $id ' : 'request $id:';
+      if (message.startsWith(prefix)) return c;
     }
-    return false;
+    return null;
   }
 
   static String _keyFor(_Kind kind, String id) =>
@@ -390,6 +425,7 @@ class AgentdClient {
 
   void _fail(AgentdFailure reason) {
     _detach();
+    _connectGuard?.cancel();
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _failAll(AgentdCommandError.disconnected);
@@ -476,6 +512,14 @@ class AgentdClient {
     _closed = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _connectGuard?.cancel();
+    final pending = _pendingConnect;
+    if (pending != null && !pending.isCompleted) {
+      // A socket that still arrives is closed by the connect callback.
+      pending.completeError(
+        const AgentdCommandException(AgentdCommandError.closed),
+      );
+    }
     final channel = _channel;
     _detach();
     _failAll(AgentdCommandError.closed);

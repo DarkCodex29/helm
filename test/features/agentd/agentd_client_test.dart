@@ -58,7 +58,10 @@ void main() {
   Future<void> dropAndReconnect(FakeChannel c, {int? code}) async {
     c.serverClose(code);
     await pump();
-    final t = timers.all.lastWhere((t) => t.isActive && t.duration.inSeconds <= 30 && t.duration != _cmdTimeout);
+    final t = timers.all.lastWhere(
+      (t) =>
+          t.isActive && t.duration.inSeconds <= 30 && t.duration != _cmdTimeout,
+    );
     t.fire();
     await pump();
   }
@@ -309,13 +312,124 @@ void main() {
       var done = false;
       unawaited(client.send('hi').then((_) => done = true, onError: (_) {}));
       await pump();
+      c.serve(const proto.ErrorMessage(code: 'x', message: 'request zzz: no'));
+      await pump();
+      expect(done, isFalse);
+      expect(timers.active(_cmdTimeout), hasLength(1));
+    });
+
+    test('an error whose text mentions another id does not fail it', () async {
+      final c = await connectAndReady();
+      var done = false;
+      unawaited(client.send('hi').then((_) => done = true, onError: (_) {}));
+      final other = client.send('there');
+      final otherResult = expectLater(
+        other,
+        throwsA(
+          isA<AgentdCommandException>().having(
+            (e) => e.requestId,
+            'requestId',
+            'req-2',
+          ),
+        ),
+      );
+      await pump();
+      // About req-2, but the body names req-1 first.
       c.serve(
-        const proto.ErrorMessage(code: 'x', message: 'request zzz: no'),
+        const proto.ErrorMessage(
+          code: 'rejected',
+          message: 'request req-2: Pi said "request req-1 is odd"',
+          requestId: 'req-2',
+        ),
+      );
+      await otherResult.timeout(_bound);
+      expect(done, isFalse);
+      expect(timers.active(_cmdTimeout), hasLength(1));
+    });
+
+    test('text of another command in the body is never scanned', () async {
+      final c = await connectAndReady();
+      var done = false;
+      unawaited(client.send('hi').then((_) => done = true, onError: (_) {}));
+      await pump();
+      c.serve(
+        const proto.ErrorMessage(
+          code: 'x',
+          message: 'failure while handling request req-1 elsewhere',
+        ),
       );
       await pump();
       expect(done, isFalse);
       expect(timers.active(_cmdTimeout), hasLength(1));
     });
+
+    test('an error with requestId fails exactly that command', () async {
+      final c = await connectAndReady();
+      final a = client.send('a');
+      final b = client.send('b');
+      var bDone = false;
+      unawaited(b.then((_) => bDone = true, onError: (_) {}));
+      final expectation = expectLater(
+        a,
+        throwsA(
+          isA<AgentdCommandException>()
+              .having((e) => e.kind, 'kind', AgentdCommandError.rejected)
+              .having((e) => e.requestId, 'requestId', 'req-1'),
+        ),
+      );
+      await pump();
+      c.serve(
+        const proto.ErrorMessage(
+          code: 'rejected',
+          message: 'unrelated wording',
+          requestId: 'req-1',
+        ),
+      );
+      await expectation.timeout(_bound);
+      expect(bDone, isFalse);
+    });
+
+    test('an error with an unknown requestId fails nothing', () async {
+      final c = await connectAndReady();
+      var done = false;
+      unawaited(client.send('hi').then((_) => done = true, onError: (_) {}));
+      await pump();
+      c.serve(
+        const proto.ErrorMessage(
+          code: 'x',
+          message: 'request req-1: looks like yours',
+          requestId: 'zzz',
+        ),
+      );
+      await pump();
+      expect(done, isFalse);
+    });
+
+    test(
+      'an answer failure carrying the ask id fails the answer now',
+      () async {
+        final c = await connectAndReady();
+        final bad = client.answer('ask-9', confirmed: true);
+        final expectation = expectLater(
+          bad,
+          throwsA(
+            isA<AgentdCommandException>()
+                .having((e) => e.code, 'code', 'not_running')
+                .having((e) => e.requestId, 'requestId', 'ask-9'),
+          ),
+        );
+        await pump();
+        c.serve(
+          const proto.ErrorMessage(
+            code: 'not_running',
+            message: 'Pi is not running',
+            requestId: 'ask-9',
+          ),
+        );
+        await expectation.timeout(_bound);
+        expect(timers.active(_cmdTimeout), isEmpty);
+      },
+    );
 
     test('times out when no ack arrives', () async {
       await connectAndReady();
@@ -335,15 +449,17 @@ void main() {
       await expectation.timeout(_bound);
     });
 
-    test('a command is not left behind after its ack (timer cancelled)',
-        () async {
-      final c = await connectAndReady();
-      final f = client.send('hi');
-      await pump();
-      c.serve(const proto.AckMessage(requestId: 'req-1', duplicate: false));
-      await f.timeout(_bound);
-      expect(timers.active(_cmdTimeout), isEmpty);
-    });
+    test(
+      'a command is not left behind after its ack (timer cancelled)',
+      () async {
+        final c = await connectAndReady();
+        final f = client.send('hi');
+        await pump();
+        c.serve(const proto.AckMessage(requestId: 'req-1', duplicate: false));
+        await f.timeout(_bound);
+        expect(timers.active(_cmdTimeout), isEmpty);
+      },
+    );
 
     test('steer, abort and answer use the right frames', () async {
       final c = await connectAndReady();
@@ -404,7 +520,10 @@ void main() {
       await pump();
       final f = client.send('early');
       await pump();
-      expect(connector.last.clientFrames.whereType<proto.ClientSend>(), isEmpty);
+      expect(
+        connector.last.clientFrames.whereType<proto.ClientSend>(),
+        isEmpty,
+      );
 
       connector.last.serveReady();
       await pump();
@@ -452,33 +571,35 @@ void main() {
   });
 
   group('in-flight commands across a reconnect', () {
-    test('is retried ONCE with the SAME requestId after the next ready',
-        () async {
-      final c1 = await connectAndReady();
-      var acked = false;
-      final f = client.send('hi').then((_) => acked = true);
-      await pump();
-      expect(c1.clientFrames.whereType<proto.ClientSend>(), hasLength(1));
+    test(
+      'is retried ONCE with the SAME requestId after the next ready',
+      () async {
+        final c1 = await connectAndReady();
+        var acked = false;
+        final f = client.send('hi').then((_) => acked = true);
+        await pump();
+        expect(c1.clientFrames.whereType<proto.ClientSend>(), hasLength(1));
 
-      await dropAndReconnect(c1, code: 1006);
-      final c2 = connector.last;
-      expect(
-        c2.clientFrames.whereType<proto.ClientSend>(),
-        isEmpty,
-        reason: 'not before ready',
-      );
-      c2.serveReady();
-      await pump();
+        await dropAndReconnect(c1, code: 1006);
+        final c2 = connector.last;
+        expect(
+          c2.clientFrames.whereType<proto.ClientSend>(),
+          isEmpty,
+          reason: 'not before ready',
+        );
+        c2.serveReady();
+        await pump();
 
-      final retry = c2.clientFrames.whereType<proto.ClientSend>().single;
-      expect(retry.requestId, 'req-1');
-      expect(retry.text, 'hi');
-      expect(acked, isFalse);
+        final retry = c2.clientFrames.whereType<proto.ClientSend>().single;
+        expect(retry.requestId, 'req-1');
+        expect(retry.text, 'hi');
+        expect(acked, isFalse);
 
-      c2.serve(const proto.AckMessage(requestId: 'req-1', duplicate: true));
-      await f.timeout(_bound);
-      expect(acked, isTrue);
-    });
+        c2.serve(const proto.AckMessage(requestId: 'req-1', duplicate: true));
+        await f.timeout(_bound);
+        expect(acked, isTrue);
+      },
+    );
 
     test('gives up with a typed error on the second disconnect', () async {
       final c1 = await connectAndReady();
@@ -506,7 +627,9 @@ void main() {
       await expectation.timeout(_bound);
 
       // And it is not sent a third time.
-      timers.all.lastWhere((t) => t.isActive && t.duration != _cmdTimeout).fire();
+      timers.all
+          .lastWhere((t) => t.isActive && t.duration != _cmdTimeout)
+          .fire();
       await pump();
       connector.last.serveReady();
       await pump();
@@ -535,10 +658,99 @@ void main() {
     test('a fatal close fails in-flight commands', () async {
       final c1 = await connectAndReady();
       final f = client.send('hi');
-      final expectation = expectLater(f, throwsA(isA<AgentdCommandException>()));
+      final expectation = expectLater(
+        f,
+        throwsA(isA<AgentdCommandException>()),
+      );
       await pump();
       c1.serverClose(4401);
       await expectation.timeout(_bound);
+    });
+  });
+
+  group('adversarial', () {
+    test('frames and a close from a stale channel are ignored', () async {
+      final old = await connectAndReady();
+      await dropAndReconnect(old);
+      final fresh = connector.last;
+      expect(fresh, isNot(same(old)));
+      fresh.serveReady();
+      await pump();
+      final before = List.of(messages);
+      final stateBefore = client.state;
+      final send = client.send('x');
+      unawaited(send.then((_) {}, onError: (_) {}));
+      await pump();
+
+      old.serve(const proto.AckMessage(requestId: 'req-1', duplicate: false));
+      old.serve(const proto.AgentStateMessage(proto.AgentState.needsYou));
+      old.serve(
+        const proto.ErrorMessage(code: 'x', message: 'm', requestId: 'req-1'),
+      );
+      await pump();
+      expect(messages, before);
+      expect(client.state, stateBefore);
+      expect(timers.active(_cmdTimeout), hasLength(1)); // still pending
+
+      // A late close from the old channel does not drop the new one.
+      old.closeCode = closeUnauthorized;
+      await pump();
+      expect(client.state, isA<AgentdConnected>());
+      expect(fresh.closedByClient, isFalse);
+    });
+
+    test('close() during an in-flight connect leaves nothing open', () async {
+      final gate = Completer<AgentdChannel>();
+      final c = AgentdClient(
+        endpoint: const AgentdEndpoint(host: '127.0.0.1', port: 7480),
+        token: _token,
+        connect: (_) => gate.future,
+        timers: timers.call,
+      );
+      c.connect();
+      await pump();
+      await c.close();
+      final late = FakeChannel();
+      gate.complete(late);
+      await pump();
+      expect(late.closedByClient, isTrue);
+      expect(late.sent, isEmpty);
+      expect(timers.all.where((t) => t.isActive), isEmpty);
+      expect(c.state, isA<AgentdDisconnected>());
+    });
+
+    test('a connect that finishes after the timeout is closed', () async {
+      final gate = Completer<AgentdChannel>();
+      final c = AgentdClient(
+        endpoint: const AgentdEndpoint(host: '127.0.0.1', port: 7480),
+        token: _token,
+        connect: (_) => gate.future,
+        timers: timers.call,
+        connectTimeout: const Duration(seconds: 10),
+      );
+      addTearDown(c.close);
+      c.connect();
+      await pump();
+      timers.one(const Duration(seconds: 10)).fire();
+      await pump();
+      expect(c.state, isA<AgentdReconnecting>());
+      final late = FakeChannel();
+      gate.complete(late);
+      await pump();
+      expect(late.closedByClient, isTrue);
+      expect(late.sent, isEmpty);
+      expect(c.state, isA<AgentdReconnecting>());
+    });
+
+    test('a duplicate ready does not re-send sent commands', () async {
+      final c = await connectAndReady();
+      unawaited(client.send('hi').then((_) {}, onError: (_) {}));
+      await pump();
+      final sentBefore = c.sent.length;
+      c.serveReady();
+      await pump();
+      expect(c.sent, hasLength(sentBefore));
+      expect(c.clientFrames.whereType<proto.ClientSend>(), hasLength(1));
     });
   });
 
@@ -560,10 +772,7 @@ void main() {
     test('a seq gap is reported with expected and got', () async {
       final c = await connectAndReady(); // seq 1
       c.serve(const proto.AgentStateMessage(proto.AgentState.working)); // 2
-      c.serve(
-        const proto.AgentStateMessage(proto.AgentState.idle),
-        seq: 5,
-      );
+      c.serve(const proto.AgentStateMessage(proto.AgentState.idle), seq: 5);
       await pump();
 
       expect(diagnostics, hasLength(1));

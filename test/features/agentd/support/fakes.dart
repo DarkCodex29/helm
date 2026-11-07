@@ -31,6 +31,7 @@ class FakeChannel implements AgentdChannel {
 
   /// Sends a server message stamped with the next seq (or [seq]).
   void serve(proto.ServerMessage m, {int? seq}) {
+    if (_in.isClosed) return; // a dead socket delivers nothing
     _in.add(proto.encodeServerFrame(seq ?? ++_seq, m));
     if (seq != null) _seq = seq;
   }
@@ -38,10 +39,7 @@ class FakeChannel implements AgentdChannel {
   void serveRaw(String text) => _in.add(text);
 
   void serveReady([proto.AgentState state = proto.AgentState.idle]) => serve(
-    proto.ReadyMessage(
-      protocol: proto.phoneProtocolVersion,
-      agentState: state,
-    ),
+    proto.ReadyMessage(protocol: proto.phoneProtocolVersion, agentState: state),
   );
 
   void serverClose(int? code) {
