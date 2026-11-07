@@ -141,8 +141,7 @@ class TerminalTabBar extends StatelessWidget {
                   );
                   return switch (agentd) {
                     AgentdTabKnown(:final state) => AgentdBadge(state: state),
-                    AgentdTabUnavailable(:final hint) =>
-                      AgentdHint(hint: hint),
+                    AgentdTabUnavailable(:final hint) => AgentdHint(hint: hint),
                     AgentdTabAbsent() => _herdrBadge(snapshot),
                   };
                 },

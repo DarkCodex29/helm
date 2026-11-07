@@ -80,9 +80,7 @@ Widget _tabStrip(
   TerminalSession session, {
   AgentdTabState agentd = const AgentdTabAbsent(),
 }) => ProviderScope(
-  overrides: [
-    agentdTabStateProvider.overrideWith((ref, id) => agentd),
-  ],
+  overrides: [agentdTabStateProvider.overrideWith((ref, id) => agentd)],
   child: MaterialApp(
     home: Scaffold(
       appBar: AppBar(
@@ -111,39 +109,35 @@ void main() {
 
   // The PTY (herdr) lane must stay armed whatever helm-agentd reports: an
   // agentd badge on top of it may never switch the host poll off.
-  testWidgets(
-    'herdr polling stays armed while helm-agentd owns the badge',
-    (tester) async {
-      final adapter = FakeAgentAdapter()
-        ..whenAgents(
-          const MuxAgentsAvailable([
-            (
-              target: 'w1:p1',
-              label: 'claude',
-              state: AgentState.idle,
-              tabId: null,
-              workspaceId: null,
-            ),
-          ]),
-        );
-      final session = await _connected(adapter);
-
-      await tester.pumpWidget(
-        _tabStrip(
-          session,
-          agentd: const AgentdTabKnown(AgentdUiState.needsYou),
-        ),
+  testWidgets('herdr polling stays armed while helm-agentd owns the badge', (
+    tester,
+  ) async {
+    final adapter = FakeAgentAdapter()
+      ..whenAgents(
+        const MuxAgentsAvailable([
+          (
+            target: 'w1:p1',
+            label: 'claude',
+            state: AgentState.idle,
+            tabId: null,
+            workspaceId: null,
+          ),
+        ]),
       );
-      await tester.pumpAndSettle();
+    final session = await _connected(adapter);
 
-      expect(find.byType(AgentdBadge), findsOneWidget);
-      expect(
-        adapter.listAgentsCalls,
-        greaterThan(0),
-        reason: 'the herdr lane is still observed under the agentd badge',
-      );
-    },
-  );
+    await tester.pumpWidget(
+      _tabStrip(session, agentd: const AgentdTabKnown(AgentdUiState.needsYou)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AgentdBadge), findsOneWidget);
+    expect(
+      adapter.listAgentsCalls,
+      greaterThan(0),
+      reason: 'the herdr lane is still observed under the agentd badge',
+    );
+  });
 
   testWidgets(
     'merely RENDERING the tab strip asks the host who is running - no '
