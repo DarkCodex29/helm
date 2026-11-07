@@ -421,6 +421,14 @@ void main() {
       );
     });
 
+    test('unavailable, not ntfy, when the token lookup throws', () async {
+      // Attach registers nothing in this case, so Settings must not offer
+      // an ntfy topic that the host will never hear about.
+      gateway.tokenError = StateError('no play services');
+      await service.start();
+      expect(await service.resolveChannel(), isA<UnavailableChannel>());
+    });
+
     test('ntfy when FCM has no token', () async {
       gateway.currentToken = null;
       await service.start();

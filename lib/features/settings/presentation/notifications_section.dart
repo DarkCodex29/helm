@@ -47,6 +47,14 @@ class NotificationsSection extends ConsumerWidget {
               title: Text('Push is delivered natively'),
               subtitle: Text('Nothing to set up on this device.'),
             ),
+            UnavailableChannel() => const ListTile(
+              leading: Icon(Icons.notifications_off_outlined),
+              title: Text('Push is unavailable on this device'),
+              subtitle: Text(
+                'The push token could not be read. It will be retried the '
+                'next time you connect.',
+              ),
+            ),
             NtfyChannel(:final topic) => _NtfyChannelTile(topic: topic),
           },
         ),

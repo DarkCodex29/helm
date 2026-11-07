@@ -88,6 +88,16 @@ void main() {
     });
   });
 
+  testWidgets('unavailable channel shows no topic and no ntfy steps', (
+    tester,
+  ) async {
+    await _pump(tester, () async => const UnavailableChannel());
+
+    expect(find.textContaining('unavailable'), findsOneWidget);
+    expect(find.text('Copy topic'), findsNothing);
+    expect(find.textContaining('Install the ntfy app'), findsNothing);
+  });
+
   testWidgets('a failed lookup says so instead of showing a channel', (
     tester,
   ) async {

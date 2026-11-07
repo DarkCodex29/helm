@@ -146,7 +146,7 @@ class DeviceTokenRegistrar {
       _log.i('Device token registered with the host');
       return TokenRegistrationOutcome.registered;
     } catch (e) {
-      _log.w('Device token registration failed on the transport: $e');
+      _log.w('Device token registration failed on the transport: ${e.runtimeType}');
       return TokenRegistrationOutcome.transportFailed;
     }
   }
@@ -180,7 +180,7 @@ class DeviceTokenRegistrar {
       _log.i('ntfy topic registered with the host');
       return TokenRegistrationOutcome.registered;
     } catch (e) {
-      _log.w('ntfy topic registration failed on the transport: $e');
+      _log.w('ntfy topic registration failed on the transport: ${e.runtimeType}');
       return TokenRegistrationOutcome.transportFailed;
     }
   }
@@ -261,9 +261,11 @@ String buildNtfyTopicRegistrationScript(String topic) =>
 String _buildMergeScript(String value, String key) {
   return '''
 set -eu
+umask 077
 dir="\$HOME/helm-notifier"
 mkdir -p "\$dir"
-tmp="\$dir/.helm-device-token.\$\$"
+chmod 700 "\$dir"
+tmp="\$(mktemp "\$dir/.helm-device-token.XXXXXX")"
 trap 'rm -f "\$tmp"' EXIT
 cat > "\$tmp" <<'$kTokenHeredocDelimiter'
 $value
@@ -299,10 +301,14 @@ if value and value not in items:
     items.append(value)
 doc[key] = items
 
+# The staging file is born 0600 (never widened by the umask) and the result
+# is re-chmodded after the swap, so a pre-existing 0644 file is tightened.
 staging = target + ".helm-new"
-with open(staging, "w") as handle:
+fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as handle:
     json.dump(doc, handle)
 os.replace(staging, target)
+os.chmod(target, 0o600)
 $kMergeHeredocDelimiter
 ''';
 }

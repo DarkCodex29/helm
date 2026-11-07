@@ -17,3 +17,10 @@ final class NtfyChannel extends NotificationChannel {
 
   final String topic;
 }
+
+/// This device's channel cannot be determined: the FCM token lookup threw.
+///
+/// Attach registers nothing in that case, so Settings must not claim ntfy.
+final class UnavailableChannel extends NotificationChannel {
+  const UnavailableChannel();
+}

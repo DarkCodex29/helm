@@ -107,7 +107,7 @@ class PushNotificationService {
     } catch (e) {
       // Reached on a device with no Play Services, and on a hot restart
       // that raced Firebase. Neither is a reason to fail the launch.
-      _log.w('Could not resolve a launch notification: $e');
+      _log.w('Could not resolve a launch notification: ${e.runtimeType}');
       return null;
     }
   }
@@ -152,7 +152,7 @@ class PushNotificationService {
       // platform `flutterfire configure` was never run for (see
       // `FirebasePushMessagingGateway`'s doc comment). Neither is a
       // reason to fail the launch.
-      _log.w('Firebase messaging did not initialize: $e');
+      _log.w('Firebase messaging did not initialize: ${e.runtimeType}');
     }
 
     try {
@@ -161,7 +161,7 @@ class PushNotificationService {
       // A channel that failed to register means local notifications will
       // not draw. It does not mean the app should not run, and it says
       // nothing about whether Firebase initialized above.
-      _log.w('Local notification presenter did not initialize: $e');
+      _log.w('Local notification presenter did not initialize: ${e.runtimeType}');
     }
 
     // Gated on Firebase alone: all three subscriptions come from
@@ -208,7 +208,7 @@ class PushNotificationService {
         final granted = await _gateway.requestPermission();
         _log.i('Notification permission: ${granted.name}');
       } catch (e) {
-        _log.w('Could not ask for notification permission: $e');
+        _log.w('Could not ask for notification permission: ${e.runtimeType}');
       }
     }
 
@@ -226,7 +226,10 @@ class PushNotificationService {
       try {
         token = await _gateway.token();
       } catch (_) {
-        token = null;
+        // Attach registers nothing when the lookup throws, so this device
+        // has no channel to show; claiming ntfy would be a topic nobody
+        // listens to.
+        return const UnavailableChannel();
       }
       if (token != null) return const FcmChannel();
     }
@@ -263,7 +266,7 @@ class PushNotificationService {
     try {
       token = await _gateway.token();
     } catch (e) {
-      _log.w('Could not read the device token: $e');
+      _log.w('Could not read the device token: ${e.runtimeType}');
       return;
     }
 
