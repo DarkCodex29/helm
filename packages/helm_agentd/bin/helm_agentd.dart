@@ -3,47 +3,71 @@ import 'dart:io';
 
 import 'package:helm_agentd/helm_agentd.dart';
 
-/// Minimal T3 entry point: starts the Pi supervisor and logs its lifecycle to
-/// stderr. The WebSocket server arrives in a later task.
-///
-///   helm_agentd [--pi <binary>] [--session-dir <dir>]
+/// helm_agentd: supervises Pi (RPC mode) and serves the phone protocol over
+/// WebSocket. Run with --help. Exit codes: 0 clean stop, 64 bad usage,
+/// 69 Pi could not start, 78 token file unusable or the port is not available.
 Future<void> main(List<String> args) async {
-  String? pi;
-  String? sessionDir;
-  for (var i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case '--pi' when i + 1 < args.length:
-        pi = args[++i];
-      case '--session-dir' when i + 1 < args.length:
-        sessionDir = args[++i];
-      default:
-        stderr.writeln(
-          'usage: helm_agentd [--pi <binary>] [--session-dir <dir>]',
-        );
-        exit(64);
-    }
+  final parsed = parseCliOptions(args);
+  switch (parsed) {
+    case CliHelp():
+      stdout.write(usageText);
+      exit(0);
+    case CliError(:final message):
+      stderr
+        ..writeln('helm_agentd: $message')
+        ..write(usageText);
+      exit(64);
+    case CliRun():
+      await _run(parsed);
   }
+}
 
-  final supervisor = PiSupervisor(
-    executable: pi ?? 'pi',
-    sessionDir: sessionDir,
-  );
-  supervisor.states.listen((s) => stderr.writeln('helm_agentd: ${s.name}'));
+Future<void> _run(CliRun o) async {
+  final supervisor = PiSupervisor(executable: o.pi, sessionDir: o.sessionDir);
+  supervisor.states.listen((s) => stderr.writeln('helm_agentd: pi ${s.name}'));
   supervisor.diagnostics.listen((d) => stderr.writeln('helm_agentd: $d'));
+  final bridge = AgentBridge(supervisor: supervisor);
+  final server = AgentServer(
+    bridge: bridge,
+    tokens: TokenStore(o.tokenFile),
+    host: o.host,
+    port: o.port,
+  );
 
   var stopping = false;
-  void stop(ProcessSignal _) {
+  Future<void> stop() async {
     if (stopping) return;
     stopping = true;
-    unawaited(supervisor.shutdown().then((_) => exit(0)));
+    await server.close();
+    bridge.dispose();
+    await supervisor.shutdown();
+    exit(0);
   }
 
-  ProcessSignal.sigint.watch().listen(stop);
-  ProcessSignal.sigterm.watch().listen(stop);
+  ProcessSignal.sigint.watch().listen((_) => unawaited(stop()));
+  ProcessSignal.sigterm.watch().listen((_) => unawaited(stop()));
+
+  try {
+    await server.start();
+  } on TokenFileException catch (e) {
+    stderr.writeln('helm_agentd: $e');
+    exit(78);
+  } on SocketException catch (e) {
+    stderr.writeln(
+      'helm_agentd: cannot listen on ${o.host}:${o.port}: ${e.message}',
+    );
+    exit(78);
+  }
+  stdout.writeln(
+    'helm_agentd: listening on ${server.address.address}:${server.port}',
+  );
+  stdout.writeln('helm_agentd: token file: ${o.tokenFile}');
 
   await supervisor.start();
+  bridge.start();
   if (supervisor.state == SupervisorState.failed) {
-    stderr.writeln('helm_agentd: could not start: ${supervisor.failure}');
+    stderr.writeln('helm_agentd: could not start Pi: ${supervisor.failure}');
+    await server.close();
     exit(69);
   }
 }
