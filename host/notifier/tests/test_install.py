@@ -34,7 +34,9 @@ class InstallScriptTest(IsolatedEnv):
         plist = os.path.join(plist_dir, "dev.helm.notifier.plist")
         with open(plist) as h:
             text = h.read()
-        self.assertNotIn("__", text)
+        # Look for the template's own placeholders, not any "__": a temp dir
+        # can be named tmp__xyz, which made this flaky on Linux CI.
+        self.assertNotRegex(text, r"__[A-Z_]+__")
         self.assertIn("<string>dev.helm.notifier</string>", text)
         self.assertIn(target + "/notifier.py", text)
         self.assertEqual(oct(os.stat(target).st_mode & 0o777), "0o700")

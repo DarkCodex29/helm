@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+
+    <!-- The binary is compiled ahead of time (dart compile exe), so launchd
+         never depends on a Dart SDK. The host argument is the Tailscale IPv4,
+         never all interfaces. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BINARY__</string>
+        <string>--host</string>
+        <string>__HOST__</string>
+        <string>--port</string>
+        <string>__PORT__</string>
+        <string>--pi</string>
+        <string>__PI__</string>
+        <string>--session-dir</string>
+        <string>__SESSION_DIR__</string>
+        <string>--token-file</string>
+        <string>__TOKEN_FILE__</string>
+    </array>
+
+    <!-- If the daemon dies the phone loses its agents, so launchd brings it
+         back. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- A daemon that exits 69/78 (pi missing, port busy) is retried at most
+         every 10 s, never in a tight loop. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Umask 077: launchd creates the out/err files itself. install.sh also
+         pre-creates them at 0600. -->
+    <key>Umask</key>
+    <integer>63</integer>
+
+    <key>StandardOutPath</key>
+    <string>__BASE_DIR__/agentd.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>__BASE_DIR__/agentd.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>__BASE_DIR__</string>
+
+    <!-- launchd does not inherit the login PATH. Pi needs node, which lives
+         next to pi. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__PATH__</string>
+    </dict>
+</dict>
+</plist>

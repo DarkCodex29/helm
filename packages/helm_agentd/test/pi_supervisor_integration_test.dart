@@ -143,6 +143,17 @@ void main() {
         probe: false,
       );
       await rig.sup.start();
+      // Shut down only once the agent has installed its SIGTERM handler;
+      // see stubborn_agent.dart for the startup race this closes.
+      final end = DateTime.now().add(_bound);
+      while (!rig.diagnostics.any(
+        (d) => d.text.contains('stubborn-agent-ready'),
+      )) {
+        if (DateTime.now().isAfter(end)) {
+          throw TimeoutException('stubborn agent never reported ready');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
       final sw = Stopwatch()..start();
       await rig.sup.shutdown().timeout(_bound);
       final code = await rig.spawned.single.exitCode.timeout(_bound);

@@ -219,6 +219,50 @@ brew install gentleman-programming/tap/gentle-ai
 Esta máquina la usa para CodeGraph (`gentle-ai codegraph init`). No
 hace falta para Helm.
 
+### helm-agentd (opcional, agentes desde el teléfono)
+
+El daemon que maneja Pi en modo RPC y sirve el protocolo al teléfono vive en
+`packages/helm_agentd`. Se instala como LaunchAgent con `host/agentd/install.sh`, que
+**compila** el daemon (`dart compile exe`) para que launchd no dependa de un SDK de Dart.
+
+```bash
+host/agentd/install.sh --dry-run   # muestra el plan, no escribe ni compila nada
+host/agentd/install.sh             # compila, renderiza el plist, imprime el launchctl
+host/agentd/install.sh --load      # igual, y además ejecuta launchctl bootstrap
+```
+
+- **Escucha solo en la IP de Tailscale.** La resuelve con `tailscale ip -4` (la primera
+  línea, que debe estar en `100.64.0.0/10`) o la tomás con `--host IP`. Un valor fuera de ese
+  rango y que no sea loopback exige `--allow-non-tailnet`; `0.0.0.0` se rechaza siempre.
+  Puerto por defecto 7480 (`--port`). La IP de Tailscale es estable por dispositivo, pero
+  cambia si el nodo se vuelve a registrar: en ese caso, volvé a correr `install.sh`.
+- **Pi con ruta absoluta.** Toma `pi` de `command -v pi` o de `--pi RUTA`, y la escribe en el
+  plist. launchd no hereda el PATH del login, así que el plist fija
+  `PATH=<carpeta de pi>:/usr/bin:/bin:/usr/sbin:/sbin` (Pi necesita `node`, que vive al lado).
+- **Todo en `~/.helm-agentd/`** (o `HELM_AGENTD_DIR` / `--base-dir`), directorios `0700`:
+  `bin/helm-agentd` (`0700`), `sessions/`, y `agentd.out` / `agentd.err` en `0600`.
+  El plist fija `Umask` 077.
+- **El token** vive en `~/.helm-agentd/token` (`0600`). Lo crea el daemon al primer arranque;
+  el instalador nunca lo crea, lo lee ni lo imprime, solo muestra la ruta. El teléfono lo
+  copia **una sola vez** por la conexión SFTP existente y lo guarda en el Keychain del iPhone.
+- **Reintentos.** El plist fija `ThrottleInterval` en 10: si el daemon sale con error (por
+  ejemplo 69 o 78: Pi no encontrado o puerto ocupado), launchd lo reintenta como mucho cada
+  10 s, nunca en bucle cerrado. Si se reinicia sin parar, mirá `~/.helm-agentd/agentd.err` y
+  `agentd.out`.
+- **Validación.** `--host` y la IP de `tailscale ip -4` deben ser un IPv4 canónico `a.b.c.d`
+  (sin ceros a la izquierda, sin puntos sobrantes ni espacios); un `--host ''` vacío es un
+  error de uso. Los valores con saltos de línea o caracteres de control se rechazan.
+- Etiqueta `dev.helm.agentd`. No detiene ni descarga ningún agente existente. Es idempotente.
+  Tests: `python3 -m unittest discover -s host/agentd/tests`.
+
+Desinstalar:
+
+```bash
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/dev.helm.agentd.plist
+rm ~/Library/LaunchAgents/dev.helm.agentd.plist
+rm -r ~/.helm-agentd    # opcional: borra también el token y las sesiones
+```
+
 ### helm-notifier (opcional, notificaciones)
 
 El daemon que se suscribe a herdr y empuja a FCM vive en este repo, en

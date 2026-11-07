@@ -121,3 +121,19 @@ jobs:
 
       - name: Test
         run: python3 -m unittest discover -s host/notifier/tests
+
+  # The agentd installer is POSIX sh; dart, tailscale, pi and launchctl are
+  # fakes placed on PATH by the tests, so nothing real is compiled or loaded.
+  agentd_installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Test
+        run: python3 -m unittest discover -s host/agentd/tests
