@@ -45,8 +45,9 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 | T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | 95ca413, 2b41ff8, 937ce9e, 9772a73, 2bf99aa (PR #11, merge c9f8228) |
 | T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | 4cb1f93, adc4230, 50157f3, eb52fb2 (PR #12, merge dca8941) |
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer): this task covers four behavior-preserving slices (types/timings/factories, `ObservableValueNotifier`, `OutputSettle`, `HostQueries`) | worker | |
-| T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | worker | |
-| T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | worker | |
+| T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | worker |  44f1543, c371618, 37c7e07 (pushed to main) |
+| T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | worker |  9419a27, bec4790 (pushed to main) |
+| T5d | S4 | Pin the host probe's internal order (publication, adoption, advisories, notice) with an event-trace test; add explicit per-await bounds to its characterization tests | pending | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
 ## Log
@@ -240,3 +241,14 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   position in `connect` and both reset points. It creates no Timer. String
   literals diffed against origin/main across `data/`: only imports and a
   second `'TerminalSession'` logger tag differ.
+- **L17** — Independent verifier on T5c: no production regression. The
+  probe keeps its steps and order (probe, report, selection, adoption,
+  log, advisories, notice), comments and literals match, the 18
+  characterization tests pass on the pre-move code. Two claims were
+  corrected rather than code: `_hostProbe` is NOT first touched in
+  `connect` (the `hostReport`/`multiplexerSelection` getters and a
+  dispose before connect also initialise it; its constructor is inert, so
+  behaviour is the same), and the tests pin outcomes, not the order
+  between publication, adoption, advisories and the notice, which rests on
+  reading the code, as it did before the move. Follow-up T5d: an ordering
+  trace test for the probe and explicit per-await bounds in its tests.
