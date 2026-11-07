@@ -183,10 +183,7 @@ class DownloadDestinationService {
       // nothing, so keeping it would only let the UI claim a destination
       // that cannot exist.
       await _store.clear();
-      return PublishFailed(
-        PublishFailure.destinationMissing,
-        detail: '$error',
-      );
+      return PublishFailed(PublishFailure.destinationMissing, detail: '$error');
     }
 
     // The folder is still there and the write did not land: out of space,

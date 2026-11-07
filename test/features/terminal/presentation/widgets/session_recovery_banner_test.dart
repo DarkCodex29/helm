@@ -12,9 +12,7 @@ import 'package:helm/features/terminal/presentation/widgets/session_recovery_ban
 /// the hit area at the text's own height — roughly 24dp, half the documented
 /// minimum, on the two controls with the least room for a mis-tap.
 void main() {
-  Widget host(Widget child) => MaterialApp(
-    home: Scaffold(body: child),
-  );
+  Widget host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
   SessionRecoveryBanner banner({
     VoidCallback? onRecover,
@@ -72,10 +70,7 @@ void main() {
 
       await tester.pumpWidget(
         host(
-          banner(
-            onRecover: () => recovered++,
-            onDiscard: () => discarded++,
-          ),
+          banner(onRecover: () => recovered++, onDiscard: () => discarded++),
         ),
       );
 

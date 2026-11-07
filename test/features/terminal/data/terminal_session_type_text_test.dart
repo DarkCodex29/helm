@@ -107,10 +107,7 @@ String _decode(FakeSSHSession remote) =>
     attachOpener: (client, command, pty) async => remote,
   );
   service.queueConnectSuccess(
-    SSHConnectionResult(
-      client: _buildFakeClient(),
-      session: FakeSSHSession(),
-    ),
+    SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
   );
   return (session: session, remote: remote);
 }
@@ -242,17 +239,19 @@ void main() {
       await result.session.dispose();
     });
 
-    test('an embedded end-of-paste marker cannot close the paste early',
-        () async {
-      final result = await _session(adapter: FakeAgentAdapter());
-      result.session.terminal.setBracketedPasteMode(true);
+    test(
+      'an embedded end-of-paste marker cannot close the paste early',
+      () async {
+        final result = await _session(adapter: FakeAgentAdapter());
+        result.session.terminal.setBracketedPasteMode(true);
 
-      result.session.typeAtPrompt('hi\x1b[201~\x03rm -rf x');
+        result.session.typeAtPrompt('hi\x1b[201~\x03rm -rf x');
 
-      expect(_decode(result.remote), '\x1b[200~hi[201~rm -rf x\x1b[201~');
+        expect(_decode(result.remote), '\x1b[200~hi[201~rm -rf x\x1b[201~');
 
-      await result.session.dispose();
-    });
+        await result.session.dispose();
+      },
+    );
 
     test('sends plain text when the remote never enabled the mode', () async {
       final result = await _session(adapter: FakeAgentAdapter());
@@ -294,11 +293,11 @@ void main() {
   // window reached NOWHERE, confirmed by scanning every herdr pane with a
   // verified-working instrument. The fix is to hold delivery until the
   // remote has gone quiet, which is exactly what this resolves.
-  group('waitForOutputToSettle - the window a freshly-attached remote needs', () {
-    test(
-      'resolves once the remote has been silent for '
-      'kOutputSettleQuietWindow',
-      () async {
+  group(
+    'waitForOutputToSettle - the window a freshly-attached remote needs',
+    () {
+      test('resolves once the remote has been silent for '
+          'kOutputSettleQuietWindow', () async {
         final built = _unconnectedSession(adapter: FakeAgentAdapter());
 
         FakeAsync().run((async) {
@@ -325,13 +324,10 @@ void main() {
         });
 
         await built.session.dispose();
-      },
-    );
+      });
 
-    test(
-      'output arriving during the quiet window resets it, deferring '
-      'delivery',
-      () async {
+      test('output arriving during the quiet window resets it, deferring '
+          'delivery', () async {
         final built = _unconnectedSession(adapter: FakeAgentAdapter());
 
         FakeAsync().run((async) {
@@ -365,13 +361,10 @@ void main() {
         });
 
         await built.session.dispose();
-      },
-    );
+      });
 
-    test(
-      'a remote that never goes quiet is still delivered once '
-      'kOutputSettleCap elapses',
-      () async {
+      test('a remote that never goes quiet is still delivered once '
+          'kOutputSettleCap elapses', () async {
         final built = _unconnectedSession(adapter: FakeAgentAdapter());
 
         FakeAsync().run((async) {
@@ -410,27 +403,27 @@ void main() {
         });
 
         await built.session.dispose();
-      },
-    );
+      });
 
-    test(
-      'a disconnected session resolves immediately - nothing to settle',
-      () async {
-        final result = await _session(
-          adapter: FakeAgentAdapter(),
-          connect: false,
-        );
+      test(
+        'a disconnected session resolves immediately - nothing to settle',
+        () async {
+          final result = await _session(
+            adapter: FakeAgentAdapter(),
+            connect: false,
+          );
 
-        var settled = false;
-        unawaited(
-          result.session.waitForOutputToSettle().then((_) => settled = true),
-        );
-        await pumpEventQueue();
+          var settled = false;
+          unawaited(
+            result.session.waitForOutputToSettle().then((_) => settled = true),
+          );
+          await pumpEventQueue();
 
-        expect(settled, isTrue);
+          expect(settled, isTrue);
 
-        await result.session.dispose();
-      },
-    );
-  });
+          await result.session.dispose();
+        },
+      );
+    },
+  );
 }

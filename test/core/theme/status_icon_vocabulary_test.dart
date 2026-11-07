@@ -90,7 +90,8 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason: 'replace the em dash with "-" in these strings:\n'
+      reason:
+          'replace the em dash with "-" in these strings:\n'
           '${offenders.join('\n')}',
     );
   });

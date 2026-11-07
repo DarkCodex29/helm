@@ -60,28 +60,25 @@ void main() {
       );
     });
 
-    test(
-      'reports a binary that is installed but off the inherited PATH as '
-      'present, not missing',
-      () {
-        final selection = resolveMultiplexer(
-          requested: MultiplexerId.herdr,
-          report: _realHostReport(),
-        );
+    test('reports a binary that is installed but off the inherited PATH as '
+        'present, not missing', () {
+      final selection = resolveMultiplexer(
+        requested: MultiplexerId.herdr,
+        report: _realHostReport(),
+      );
 
-        expect(
-          selection,
-          isA<MultiplexerVerified>()
-              .having((s) => s.id, 'id', MultiplexerId.herdr)
-              .having(
-                (s) => s.absPath,
-                'absPath',
-                '/home/deployer/.local/bin/herdr',
-              )
-              .having((s) => s.onInheritedPath, 'onInheritedPath', isFalse),
-        );
-      },
-    );
+      expect(
+        selection,
+        isA<MultiplexerVerified>()
+            .having((s) => s.id, 'id', MultiplexerId.herdr)
+            .having(
+              (s) => s.absPath,
+              'absPath',
+              '/home/deployer/.local/bin/herdr',
+            )
+            .having((s) => s.onInheritedPath, 'onInheritedPath', isFalse),
+      );
+    });
   });
 
   group('resolveMultiplexer - the request is positively absent', () {
@@ -224,7 +221,11 @@ void main() {
 
       expect(
         selection,
-        isA<MultiplexerVerified>().having((s) => s.id, 'id', MultiplexerId.tmux),
+        isA<MultiplexerVerified>().having(
+          (s) => s.id,
+          'id',
+          MultiplexerId.tmux,
+        ),
       );
     });
 
@@ -382,7 +383,11 @@ void main() {
 
       expect(
         selection,
-        isA<MultiplexerVerified>().having((s) => s.id, 'id', MultiplexerId.tmux),
+        isA<MultiplexerVerified>().having(
+          (s) => s.id,
+          'id',
+          MultiplexerId.tmux,
+        ),
       );
     });
 

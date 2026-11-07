@@ -68,8 +68,9 @@ Future<TerminalSession> _connectedSession({String? multiplexer}) async {
   return session;
 }
 
-Widget _host(TerminalSession session) =>
-    MaterialApp(home: Scaffold(body: HelmTerminalView(session: session)));
+Widget _host(TerminalSession session) => MaterialApp(
+  home: Scaffold(body: HelmTerminalView(session: session)),
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

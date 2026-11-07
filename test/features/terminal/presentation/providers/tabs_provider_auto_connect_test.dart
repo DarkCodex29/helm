@@ -68,116 +68,95 @@ void main() {
   });
 
   group('TabsNotifier.autoConnectDefault', () {
-    test(
-      'opens a session for the profile the user marked default, with no '
-      'user action - this is the whole point of the "Opens automatically '
-      'on launch" copy the profile editor already shows',
-      () async {
-        _seedProfiles([_otherProfile, _defaultProfile]);
-        ssh.queueConnectError(const SocketFailure());
+    test('opens a session for the profile the user marked default, with no '
+        'user action - this is the whole point of the "Opens automatically '
+        'on launch" copy the profile editor already shows', () async {
+      _seedProfiles([_otherProfile, _defaultProfile]);
+      ssh.queueConnectError(const SocketFailure());
 
-        final decision = await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: false);
+      final decision = await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: false);
 
-        expect(decision, isA<AutoConnectStart>());
-        expect(container.read(tabsProvider).tabs, hasLength(1));
-        expect(
-          container.read(tabsProvider).tabs.single.profile.id,
-          'p-default',
-        );
-        // The host that was actually dialed, not merely the tab's label.
-        expect(ssh.connectCalls.single.profile.id, 'p-default');
-      },
-    );
+      expect(decision, isA<AutoConnectStart>());
+      expect(container.read(tabsProvider).tabs, hasLength(1));
+      expect(container.read(tabsProvider).tabs.single.profile.id, 'p-default');
+      // The host that was actually dialed, not merely the tab's label.
+      expect(ssh.connectCalls.single.profile.id, 'p-default');
+    });
 
-    test(
-      'an unreachable host does NOT throw out of auto-connect and does NOT '
-      'strand Home - the tab is still there, carrying the failure',
-      () async {
-        _seedProfiles([_defaultProfile]);
-        ssh.queueConnectError(const SocketFailure());
+    test('an unreachable host does NOT throw out of auto-connect and does NOT '
+        'strand Home - the tab is still there, carrying the failure', () async {
+      _seedProfiles([_defaultProfile]);
+      ssh.queueConnectError(const SocketFailure());
 
-        // No expect(..., throwsA(...)) wrapper on purpose: an exception
-        // escaping here would propagate out of HomeScreen's post-frame
-        // callback, and an unroutable host on launch would take the app
-        // down instead of the session.
-        await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: false);
+      // No expect(..., throwsA(...)) wrapper on purpose: an exception
+      // escaping here would propagate out of HomeScreen's post-frame
+      // callback, and an unroutable host on launch would take the app
+      // down instead of the session.
+      await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: false);
 
-        final tabs = container.read(tabsProvider).tabs;
-        expect(tabs, hasLength(1));
-        expect(
-          tabs.single.session.statusNotifier.value,
-          ConnectionStatus.error,
-        );
-      },
-    );
+      final tabs = container.read(tabsProvider).tabs;
+      expect(tabs, hasLength(1));
+      expect(tabs.single.session.statusNotifier.value, ConnectionStatus.error);
+    });
 
-    test(
-      'stands down while a crash-recovery offer is outstanding - accepting '
-      'that offer reopens this very profile, and nothing must dial in '
-      'parallel with it',
-      () async {
-        _seedProfiles([_defaultProfile]);
+    test('stands down while a crash-recovery offer is outstanding - accepting '
+        'that offer reopens this very profile, and nothing must dial in '
+        'parallel with it', () async {
+      _seedProfiles([_defaultProfile]);
 
-        final decision = await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: true);
+      final decision = await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: true);
 
-        expect(
-          (decision as AutoConnectSkip).reason,
-          AutoConnectSkipReason.recoveryPending,
-        );
-        expect(container.read(tabsProvider).tabs, isEmpty);
-        expect(ssh.connectCalls, isEmpty);
-      },
-    );
+      expect(
+        (decision as AutoConnectSkip).reason,
+        AutoConnectSkipReason.recoveryPending,
+      );
+      expect(container.read(tabsProvider).tabs, isEmpty);
+      expect(ssh.connectCalls, isEmpty);
+    });
 
-    test(
-      'does not open a SECOND session when a recovered one is already on '
-      'that profile - one session, not one per launch path',
-      () async {
-        _seedProfiles([_defaultProfile]);
-        ssh.queueConnectError(const SocketFailure());
+    test('does not open a SECOND session when a recovered one is already on '
+        'that profile - one session, not one per launch path', () async {
+      _seedProfiles([_defaultProfile]);
+      ssh.queueConnectError(const SocketFailure());
 
-        // Stand in for a completed crash recovery: a tab already exists
-        // for the default profile before auto-connect is evaluated.
-        await container.read(tabsProvider.notifier).addTab(_defaultProfile);
-        expect(ssh.connectCalls, hasLength(1));
+      // Stand in for a completed crash recovery: a tab already exists
+      // for the default profile before auto-connect is evaluated.
+      await container.read(tabsProvider.notifier).addTab(_defaultProfile);
+      expect(ssh.connectCalls, hasLength(1));
 
-        final decision = await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: false);
+      final decision = await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: false);
 
-        expect(
-          (decision as AutoConnectSkip).reason,
-          AutoConnectSkipReason.alreadyOpen,
-        );
-        expect(container.read(tabsProvider).tabs, hasLength(1));
-        expect(ssh.connectCalls, hasLength(1));
-      },
-    );
+      expect(
+        (decision as AutoConnectSkip).reason,
+        AutoConnectSkipReason.alreadyOpen,
+      );
+      expect(container.read(tabsProvider).tabs, hasLength(1));
+      expect(ssh.connectCalls, hasLength(1));
+    });
 
-    test(
-      'with NO profile marked default, launch is left exactly as it was - '
-      'no tab, no dial, today empty state',
-      () async {
-        _seedProfiles([_otherProfile]);
+    test('with NO profile marked default, launch is left exactly as it was - '
+        'no tab, no dial, today empty state', () async {
+      _seedProfiles([_otherProfile]);
 
-        final decision = await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: false);
+      final decision = await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: false);
 
-        expect(
-          (decision as AutoConnectSkip).reason,
-          AutoConnectSkipReason.noDefaultProfile,
-        );
-        expect(container.read(tabsProvider).tabs, isEmpty);
-        expect(ssh.connectCalls, isEmpty);
-      },
-    );
+      expect(
+        (decision as AutoConnectSkip).reason,
+        AutoConnectSkipReason.noDefaultProfile,
+      );
+      expect(container.read(tabsProvider).tabs, isEmpty);
+      expect(ssh.connectCalls, isEmpty);
+    });
 
     test('with no profiles saved at all, it dials nothing', () async {
       _seedProfiles(const []);

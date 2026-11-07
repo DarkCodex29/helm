@@ -704,22 +704,16 @@ void main() {
       await expectLater(adapter.listPanes(), throwsStateError);
     });
 
-    test(
-      'a transport that gave up is UNREACHABLE, never a crash - this is the '
-      'failure caught on a real device, where a timed-out pane list was read '
-      'as herdr answering with an unrecognized error and took the vitality '
-      'check down with a StateError',
-      () async {
-        runner.whenRun(
-          _paneListCommand,
-          const HostCommandResult(timedOut: true),
-        );
+    test('a transport that gave up is UNREACHABLE, never a crash - this is the '
+        'failure caught on a real device, where a timed-out pane list was read '
+        'as herdr answering with an unrecognized error and took the vitality '
+        'check down with a StateError', () async {
+      runner.whenRun(_paneListCommand, const HostCommandResult(timedOut: true));
 
-        final result = await adapter.listPanes();
+      final result = await adapter.listPanes();
 
-        expect(result, isA<MuxPaneServerNotRunning>());
-      },
-    );
+      expect(result, isA<MuxPaneServerNotRunning>());
+    });
   });
 
   group('listPanes command shape', () {
@@ -1305,21 +1299,18 @@ void main() {
       expect(result, isA<MuxServerNotRunning>());
     });
 
-    test(
-      'a transport that gave up reports the same typed failure state, and '
-      'reaches it deliberately rather than by a null exit code happening to '
-      'compare unequal to zero',
-      () async {
-        runner.whenRun(
-          _sessionListCommand,
-          const HostCommandResult(timedOut: true),
-        );
+    test('a transport that gave up reports the same typed failure state, and '
+        'reaches it deliberately rather than by a null exit code happening to '
+        'compare unequal to zero', () async {
+      runner.whenRun(
+        _sessionListCommand,
+        const HostCommandResult(timedOut: true),
+      );
 
-        final result = await adapter.listSessions();
+      final result = await adapter.listSessions();
 
-        expect(result, isA<MuxServerNotRunning>());
-      },
-    );
+      expect(result, isA<MuxServerNotRunning>());
+    });
 
     test('a genuinely empty session list is reported when the server IS '
         'running and herdr has zero known sessions', () async {
@@ -1388,21 +1379,18 @@ void main() {
       expect(detection.determined, isTrue);
     });
 
-    test(
-      'a transport that never answered is UNDETERMINED, never NOT INSTALLED '
-      '- a host that did not reply has said nothing about whether the binary '
-      'is there, and a caller acts on that difference by picking a different '
-      'multiplexer entirely',
-      () async {
-        runner.whenRun(_detectCommand, const HostCommandResult(timedOut: true));
+    test('a transport that never answered is UNDETERMINED, never NOT INSTALLED '
+        '- a host that did not reply has said nothing about whether the binary '
+        'is there, and a caller acts on that difference by picking a different '
+        'multiplexer entirely', () async {
+      runner.whenRun(_detectCommand, const HostCommandResult(timedOut: true));
 
-        final detection = await adapter.detect();
+      final detection = await adapter.detect();
 
-        expect(detection.determined, isFalse);
-        expect(detection.absPath, isNull);
-        expect(detection.version, isNull);
-      },
-    );
+      expect(detection.determined, isFalse);
+      expect(detection.absPath, isNull);
+      expect(detection.version, isNull);
+    });
   });
 
   group('hasSession', () {

@@ -31,7 +31,11 @@ void main() {
     test('maps a scripted reply to a PickedDocument', () async {
       setHandler((call) async {
         expect(call.method, 'pickFile');
-        return {'path': '/tmp/pick/report.docx', 'name': 'report.docx', 'length': 2048};
+        return {
+          'path': '/tmp/pick/report.docx',
+          'name': 'report.docx',
+          'length': 2048,
+        };
       });
       final gateway = IosDocumentTreeGateway(channel: channel);
 
@@ -60,7 +64,9 @@ void main() {
     });
 
     test('returns null on a PlatformException', () async {
-      setHandler((call) async => throw PlatformException(code: 'ALREADY_PICKING'));
+      setHandler(
+        (call) async => throw PlatformException(code: 'ALREADY_PICKING'),
+      );
       final gateway = IosDocumentTreeGateway(channel: channel);
 
       expect(await gateway.pickFile(), isNull);
@@ -139,11 +145,7 @@ void main() {
     test('copyInto throws UnsupportedError', () {
       final gateway = IosDocumentTreeGateway(channel: channel);
       expect(
-        () => gateway.copyInto(
-          source: File('x'),
-          treeUri: 'x',
-          fileName: 'x',
-        ),
+        () => gateway.copyInto(source: File('x'), treeUri: 'x', fileName: 'x'),
         throwsUnsupportedError,
       );
     });
@@ -158,7 +160,11 @@ void main() {
     'UploadSourcePicker over the iOS gateway adapts a scripted pick',
     () async {
       setHandler((call) async {
-        return {'path': '/tmp/pick/report.docx', 'name': 'report.docx', 'length': 2048};
+        return {
+          'path': '/tmp/pick/report.docx',
+          'name': 'report.docx',
+          'length': 2048,
+        };
       });
       final DocumentTreeGateway gateway = IosDocumentTreeGateway(
         channel: channel,
@@ -176,17 +182,11 @@ void main() {
     },
   );
 
-  test(
-    'UploadSourcePicker(supportsPicking: false).pick() still returns null '
-    '(unchanged Android/iOS-off behaviour)',
-    () async {
-      final gateway = IosDocumentTreeGateway(channel: channel);
-      final picker = UploadSourcePicker(
-        gateway: gateway,
-        supportsPicking: false,
-      );
+  test('UploadSourcePicker(supportsPicking: false).pick() still returns null '
+      '(unchanged Android/iOS-off behaviour)', () async {
+    final gateway = IosDocumentTreeGateway(channel: channel);
+    final picker = UploadSourcePicker(gateway: gateway, supportsPicking: false);
 
-      expect(await picker.pick(), isNull);
-    },
-  );
+    expect(await picker.pick(), isNull);
+  });
 }

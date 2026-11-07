@@ -405,21 +405,23 @@ void main() {
       expect(await service.resolveChannel(), isA<FcmChannel>());
     });
 
-    test('ntfy with the SAME topic that gets registered, without Firebase',
-        () async {
-      gateway.initializeError = UnsupportedError('no ios options');
-      final runner = _Runner();
-      await service.start();
-      await service.onAgentTrackingStarted(runner);
+    test(
+      'ntfy with the SAME topic that gets registered, without Firebase',
+      () async {
+        gateway.initializeError = UnsupportedError('no ios options');
+        final runner = _Runner();
+        await service.start();
+        await service.onAgentTrackingStarted(runner);
 
-      final channel = await service.resolveChannel();
+        final channel = await service.resolveChannel();
 
-      expect(channel, isA<NtfyChannel>());
-      expect(
-        runner.scripts.single,
-        contains('\n${(channel as NtfyChannel).topic}\n'),
-      );
-    });
+        expect(channel, isA<NtfyChannel>());
+        expect(
+          runner.scripts.single,
+          contains('\n${(channel as NtfyChannel).topic}\n'),
+        );
+      },
+    );
 
     test('unavailable, not ntfy, when the token lookup throws', () async {
       // Attach registers nothing in this case, so Settings must not offer

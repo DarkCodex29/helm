@@ -36,53 +36,44 @@ void main() {
       expect(result.legacyValue, isNull);
     });
 
-    test('non-empty input resolves trimmed to the same value on both fields', () {
-      final result = resolveOptionalSessionReference('  prod  ');
+    test(
+      'non-empty input resolves trimmed to the same value on both fields',
+      () {
+        final result = resolveOptionalSessionReference('  prod  ');
 
-      expect(result.sessionRef, 'prod');
-      expect(result.legacyValue, 'prod');
-    });
+        expect(result.sessionRef, 'prod');
+        expect(result.legacyValue, 'prod');
+      },
+    );
   });
 
-  group(
-    'resolveRequiredSessionReference '
-    '(ProjectShortcut.tmuxSession / TabSnapshot.tmuxSessionName)',
-    () {
-      test('null input falls back to fallback for both fields', () {
-        final result = resolveRequiredSessionReference(
-          null,
-          fallback: 'helm',
-        );
+  group('resolveRequiredSessionReference '
+      '(ProjectShortcut.tmuxSession / TabSnapshot.tmuxSessionName)', () {
+    test('null input falls back to fallback for both fields', () {
+      final result = resolveRequiredSessionReference(null, fallback: 'helm');
 
-        expect(result.sessionRef, 'helm');
-        expect(result.legacyValue, 'helm');
-      });
+      expect(result.sessionRef, 'helm');
+      expect(result.legacyValue, 'helm');
+    });
 
-      test('whitespace-only input falls back to fallback for both fields', () {
-        final result = resolveRequiredSessionReference(
-          '   ',
-          fallback: 'helm',
-        );
+    test('whitespace-only input falls back to fallback for both fields', () {
+      final result = resolveRequiredSessionReference('   ', fallback: 'helm');
 
-        expect(result.sessionRef, 'helm');
-        expect(result.legacyValue, 'helm');
-      });
+      expect(result.sessionRef, 'helm');
+      expect(result.legacyValue, 'helm');
+    });
 
-      test(
-        'non-empty input resolves trimmed to the same value on both fields, '
-        'ignoring the fallback',
-        () {
-          final result = resolveRequiredSessionReference(
-            '  metalpren  ',
-            fallback: 'helm',
-          );
-
-          expect(result.sessionRef, 'metalpren');
-          expect(result.legacyValue, 'metalpren');
-        },
+    test('non-empty input resolves trimmed to the same value on both fields, '
+        'ignoring the fallback', () {
+      final result = resolveRequiredSessionReference(
+        '  metalpren  ',
+        fallback: 'helm',
       );
-    },
-  );
+
+      expect(result.sessionRef, 'metalpren');
+      expect(result.legacyValue, 'metalpren');
+    });
+  });
 
   group('encodeMultiplexer', () {
     test('encodes each MultiplexerId to its stable .name string', () {

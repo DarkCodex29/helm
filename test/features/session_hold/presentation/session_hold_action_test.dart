@@ -46,7 +46,9 @@ void main() {
   // `find.bySemanticsIdentifier` would need the semantics tree switched
   // on; matching the widget needs nothing.
   final holdToggle = find.byWidgetPredicate(
-    (w) => w is Semantics && w.properties.identifier == SessionHoldSemantics.toggle,
+    (w) =>
+        w is Semantics &&
+        w.properties.identifier == SessionHoldSemantics.toggle,
   );
 
   testWidgets('renders nothing without a session', (tester) async {

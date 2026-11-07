@@ -29,7 +29,8 @@ import '../../../helpers/fake_document_tree_gateway.dart';
 import '../../../helpers/fake_sftp_session.dart';
 
 const _folder = DownloadDestination(
-  uri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
+  uri:
+      'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
   name: 'Helm',
 );
 
@@ -82,8 +83,9 @@ void main() {
   FileDownloadNotifier notifierIn(
     ProviderContainer container, {
     ViewerOutcome viewer = ViewerOutcome.opened,
-  }) => container.read(fileDownloadProvider.notifier)
-    ..debugUseViewer((_) async => viewer);
+  }) =>
+      container.read(fileDownloadProvider.notifier)
+        ..debugUseViewer((_) async => viewer);
 
   group('with a folder chosen', () {
     test('the file is copied there and the state says where', () async {
@@ -106,22 +108,25 @@ void main() {
       expect(gateway.copiedNames, ['report.docx']);
     });
 
-    test('a name already taken is saved beside it, under the real name', () async {
-      await store.write(_folder);
-      final gateway = FakeDocumentTreeGateway()
-        ..existingNames.add('report.docx');
-      final container = containerWith(gateway);
-      addTearDown(container.dispose);
+    test(
+      'a name already taken is saved beside it, under the real name',
+      () async {
+        await store.write(_folder);
+        final gateway = FakeDocumentTreeGateway()
+          ..existingNames.add('report.docx');
+        final container = containerWith(gateway);
+        addTearDown(container.dispose);
 
-      await notifierIn(container).start(
-        downloadOf('/home/gian/report.docx'),
-        _entry('/home/gian/report.docx'),
-      );
+        await notifierIn(container).start(
+          downloadOf('/home/gian/report.docx'),
+          _entry('/home/gian/report.docx'),
+        );
 
-      final published =
-          container.read(fileDownloadProvider).publish! as PublishedToFolder;
-      expect(published.fileName, 'report(1).docx');
-    });
+        final published =
+            container.read(fileDownloadProvider).publish! as PublishedToFolder;
+        expect(published.fileName, 'report(1).docx');
+      },
+    );
   });
 
   group('with no folder chosen', () {

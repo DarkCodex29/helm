@@ -52,12 +52,13 @@ void main() {
 
   /// Everything the service wrote, so a test can assert on leftovers as
   /// well as on the file it was asked for.
-  List<String> filesOnDisk() => destination
-      .listSync(recursive: true)
-      .whereType<File>()
-      .map((f) => f.path.split('/').last)
-      .toList()
-    ..sort();
+  List<String> filesOnDisk() =>
+      destination
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map((f) => f.path.split('/').last)
+          .toList()
+        ..sort();
 
   group('a successful download', () {
     test('writes the exact bytes the server sent', () async {
@@ -98,21 +99,24 @@ void main() {
       expect(session.openedHandles.single.closed, isTrue);
     });
 
-    test('holds far less in flight than the library would by default', () async {
-      final session = FakeSftpSession(
-        files: {'/home/gian/report.docx': FakeRemoteFile(_bytes(100))},
-      );
+    test(
+      'holds far less in flight than the library would by default',
+      () async {
+        final session = FakeSftpSession(
+          files: {'/home/gian/report.docx': FakeRemoteFile(_bytes(100))},
+        );
 
-      await serviceFor(session).download(_entry('/home/gian/report.docx'));
+        await serviceFor(session).download(_entry('/home/gian/report.docx'));
 
-      final handle = session.openedHandles.single;
-      final inFlight =
-          handle.requestedChunkSize! * handle.requestedMaxPendingRequests!;
-      // dartssh2's own download defaults are 64 KiB x 128 = 8 MiB
-      // (`sftp_client.dart:32-33`).
-      expect(inFlight, lessThanOrEqualTo(512 * 1024));
-      expect(inFlight, SftpDownloadService.pipelineBytesInFlight);
-    });
+        final handle = session.openedHandles.single;
+        final inFlight =
+            handle.requestedChunkSize! * handle.requestedMaxPendingRequests!;
+        // dartssh2's own download defaults are 64 KiB x 128 = 8 MiB
+        // (`sftp_client.dart:32-33`).
+        expect(inFlight, lessThanOrEqualTo(512 * 1024));
+        expect(inFlight, SftpDownloadService.pipelineBytesInFlight);
+      },
+    );
   });
 
   group('progress', () {
@@ -133,29 +137,36 @@ void main() {
       expect(seen, [12, 25, 37, 50, 62, 75, 87, 100]);
     });
 
-    test('is throttled to whole percent CHANGES, not one event per chunk', () async {
-      // 400 chunks over a file big enough that most of them do not move
-      // the percentage at all. An unthrottled callback fires 400 times to
-      // redraw a bar with 101 distinct states; a throttled one cannot
-      // exceed 100 events, and never repeats a number.
-      final session = FakeSftpSession(
-        files: {
-          '/home/gian/huge.bin': FakeRemoteFile(
-            _bytes(400 * SftpDownloadService.chunkSize),
-          ),
-        },
-      );
-      final seen = <int>[];
+    test(
+      'is throttled to whole percent CHANGES, not one event per chunk',
+      () async {
+        // 400 chunks over a file big enough that most of them do not move
+        // the percentage at all. An unthrottled callback fires 400 times to
+        // redraw a bar with 101 distinct states; a throttled one cannot
+        // exceed 100 events, and never repeats a number.
+        final session = FakeSftpSession(
+          files: {
+            '/home/gian/huge.bin': FakeRemoteFile(
+              _bytes(400 * SftpDownloadService.chunkSize),
+            ),
+          },
+        );
+        final seen = <int>[];
 
-      await serviceFor(
-        session,
-      ).download(_entry('/home/gian/huge.bin'), onProgress: seen.add);
+        await serviceFor(
+          session,
+        ).download(_entry('/home/gian/huge.bin'), onProgress: seen.add);
 
-      expect(seen.length, lessThan(400), reason: 'fewer events than chunks');
-      expect(seen.toSet().length, seen.length, reason: 'no percentage repeats');
-      expect(seen, orderedEquals(List<int>.from(seen)..sort()));
-      expect(seen.last, 100);
-    });
+        expect(seen.length, lessThan(400), reason: 'fewer events than chunks');
+        expect(
+          seen.toSet().length,
+          seen.length,
+          reason: 'no percentage repeats',
+        );
+        expect(seen, orderedEquals(List<int>.from(seen)..sort()));
+        expect(seen.last, 100);
+      },
+    );
   });
 
   group('cancellation', () {
@@ -183,25 +194,28 @@ void main() {
       expect(outcome, isNot(isA<DownloadFailed>()));
     });
 
-    test('leaves nothing on disk that could be mistaken for the file', () async {
-      final session = FakeSftpSession(
-        files: {
-          '/home/gian/big.bin': FakeRemoteFile(
-            _bytes(200 * 1024),
-            chunkGap: const Duration(milliseconds: 5),
-          ),
-        },
-      );
-      final cancellation = DownloadCancellation();
+    test(
+      'leaves nothing on disk that could be mistaken for the file',
+      () async {
+        final session = FakeSftpSession(
+          files: {
+            '/home/gian/big.bin': FakeRemoteFile(
+              _bytes(200 * 1024),
+              chunkGap: const Duration(milliseconds: 5),
+            ),
+          },
+        );
+        final cancellation = DownloadCancellation();
 
-      await serviceFor(session).download(
-        _entry('/home/gian/big.bin'),
-        cancellation: cancellation,
-        onProgress: (_) => cancellation.cancel(),
-      );
+        await serviceFor(session).download(
+          _entry('/home/gian/big.bin'),
+          cancellation: cancellation,
+          onProgress: (_) => cancellation.cancel(),
+        );
 
-      expect(filesOnDisk(), isEmpty);
-    });
+        expect(filesOnDisk(), isEmpty);
+      },
+    );
 
     test('still closes the transfer session and the handle', () async {
       final session = FakeSftpSession(
@@ -224,21 +238,23 @@ void main() {
       expect(session.openedHandles.single.closed, isTrue);
     });
 
-    test('a download cancelled before it starts never opens a handle', () async {
-      final session = FakeSftpSession(
-        files: {'/home/gian/big.bin': FakeRemoteFile(_bytes(1000))},
-      );
-      final cancellation = DownloadCancellation()..cancel();
+    test(
+      'a download cancelled before it starts never opens a handle',
+      () async {
+        final session = FakeSftpSession(
+          files: {'/home/gian/big.bin': FakeRemoteFile(_bytes(1000))},
+        );
+        final cancellation = DownloadCancellation()..cancel();
 
-      final outcome = await serviceFor(session).download(
-        _entry('/home/gian/big.bin'),
-        cancellation: cancellation,
-      );
+        final outcome = await serviceFor(
+          session,
+        ).download(_entry('/home/gian/big.bin'), cancellation: cancellation);
 
-      expect(outcome, isA<DownloadCancelled>());
-      expect(session.openedPaths, isEmpty);
-      expect(session.closed, isTrue);
-    });
+        expect(outcome, isA<DownloadCancelled>());
+        expect(session.openedPaths, isEmpty);
+        expect(session.closed, isTrue);
+      },
+    );
   });
 
   group('the completeness check', () {
@@ -275,24 +291,27 @@ void main() {
       expect(filesOnDisk(), isEmpty);
     });
 
-    test('refuses to transfer a file whose size the server withholds', () async {
-      final session = FakeSftpSession(
-        files: {
-          '/home/gian/report.docx': FakeRemoteFile(
-            _bytes(500),
-            sizeIsUnknown: true,
-          ),
-        },
-      );
+    test(
+      'refuses to transfer a file whose size the server withholds',
+      () async {
+        final session = FakeSftpSession(
+          files: {
+            '/home/gian/report.docx': FakeRemoteFile(
+              _bytes(500),
+              sizeIsUnknown: true,
+            ),
+          },
+        );
 
-      final outcome = await serviceFor(
-        session,
-      ).download(_entry('/home/gian/report.docx'));
+        final outcome = await serviceFor(
+          session,
+        ).download(_entry('/home/gian/report.docx'));
 
-      expect(outcome, isA<DownloadFailed>());
-      expect((outcome as DownloadFailed).reason, DownloadFailure.unknownSize);
-      expect(session.openedHandles.single.closed, isTrue);
-    });
+        expect(outcome, isA<DownloadFailed>());
+        expect((outcome as DownloadFailed).reason, DownloadFailure.unknownSize);
+        expect(session.openedHandles.single.closed, isTrue);
+      },
+    );
 
     test('an empty file is a completed download, not a failure', () async {
       final session = FakeSftpSession(
@@ -385,7 +404,10 @@ void main() {
         session,
       ).download(_entry('/root/secret.txt'));
 
-      expect((outcome as DownloadFailed).reason, DownloadFailure.permissionDenied);
+      expect(
+        (outcome as DownloadFailed).reason,
+        DownloadFailure.permissionDenied,
+      );
     });
 
     test('a missing file reports notFound', () async {
@@ -461,9 +483,7 @@ void main() {
     test('sweeps files older than the retention window', () async {
       final stale = File('${destination.path}/old.bin')
         ..writeAsBytesSync(_bytes(10))
-        ..setLastModifiedSync(
-          DateTime.now().subtract(const Duration(days: 3)),
-        );
+        ..setLastModifiedSync(DateTime.now().subtract(const Duration(days: 3)));
       final session = FakeSftpSession(
         files: {'/home/gian/report.docx': FakeRemoteFile(_bytes(100))},
       );

@@ -11,10 +11,7 @@ import 'package:helm/features/auth/data/biometric_service.dart';
 /// screen must never prompt when biometrics are unavailable, and must prompt
 /// exactly once per locked transition when they are.
 class FakeBiometricService extends BiometricService {
-  FakeBiometricService({
-    this.available = true,
-    this.authenticateResult = true,
-  });
+  FakeBiometricService({this.available = true, this.authenticateResult = true});
 
   /// Value returned by [isAvailable].
   bool available;

@@ -29,18 +29,15 @@ void main() {
       );
     });
 
-    test(
-      'stops shrinking before the dismiss button would be cut in half',
-      () {
-        // 12pt of padding above a 32pt minimum-height IconButton. Below
-        // 56pt the one control that removes this surface is itself
-        // clipped — which is the defect, not a smaller version of the fix.
-        // A strict fraction would hand back 40pt here.
-        final cap = advisorySurfaceMaxHeight(100);
+    test('stops shrinking before the dismiss button would be cut in half', () {
+      // 12pt of padding above a 32pt minimum-height IconButton. Below
+      // 56pt the one control that removes this surface is itself
+      // clipped — which is the defect, not a smaller version of the fix.
+      // A strict fraction would hand back 40pt here.
+      final cap = advisorySurfaceMaxHeight(100);
 
-        expect(cap, greaterThanOrEqualTo(56));
-      },
-    );
+      expect(cap, greaterThanOrEqualTo(56));
+    });
 
     test('never exceeds the area it is drawn over, however short', () {
       // Landscape with the keyboard up. There is no good answer at this
@@ -60,10 +57,7 @@ void main() {
       const crossover = 56 / 0.4; // 140pt
 
       expect(advisorySurfaceMaxHeight(crossover), closeTo(56, 0.001));
-      expect(
-        advisorySurfaceMaxHeight(crossover + 1),
-        greaterThanOrEqualTo(56),
-      );
+      expect(advisorySurfaceMaxHeight(crossover + 1), greaterThanOrEqualTo(56));
       expect(advisorySurfaceMaxHeight(crossover - 1), closeTo(56, 0.001));
     });
 

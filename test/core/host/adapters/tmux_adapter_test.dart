@@ -45,7 +45,10 @@ void main() {
     test('reports an exited session instead of omitting it', () async {
       runner.whenRun(
         _listSessionsCommand,
-        const HostCommandResult(stdout: 'work\t0\ndead-agent\t1\n', exitCode: 0),
+        const HostCommandResult(
+          stdout: 'work\t0\ndead-agent\t1\n',
+          exitCode: 0,
+        ),
       );
 
       final result = await adapter.listSessions();
@@ -58,17 +61,20 @@ void main() {
       ]);
     });
 
-    test('a genuinely empty session list is reported when the server IS running', () async {
-      runner.whenRun(
-        _listSessionsCommand,
-        const HostCommandResult(stdout: '', exitCode: 0),
-      );
+    test(
+      'a genuinely empty session list is reported when the server IS running',
+      () async {
+        runner.whenRun(
+          _listSessionsCommand,
+          const HostCommandResult(stdout: '', exitCode: 0),
+        );
 
-      final result = await adapter.listSessions();
+        final result = await adapter.listSessions();
 
-      expect(result, isA<MuxSessionsAvailable>());
-      expect((result as MuxSessionsAvailable).sessions, isEmpty);
-    });
+        expect(result, isA<MuxSessionsAvailable>());
+        expect((result as MuxSessionsAvailable).sessions, isEmpty);
+      },
+    );
   });
 
   group('agents capability', () {
@@ -98,18 +104,21 @@ void main() {
   });
 
   group('detect', () {
-    test('reports installed and the version when the binary is found', () async {
-      runner.whenRun(
-        _detectCommand,
-        const HostCommandResult(stdout: 'tmux 3.6a\n', exitCode: 0),
-      );
+    test(
+      'reports installed and the version when the binary is found',
+      () async {
+        runner.whenRun(
+          _detectCommand,
+          const HostCommandResult(stdout: 'tmux 3.6a\n', exitCode: 0),
+        );
 
-      final detection = await adapter.detect();
+        final detection = await adapter.detect();
 
-      expect(detection.installed, isTrue);
-      expect(detection.absPath, 'tmux');
-      expect(detection.version, 'tmux 3.6a');
-    });
+        expect(detection.installed, isTrue);
+        expect(detection.absPath, 'tmux');
+        expect(detection.version, 'tmux 3.6a');
+      },
+    );
 
     test('reports not installed when the binary is missing', () async {
       runner.whenRun(_detectCommand, const HostCommandResult(exitCode: 1));

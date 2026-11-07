@@ -92,31 +92,28 @@ void main() {
     expect((await repo.getById('p-2'))!.isDefault, isTrue);
   });
 
-  test(
-    'a store written by a version that had no such field loads with the '
-    'hold off, for every profile in it',
-    () async {
-      // Read straight out of the store rather than round-tripped through
-      // the model, because this is the upgrade path: the strings below are
-      // what an existing install has on disk the moment it takes this
-      // update.
-      SharedPreferences.setMockInitialValues({
-        AppConstants.profilesStorageKey: [
-          '{"id":"abc-123","name":"Mac Studio","host":"192.168.1.10",'
-              '"port":22,"username":"gian","tmuxSession":"work",'
-              '"sessionRef":"work","multiplexer":"herdr","isDefault":true}',
-          '{"id":"def-456","name":"Contabo VPS","host":"158.220.106.131",'
-              '"port":22,"username":"deployer","tmuxSession":null,'
-              '"sessionRef":null,"multiplexer":null,"isDefault":false}',
-        ],
-      });
+  test('a store written by a version that had no such field loads with the '
+      'hold off, for every profile in it', () async {
+    // Read straight out of the store rather than round-tripped through
+    // the model, because this is the upgrade path: the strings below are
+    // what an existing install has on disk the moment it takes this
+    // update.
+    SharedPreferences.setMockInitialValues({
+      AppConstants.profilesStorageKey: [
+        '{"id":"abc-123","name":"Mac Studio","host":"192.168.1.10",'
+            '"port":22,"username":"gian","tmuxSession":"work",'
+            '"sessionRef":"work","multiplexer":"herdr","isDefault":true}',
+        '{"id":"def-456","name":"Contabo VPS","host":"158.220.106.131",'
+            '"port":22,"username":"deployer","tmuxSession":null,'
+            '"sessionRef":null,"multiplexer":null,"isDefault":false}',
+      ],
+    });
 
-      final all = await ConnectionProfileRepository().getAll();
+    final all = await ConnectionProfileRepository().getAll();
 
-      expect(all, hasLength(2));
-      expect(all.every((p) => !p.holdInBackground), isTrue);
-    },
-  );
+    expect(all, hasLength(2));
+    expect(all.every((p) => !p.holdInBackground), isTrue);
+  });
 
   test('the stored JSON carries the field explicitly once saved', () async {
     await repo.create(

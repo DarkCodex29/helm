@@ -129,7 +129,7 @@ class FakeAgentAdapter implements MultiplexerAdapter, AgentAwareMultiplexer {
     String target, {
     required Set<AgentState> until,
     required Duration timeout,
-  }  ) async => throw StateError(
+  }) async => throw StateError(
     'FakeAgentAdapter: waitForAgent() called on an adapter that does not '
     'advertise MuxCapability.agentWait',
   );

@@ -86,65 +86,51 @@ void main() {
   });
 
   group('TabsNotifier.addTab and the background-hold preference', () {
-    test(
-      'a connect that FAILED holds nothing, even for a profile that asked '
-      'for a hold - a foreground service over a connection that was never '
-      'established is a notification about nothing',
-      () async {
-        ssh.queueConnectError(const _SocketFailure());
+    test('a connect that FAILED holds nothing, even for a profile that asked '
+        'for a hold - a foreground service over a connection that was never '
+        'established is a notification about nothing', () async {
+      ssh.queueConnectError(const _SocketFailure());
 
-        await container.read(tabsProvider.notifier).addTab(_holdingProfile);
+      await container.read(tabsProvider.notifier).addTab(_holdingProfile);
 
-        // The tab is there, carrying the failure, exactly as before.
-        final tabs = container.read(tabsProvider).tabs;
-        expect(tabs, hasLength(1));
-        expect(
-          tabs.single.session.statusNotifier.value,
-          ConnectionStatus.error,
-        );
+      // The tab is there, carrying the failure, exactly as before.
+      final tabs = container.read(tabsProvider).tabs;
+      expect(tabs, hasLength(1));
+      expect(tabs.single.session.statusNotifier.value, ConnectionStatus.error);
 
-        expect(host.starts, isEmpty);
-        expect(host.running, isFalse);
-        expect(holdController.state.isHolding, isFalse);
-      },
-    );
+      expect(host.starts, isEmpty);
+      expect(host.running, isFalse);
+      expect(holdController.state.isHolding, isFalse);
+    });
 
-    test(
-      'a profile that did not ask for a hold gets none - this is the state '
-      'every existing install upgrades into',
-      () async {
-        ssh.queueConnectError(const _SocketFailure());
+    test('a profile that did not ask for a hold gets none - this is the state '
+        'every existing install upgrades into', () async {
+      ssh.queueConnectError(const _SocketFailure());
 
-        await container.read(tabsProvider.notifier).addTab(_plainProfile);
+      await container.read(tabsProvider.notifier).addTab(_plainProfile);
 
-        expect(host.starts, isEmpty);
-        expect(holdController.state, isA<Object>());
-        expect(holdController.state.isHolding, isFalse);
-      },
-    );
+      expect(host.starts, isEmpty);
+      expect(holdController.state, isA<Object>());
+      expect(holdController.state.isHolding, isFalse);
+    });
 
-    test(
-      'auto-connecting the default profile on launch holds nothing when the '
-      'connect fails',
-      () async {
-        // Launch is the one path where nobody tapped anything. It must be
-        // held to the same rule as every other: no connection, no service.
-        SharedPreferences.setMockInitialValues({
-          AppConstants.profilesStorageKey: [
-            jsonEncode(
-              _holdingProfile.copyWith(isDefault: true).toJson(),
-            ),
-          ],
-        });
-        ssh.queueConnectError(const _SocketFailure());
+    test('auto-connecting the default profile on launch holds nothing when the '
+        'connect fails', () async {
+      // Launch is the one path where nobody tapped anything. It must be
+      // held to the same rule as every other: no connection, no service.
+      SharedPreferences.setMockInitialValues({
+        AppConstants.profilesStorageKey: [
+          jsonEncode(_holdingProfile.copyWith(isDefault: true).toJson()),
+        ],
+      });
+      ssh.queueConnectError(const _SocketFailure());
 
-        await container
-            .read(tabsProvider.notifier)
-            .autoConnectDefault(recoveryPending: false);
+      await container
+          .read(tabsProvider.notifier)
+          .autoConnectDefault(recoveryPending: false);
 
-        expect(container.read(tabsProvider).tabs, hasLength(1));
-        expect(host.starts, isEmpty);
-      },
-    );
+      expect(container.read(tabsProvider).tabs, hasLength(1));
+      expect(host.starts, isEmpty);
+    });
   });
 }

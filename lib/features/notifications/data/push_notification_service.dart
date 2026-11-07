@@ -161,7 +161,9 @@ class PushNotificationService {
       // A channel that failed to register means local notifications will
       // not draw. It does not mean the app should not run, and it says
       // nothing about whether Firebase initialized above.
-      _log.w('Local notification presenter did not initialize: ${e.runtimeType}');
+      _log.w(
+        'Local notification presenter did not initialize: ${e.runtimeType}',
+      );
     }
 
     // Gated on Firebase alone: all three subscriptions come from

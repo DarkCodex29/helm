@@ -116,8 +116,7 @@ void main() {
       );
     });
 
-    test('a still-locked user is not let through early by a pending alert',
-        () {
+    test('a still-locked user is not let through early by a pending alert', () {
       // A notification must never become a way around the biometric gate.
       expect(
         resolveAuthRedirect(

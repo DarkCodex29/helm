@@ -19,8 +19,10 @@ class _ThrowingRunner implements HostCommandRunner {
       throw StateError('run() must not be called by HostProber');
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async =>
-      throw const SocketishFailure();
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async => throw const SocketishFailure();
 }
 
 /// Stand-in for the transport-level exceptions dartssh2 can raise once a
@@ -42,7 +44,10 @@ class _ScriptedRunner implements HostCommandRunner {
       throw StateError('run() must not be called by HostProber');
 
   @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) async {
+  Future<HostCommandResult> runScript(
+    String script, {
+    Duration? timeout,
+  }) async {
     scripts.add(script);
     timeouts.add(timeout);
     return _result;
@@ -55,7 +60,10 @@ void main() {
       // AD-1: the script crosses zero shell-quoting layers because it is
       // fed to `/bin/sh -s` over stdin.
       final runner = _ScriptedRunner(
-        const HostCommandResult(stdout: 'helm-probe/1\nend\tok\t12', exitCode: 0),
+        const HostCommandResult(
+          stdout: 'helm-probe/1\nend\tok\t12',
+          exitCode: 0,
+        ),
       );
 
       return const HostProber().probe(runner).then((_) {
@@ -63,16 +71,22 @@ void main() {
       });
     });
 
-    test('bounds the probe with a timeout so it cannot hang a connect', () async {
-      final runner = _ScriptedRunner(
-        const HostCommandResult(stdout: 'helm-probe/1\nend\tok\t12', exitCode: 0),
-      );
+    test(
+      'bounds the probe with a timeout so it cannot hang a connect',
+      () async {
+        final runner = _ScriptedRunner(
+          const HostCommandResult(
+            stdout: 'helm-probe/1\nend\tok\t12',
+            exitCode: 0,
+          ),
+        );
 
-      await const HostProber().probe(runner);
+        await const HostProber().probe(runner);
 
-      expect(runner.timeouts.single, isNotNull);
-      expect(runner.timeouts.single, kHostProbeTimeout);
-    });
+        expect(runner.timeouts.single, isNotNull);
+        expect(runner.timeouts.single, kHostProbeTimeout);
+      },
+    );
 
     test('parses a well-formed report', () async {
       final runner = _ScriptedRunner(
@@ -93,16 +107,19 @@ void main() {
   });
 
   group('HostProber.probe - degrades honestly', () {
-    test('a thrown transport failure becomes an unknown report, not empty', () async {
-      final report = await const HostProber().probe(_ThrowingRunner());
+    test(
+      'a thrown transport failure becomes an unknown report, not empty',
+      () async {
+        final report = await const HostProber().probe(_ThrowingRunner());
 
-      // truncated == "we could not find out", which resolveMultiplexer
-      // reads as unverified. An `ok` report with an empty mux list would
-      // instead read as "this host has no multiplexers" — the exact lie
-      // this fallback exists to avoid.
-      expect(report.status, HostReportStatus.truncated);
-      expect(report.mux, isEmpty);
-    });
+        // truncated == "we could not find out", which resolveMultiplexer
+        // reads as unverified. An `ok` report with an empty mux list would
+        // instead read as "this host has no multiplexers" — the exact lie
+        // this fallback exists to avoid.
+        expect(report.status, HostReportStatus.truncated);
+        expect(report.mux, isEmpty);
+      },
+    );
 
     test('a timed-out result becomes an unknown report', () async {
       final runner = _ScriptedRunner(
@@ -114,14 +131,20 @@ void main() {
       expect(report.status, HostReportStatus.truncated);
     });
 
-    test('output from a host that is not running the probe is a mismatch', () async {
-      final runner = _ScriptedRunner(
-        const HostCommandResult(stdout: '/bin/sh: 1: Syntax error', exitCode: 2),
-      );
+    test(
+      'output from a host that is not running the probe is a mismatch',
+      () async {
+        final runner = _ScriptedRunner(
+          const HostCommandResult(
+            stdout: '/bin/sh: 1: Syntax error',
+            exitCode: 2,
+          ),
+        );
 
-      final report = await const HostProber().probe(runner);
+        final report = await const HostProber().probe(runner);
 
-      expect(report.status, HostReportStatus.versionMismatch);
-    });
+        expect(report.status, HostReportStatus.versionMismatch);
+      },
+    );
   });
 }

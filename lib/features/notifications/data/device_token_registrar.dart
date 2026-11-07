@@ -146,7 +146,9 @@ class DeviceTokenRegistrar {
       _log.i('Device token registered with the host');
       return TokenRegistrationOutcome.registered;
     } catch (e) {
-      _log.w('Device token registration failed on the transport: ${e.runtimeType}');
+      _log.w(
+        'Device token registration failed on the transport: ${e.runtimeType}',
+      );
       return TokenRegistrationOutcome.transportFailed;
     }
   }
@@ -180,7 +182,9 @@ class DeviceTokenRegistrar {
       _log.i('ntfy topic registered with the host');
       return TokenRegistrationOutcome.registered;
     } catch (e) {
-      _log.w('ntfy topic registration failed on the transport: ${e.runtimeType}');
+      _log.w(
+        'ntfy topic registration failed on the transport: ${e.runtimeType}',
+      );
       return TokenRegistrationOutcome.transportFailed;
     }
   }

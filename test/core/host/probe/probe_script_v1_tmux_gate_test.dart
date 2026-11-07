@@ -90,60 +90,44 @@ void main() {
       'the platform decision already made in probe_script_v1_test.dart.';
 
   group('tmux server detection gate (_tmux_server_running)', () {
-    test(
-      'reports a running server when ps lists the exact tmux server '
-      'process name for the current user',
-      () async {
-        final result = await _runGate(
-          psOutputLines: ['bash', 'tmux: server', 'sshd'],
-        );
-        expect(result, 'SERVER_RUNNING');
-      },
-    );
+    test('reports a running server when ps lists the exact tmux server '
+        'process name for the current user', () async {
+      final result = await _runGate(
+        psOutputLines: ['bash', 'tmux: server', 'sshd'],
+      );
+      expect(result, 'SERVER_RUNNING');
+    });
 
-    test(
-      'reports no running server when ps lists no tmux server process '
-      'at all',
-      () async {
-        final result = await _runGate(
-          psOutputLines: ['bash', 'sshd', 'node'],
-        );
-        expect(result, 'SERVER_NOT_RUNNING');
-      },
-    );
+    test('reports no running server when ps lists no tmux server process '
+        'at all', () async {
+      final result = await _runGate(psOutputLines: ['bash', 'sshd', 'node']);
+      expect(result, 'SERVER_NOT_RUNNING');
+    });
 
     test(
       'does not treat a bare "tmux" comm (e.g. a transient attaching '
       'client) as a running server -- only the exact server name counts',
       () async {
-        final result = await _runGate(
-          psOutputLines: ['bash', 'tmux', 'sshd'],
-        );
+        final result = await _runGate(psOutputLines: ['bash', 'tmux', 'sshd']);
         expect(result, 'SERVER_NOT_RUNNING');
       },
     );
 
-    test(
-      'is scoped to the invoking user: a comm line does not need '
-      'ownership simulated here because `ps -u` performs the OS-level '
-      'filtering -- this test proves the gate parses ONLY what ps '
-      'already scoped to us, i.e. an empty scoped list means no server, '
-      'never a scan of every user on the host',
-      () async {
-        final result = await _runGate(psOutputLines: const <String>[]);
-        expect(result, 'SERVER_NOT_RUNNING');
-      },
-    );
+    test('is scoped to the invoking user: a comm line does not need '
+        'ownership simulated here because `ps -u` performs the OS-level '
+        'filtering -- this test proves the gate parses ONLY what ps '
+        'already scoped to us, i.e. an empty scoped list means no server, '
+        'never a scan of every user on the host', () async {
+      final result = await _runGate(psOutputLines: const <String>[]);
+      expect(result, 'SERVER_NOT_RUNNING');
+    });
 
-    test(
-      'fails OPEN -- reports a possible server -- when ps is not '
-      'available on PATH at all, so an undetectable server can never '
-      'silently become "no sessions"',
-      () async {
-        final result = await _runGate(psAvailable: false);
-        expect(result, 'SERVER_RUNNING');
-      },
-    );
+    test('fails OPEN -- reports a possible server -- when ps is not '
+        'available on PATH at all, so an undetectable server can never '
+        'silently become "no sessions"', () async {
+      final result = await _runGate(psAvailable: false);
+      expect(result, 'SERVER_RUNNING');
+    });
 
     test(
       'still reports a running server when TMUX_TMPDIR relocates the '
@@ -158,95 +142,81 @@ void main() {
       },
     );
 
-    test(
-      'still reports no running server when TMUX_TMPDIR relocates the '
-      'socket directory away from its default, even though a relocated '
-      'socket artifact exists on disk with no matching process -- proves '
-      'the decision reads process state, never the filesystem at that '
-      'path',
-      () async {
-        final result = await _runGate(
-          psOutputLines: ['bash', 'sshd', 'node'],
-          withRelocatedSocketArtifact: true,
-        );
-        expect(result, 'SERVER_NOT_RUNNING');
-      },
-    );
+    test('still reports no running server when TMUX_TMPDIR relocates the '
+        'socket directory away from its default, even though a relocated '
+        'socket artifact exists on disk with no matching process -- proves '
+        'the decision reads process state, never the filesystem at that '
+        'path', () async {
+      final result = await _runGate(
+        psOutputLines: ['bash', 'sshd', 'node'],
+        withRelocatedSocketArtifact: true,
+      );
+      expect(result, 'SERVER_NOT_RUNNING');
+    });
 
-    test(
-      'still reports a running server when an explicit -S-style client '
-      'socket path is set via TMUX, pointing at a location outside any '
-      'default or TMUX_TMPDIR-relocated directory',
-      () async {
-        final result = await _runGate(
-          psOutputLines: ['bash', 'tmux: server', 'sshd'],
-          extraEnv: const <String, String>{
-            'TMUX': '/completely/unrelated/custom.sock,1234,0',
-          },
-        );
-        expect(result, 'SERVER_RUNNING');
-      },
-    );
+    test('still reports a running server when an explicit -S-style client '
+        'socket path is set via TMUX, pointing at a location outside any '
+        'default or TMUX_TMPDIR-relocated directory', () async {
+      final result = await _runGate(
+        psOutputLines: ['bash', 'tmux: server', 'sshd'],
+        extraEnv: const <String, String>{
+          'TMUX': '/completely/unrelated/custom.sock,1234,0',
+        },
+      );
+      expect(result, 'SERVER_RUNNING');
+    });
   }, skip: hasPosixShell ? false : skipReason);
 
   group('no command is invoked when there is nothing to report', () {
-    test(
-      'does not invoke tmux list-sessions when tmux is installed but no '
-      'server is running',
-      () async {
-        final result = await _runFullProbe(
-          tmuxInstalled: true,
-          tmuxServerRunning: false,
-        );
-        expect(
-          result.tmuxInvocations.any(
-            (args) => args.contains('list-sessions'),
-          ),
-          isFalse,
-          reason:
-              'tmux list-sessions must never be invoked when the gate '
-              'reports no server; recorded invocations: '
-              '${result.tmuxInvocations}',
-        );
-      },
-    );
+    test('does not invoke tmux list-sessions when tmux is installed but no '
+        'server is running', () async {
+      final result = await _runFullProbe(
+        tmuxInstalled: true,
+        tmuxServerRunning: false,
+      );
+      expect(
+        result.tmuxInvocations.any((args) => args.contains('list-sessions')),
+        isFalse,
+        reason:
+            'tmux list-sessions must never be invoked when the gate '
+            'reports no server; recorded invocations: '
+            '${result.tmuxInvocations}',
+      );
+    });
 
-    test(
-      'emits the same session-record stream (none) whether tmux is '
-      'installed with no server or entirely absent from the host',
-      () async {
-        final installedNoServer = await _runFullProbe(
-          tmuxInstalled: true,
-          tmuxServerRunning: false,
-        );
-        final absent = await _runFullProbe(
-          tmuxInstalled: false,
-          tmuxServerRunning: false,
-        );
+    test('emits the same session-record stream (none) whether tmux is '
+        'installed with no server or entirely absent from the host', () async {
+      final installedNoServer = await _runFullProbe(
+        tmuxInstalled: true,
+        tmuxServerRunning: false,
+      );
+      final absent = await _runFullProbe(
+        tmuxInstalled: false,
+        tmuxServerRunning: false,
+      );
 
-        expect(
-          installedNoServer.sessionRecordLines,
-          isEmpty,
-          reason:
-              'installed-but-idle host emitted unexpected session '
-              'records: ${installedNoServer.sessionRecordLines}',
-        );
-        expect(
-          absent.sessionRecordLines,
-          isEmpty,
-          reason:
-              'tool-absent host emitted unexpected session records: '
-              '${absent.sessionRecordLines}',
-        );
-        expect(
-          installedNoServer.sessionRecordLines,
-          absent.sessionRecordLines,
-          reason:
-              'session-record stream must be identical (both empty) '
-              'whether the tool is installed but idle or entirely absent',
-        );
-      },
-    );
+      expect(
+        installedNoServer.sessionRecordLines,
+        isEmpty,
+        reason:
+            'installed-but-idle host emitted unexpected session '
+            'records: ${installedNoServer.sessionRecordLines}',
+      );
+      expect(
+        absent.sessionRecordLines,
+        isEmpty,
+        reason:
+            'tool-absent host emitted unexpected session records: '
+            '${absent.sessionRecordLines}',
+      );
+      expect(
+        installedNoServer.sessionRecordLines,
+        absent.sessionRecordLines,
+        reason:
+            'session-record stream must be identical (both empty) '
+            'whether the tool is installed but idle or entirely absent',
+      );
+    });
   }, skip: hasPosixShell ? false : skipReason);
 }
 

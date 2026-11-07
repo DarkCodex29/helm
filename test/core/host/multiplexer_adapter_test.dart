@@ -44,8 +44,7 @@ class _FakeAgentCapableAdapter implements MultiplexerAdapter {
   Future<MuxDetection> detect() async => const MuxDetection.notInstalled();
 
   @override
-  Future<MuxSessionsResult> listSessions() async =>
-      const MuxServerNotRunning();
+  Future<MuxSessionsResult> listSessions() async => const MuxServerNotRunning();
 
   @override
   Future<bool> hasSession(String name) async => false;
@@ -85,10 +84,7 @@ void main() {
         final support = AgentSupport.resolve(adapter);
 
         expect(support, isA<AgentSupportUnsupported>());
-        expect(
-          (support as AgentSupportUnsupported).muxId,
-          MultiplexerId.tmux,
-        );
+        expect((support as AgentSupportUnsupported).muxId, MultiplexerId.tmux);
       },
     );
 

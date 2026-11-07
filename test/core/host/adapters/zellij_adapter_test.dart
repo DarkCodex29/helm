@@ -28,8 +28,7 @@ import '../../../helpers/fake_host_command_runner.dart';
 //   so parsing splits on the literal " [Created" marker, never on
 //   whitespace tokens.
 const _listSessionsCommand = 'zellij list-sessions --no-formatting';
-const _detectCommand =
-    'command -v zellij >/dev/null 2>&1 && zellij --version';
+const _detectCommand = 'command -v zellij >/dev/null 2>&1 && zellij --version';
 
 void main() {
   late FakeHostCommandRunner runner;
@@ -121,19 +120,13 @@ void main() {
       expect(adapter.agents, isNull);
     });
 
-    test(
-      'a caller resolving agent support gets a typed unsupported result, '
-      'never []',
-      () {
-        final support = AgentSupport.resolve(adapter);
+    test('a caller resolving agent support gets a typed unsupported result, '
+        'never []', () {
+      final support = AgentSupport.resolve(adapter);
 
-        expect(support, isA<AgentSupportUnsupported>());
-        expect(
-          (support as AgentSupportUnsupported).muxId,
-          MultiplexerId.zellij,
-        );
-      },
-    );
+      expect(support, isA<AgentSupportUnsupported>());
+      expect((support as AgentSupportUnsupported).muxId, MultiplexerId.zellij);
+    });
 
     test('advertises deadSessionResurrection, not agentState', () {
       expect(adapter.capabilities, {MuxCapability.deadSessionResurrection});

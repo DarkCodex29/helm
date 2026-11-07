@@ -22,7 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../helpers/fake_document_tree_gateway.dart';
 
 const _folder = DownloadDestination(
-  uri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
+  uri:
+      'content://com.android.externalstorage.documents/tree/primary%3ADownload%2FHelm',
   name: 'Helm',
 );
 
@@ -59,9 +60,7 @@ void main() {
       await store.write(_folder);
       final gateway = FakeDocumentTreeGateway();
 
-      final outcome = await serviceWith(
-        gateway,
-      ).publish(staged('report.docx'));
+      final outcome = await serviceWith(gateway).publish(staged('report.docx'));
 
       expect(outcome, isA<PublishedToFolder>());
       final published = outcome as PublishedToFolder;
@@ -82,21 +81,24 @@ void main() {
   });
 
   group('name collision', () {
-    test('keeps the existing file and reports the name it really got', () async {
-      await store.write(_folder);
-      final gateway = FakeDocumentTreeGateway()
-        ..existingNames.add('report.docx');
+    test(
+      'keeps the existing file and reports the name it really got',
+      () async {
+        await store.write(_folder);
+        final gateway = FakeDocumentTreeGateway()
+          ..existingNames.add('report.docx');
 
-      final outcome = await serviceWith(
-        gateway,
-      ).publish(staged('report.docx'));
+        final outcome = await serviceWith(
+          gateway,
+        ).publish(staged('report.docx'));
 
-      // The point of the assertion is the PAIR: nothing was overwritten,
-      // and the user is told the new name rather than left looking for a
-      // `report.docx` that is somebody else's file.
-      expect(outcome, isA<PublishedToFolder>());
-      expect((outcome as PublishedToFolder).fileName, 'report(1).docx');
-    });
+        // The point of the assertion is the PAIR: nothing was overwritten,
+        // and the user is told the new name rather than left looking for a
+        // `report.docx` that is somebody else's file.
+        expect(outcome, isA<PublishedToFolder>());
+        expect((outcome as PublishedToFolder).fileName, 'report(1).docx');
+      },
+    );
   });
 
   group('with no folder chosen', () {
@@ -124,9 +126,7 @@ void main() {
       await store.write(_folder);
       final gateway = FakeDocumentTreeGateway()..writeGrant = false;
 
-      final outcome = await serviceWith(
-        gateway,
-      ).publish(staged('report.docx'));
+      final outcome = await serviceWith(gateway).publish(staged('report.docx'));
 
       expect(outcome, isA<PublishFailed>());
       expect((outcome as PublishFailed).reason, PublishFailure.permissionLost);
@@ -167,9 +167,7 @@ void main() {
         ..folderPresent = false
         ..copyError = const FileSystemException('no such directory');
 
-      final outcome = await serviceWith(
-        gateway,
-      ).publish(staged('report.docx'));
+      final outcome = await serviceWith(gateway).publish(staged('report.docx'));
 
       expect(outcome, isA<PublishFailed>());
       final failed = outcome as PublishFailed;
@@ -195,9 +193,7 @@ void main() {
       final gateway = FakeDocumentTreeGateway()
         ..copyError = const FileSystemException('no space left on device');
 
-      final outcome = await serviceWith(
-        gateway,
-      ).publish(staged('report.docx'));
+      final outcome = await serviceWith(gateway).publish(staged('report.docx'));
 
       expect((outcome as PublishFailed).reason, PublishFailure.storage);
       // Kept on purpose: a full disk is not a reason to make the user
@@ -254,15 +250,18 @@ void main() {
       expect(await store.read(), _folder);
     });
 
-    test('opens the picker at Downloads, one step from a sensible answer', () async {
-      final gateway = FakeDocumentTreeGateway(picks: _folder);
+    test(
+      'opens the picker at Downloads, one step from a sensible answer',
+      () async {
+        final gateway = FakeDocumentTreeGateway(picks: _folder);
 
-      await serviceWith(gateway).choose();
+        await serviceWith(gateway).choose();
 
-      // Null means "the gateway picks its own default", which is the
-      // Downloads seed documented on SafDocumentTreeGateway.
-      expect(gateway.pickedWith, [null]);
-    });
+        // Null means "the gateway picks its own default", which is the
+        // Downloads seed documented on SafDocumentTreeGateway.
+        expect(gateway.pickedWith, [null]);
+      },
+    );
 
     test('a declined picker leaves the previous choice untouched', () async {
       await store.write(_folder);

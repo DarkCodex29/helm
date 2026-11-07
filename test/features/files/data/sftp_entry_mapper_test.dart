@@ -119,7 +119,10 @@ void main() {
     });
 
     test('is true when every read bit is set, whoever we turn out to be', () {
-      expect(resolveRemoteEntryReadability(SftpFileMode.value(_file0644)), isTrue);
+      expect(
+        resolveRemoteEntryReadability(SftpFileMode.value(_file0644)),
+        isTrue,
+      );
     });
 
     test('is false when no read bit is set for anyone', () {
@@ -130,7 +133,10 @@ void main() {
     });
 
     test('is unknown when the answer depends on ownership SFTP never sent', () {
-      expect(resolveRemoteEntryReadability(SftpFileMode.value(_file0600)), isNull);
+      expect(
+        resolveRemoteEntryReadability(SftpFileMode.value(_file0600)),
+        isNull,
+      );
     });
   });
 
@@ -181,10 +187,7 @@ void main() {
     });
 
     test('joins onto the root without doubling the separator', () {
-      final entry = mapSftpName(
-        _name('etc', mode: _dir0755),
-        parentPath: '/',
-      );
+      final entry = mapSftpName(_name('etc', mode: _dir0755), parentPath: '/');
 
       expect(entry.path, '/etc');
     });

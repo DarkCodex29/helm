@@ -34,12 +34,9 @@ class HerdrAdapter
         AgentAwareMultiplexer,
         PaneAwareMultiplexer,
         WorkspaceAwareMultiplexer {
-  HerdrAdapter(
-    this._runner, {
-    String absPath = 'herdr',
-    String? sessionRef,
-  }) : _absPath = absPath,
-       _sessionRef = sessionRef;
+  HerdrAdapter(this._runner, {String absPath = 'herdr', String? sessionRef})
+    : _absPath = absPath,
+      _sessionRef = sessionRef;
 
   final HostCommandRunner _runner;
 

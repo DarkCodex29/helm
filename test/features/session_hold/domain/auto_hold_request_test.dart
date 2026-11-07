@@ -10,37 +10,31 @@ void main() {
   tearDown(() => status.dispose());
 
   group('a profile that did not ask for a hold never gets one', () {
-    test(
-      'the request is null, so the connect path has nothing to hand the '
-      'controller - the decision is taken here rather than by a controller '
-      'that would otherwise be asked to hold and then refuse',
-      () {
-        final request = autoHoldRequest(
+    test('the request is null, so the connect path has nothing to hand the '
+        'controller - the decision is taken here rather than by a controller '
+        'that would otherwise be asked to hold and then refuse', () {
+      final request = autoHoldRequest(
+        profileHoldsInBackground: false,
+        multiplexerSessionName: 'helm-deploy',
+        profileName: 'Mac Studio',
+        status: status,
+      );
+
+      expect(request, isNull);
+    });
+
+    test('a profile constructed with no opinion at all is treated as not '
+        'asking - a foreground service is never inherited', () {
+      expect(
+        autoHoldRequest(
           profileHoldsInBackground: false,
-          multiplexerSessionName: 'helm-deploy',
-          profileName: 'Mac Studio',
+          multiplexerSessionName: null,
+          profileName: 'Contabo VPS',
           status: status,
-        );
-
-        expect(request, isNull);
-      },
-    );
-
-    test(
-      'a profile constructed with no opinion at all is treated as not '
-      'asking - a foreground service is never inherited',
-      () {
-        expect(
-          autoHoldRequest(
-            profileHoldsInBackground: false,
-            multiplexerSessionName: null,
-            profileName: 'Contabo VPS',
-            status: status,
-          ),
-          isNull,
-        );
-      },
-    );
+        ),
+        isNull,
+      );
+    });
   });
 
   group('a profile that asked for a hold names the session it holds', () {
@@ -60,21 +54,18 @@ void main() {
       expect(request.hostName, 'Mac Studio');
     });
 
-    test(
-      'an unnamed session falls back to the profile name, exactly as a '
-      'hand-tapped hold does',
-      () {
-        final request = autoHoldRequest(
-          profileHoldsInBackground: true,
-          multiplexerSessionName: null,
-          profileName: 'Contabo VPS',
-          status: status,
-        );
+    test('an unnamed session falls back to the profile name, exactly as a '
+        'hand-tapped hold does', () {
+      final request = autoHoldRequest(
+        profileHoldsInBackground: true,
+        multiplexerSessionName: null,
+        profileName: 'Contabo VPS',
+        status: status,
+      );
 
-        expect(request!.sessionName, 'Contabo VPS');
-        expect(request.hostName, '');
-      },
-    );
+      expect(request!.sessionName, 'Contabo VPS');
+      expect(request.hostName, '');
+    });
 
     test(
       'the request carries the session\'s own status listenable, unchanged',

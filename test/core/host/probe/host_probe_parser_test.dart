@@ -8,18 +8,14 @@ void main() {
 
   group('Version Gate', () {
     test('matching version marker proceeds to remaining records', () {
-      final report = parser.parse(
-        'helm-probe/1\nenv\tuser\tdev\nend\tok\t5\n',
-      );
+      final report = parser.parse('helm-probe/1\nenv\tuser\tdev\nend\tok\t5\n');
 
       expect(report.status, HostReportStatus.ok);
       expect(report.env['user'], 'dev');
     });
 
     test('mismatched major version is refused, no record parsed', () {
-      final report = parser.parse(
-        'helm-probe/2\nenv\tuser\tdev\nend\tok\t5\n',
-      );
+      final report = parser.parse('helm-probe/2\nenv\tuser\tdev\nend\tok\t5\n');
 
       expect(report.status, HostReportStatus.versionMismatch);
       expect(report.env, isEmpty);

@@ -176,10 +176,7 @@ void main() {
     group('an unpinned key type gets its own prompt', () {
       Future<void> raiseNewKeyType() async {
         ssh.queueConnectError(_newKeyType);
-        await expectLater(
-          session.connect('pem'),
-          throwsA(same(_newKeyType)),
-        );
+        await expectLater(session.connect('pem'), throwsA(same(_newKeyType)));
       }
 
       testWidgets('shows the key type card, not the migration one', (

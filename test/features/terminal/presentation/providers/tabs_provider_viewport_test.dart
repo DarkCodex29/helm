@@ -60,57 +60,51 @@ void main() {
 
   tearDown(() => container.dispose());
 
-  test(
-    'addTab does not open a PTY until the tab it just created has reported '
-    'a real viewport size',
-    () async {
-      final notifier = container.read(tabsProvider.notifier);
+  test('addTab does not open a PTY until the tab it just created has reported '
+      'a real viewport size', () async {
+    final notifier = container.read(tabsProvider.notifier);
 
-      final opening = notifier.addTab(_profile);
-      // Let every microtask the key lookup and state assignment queue run.
-      // The view still does not exist — in the app it is a frame away.
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
+    final opening = notifier.addTab(_profile);
+    // Let every microtask the key lookup and state assignment queue run.
+    // The view still does not exist — in the app it is a frame away.
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
 
-      expect(
-        ssh.connectCalls,
-        isEmpty,
-        reason:
-            'addTab dialed before anything could tell it the screen size, so '
-            'the PTY would be opened at the 80x24 default',
-      );
+    expect(
+      ssh.connectCalls,
+      isEmpty,
+      reason:
+          'addTab dialed before anything could tell it the screen size, so '
+          'the PTY would be opened at the 80x24 default',
+    );
 
-      // The tab exists and is rendered from the first frame, exactly as
-      // addTab's own doc promises — it just is not connected yet.
-      expect(container.read(tabsProvider).tabs, hasLength(1));
+    // The tab exists and is rendered from the first frame, exactly as
+    // addTab's own doc promises — it just is not connected yet.
+    expect(container.read(tabsProvider).tabs, hasLength(1));
 
-      // The view lays out and reports what it renders.
-      final session = container.read(tabsProvider).tabs.single.session;
-      session.onResize(51, 29);
-      await opening;
+    // The view lays out and reports what it renders.
+    final session = container.read(tabsProvider).tabs.single.session;
+    session.onResize(51, 29);
+    await opening;
 
-      expect(ssh.connectCalls, hasLength(1));
-      expect(ssh.connectCalls.single.columns, 51);
-      expect(ssh.connectCalls.single.rows, 29);
-    },
-  );
+    expect(ssh.connectCalls, hasLength(1));
+    expect(ssh.connectCalls.single.columns, 51);
+    expect(ssh.connectCalls.single.rows, 29);
+  });
 
-  test(
-    'a tab closed before its viewport ever reported still finishes opening '
-    'rather than hanging on a view that will never arrive',
-    () async {
-      final notifier = container.read(tabsProvider.notifier);
+  test('a tab closed before its viewport ever reported still finishes opening '
+      'rather than hanging on a view that will never arrive', () async {
+    final notifier = container.read(tabsProvider.notifier);
 
-      final opening = notifier.addTab(_profile);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      expect(ssh.connectCalls, isEmpty);
+    final opening = notifier.addTab(_profile);
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(ssh.connectCalls, isEmpty);
 
-      final tab = container.read(tabsProvider).tabs.single;
-      await notifier.removeTab(tab.id);
-      await opening;
+    final tab = container.read(tabsProvider).tabs.single;
+    await notifier.removeTab(tab.id);
+    await opening;
 
-      expect(container.read(tabsProvider).tabs, isEmpty);
-    },
-  );
+    expect(container.read(tabsProvider).tabs, isEmpty);
+  });
 }
