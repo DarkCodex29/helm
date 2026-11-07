@@ -27,6 +27,10 @@ class Rig {
 
   Future<void> up() async {
     tmp = await Directory.systemTemp.createTemp('helm_agentd_daemon_');
+    // Temp dirs are 0755 on Linux; the token store refuses a directory
+    // others can enter, so make it owner-only like ~/.helm-agentd.
+    final chmod = await Process.run('chmod', ['700', tmp.path]);
+    expect(chmod.exitCode, 0);
     piLog = File('${tmp.path}/pi.log');
     final store = TokenStore('${tmp.path}/token');
     await store.ensure();

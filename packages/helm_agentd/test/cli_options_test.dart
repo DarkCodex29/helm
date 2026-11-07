@@ -80,6 +80,10 @@ void main() {
     Process? proc;
     setUp(() async {
       tmp = await Directory.systemTemp.createTemp('helm_agentd_cli_');
+      // Temp dirs are 0755 on Linux; the token store refuses a directory
+      // others can enter, so make it owner-only like ~/.helm-agentd.
+      final chmod = await Process.run('chmod', ['700', tmp.path]);
+      expect(chmod.exitCode, 0);
     });
     tearDown(() async {
       proc?.kill(ProcessSignal.sigkill);

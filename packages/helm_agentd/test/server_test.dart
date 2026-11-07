@@ -150,26 +150,32 @@ void main() {
       expect(TokenStore.defaultPath(), endsWith('/.helm-agentd/token'));
     });
 
-    test('refuses a token path that is a symlink, even to a 0600 file', () async {
-      final link = '${tmp.path}/state/link-token';
-      Link(link).createSync(tokenPath);
-      await expectLater(
-        TokenStore(link).ensure(),
-        throwsA(isA<TokenFileException>()),
-      );
-      expect(TokenStore(link).verify((await currentToken()).trim()), isFalse);
-    });
+    test(
+      'refuses a token path that is a symlink, even to a 0600 file',
+      () async {
+        final link = '${tmp.path}/state/link-token';
+        Link(link).createSync(tokenPath);
+        await expectLater(
+          TokenStore(link).ensure(),
+          throwsA(isA<TokenFileException>()),
+        );
+        expect(TokenStore(link).verify((await currentToken()).trim()), isFalse);
+      },
+    );
 
-    test('refuses to create the token in a directory others can enter', () async {
-      final loose = Directory('${tmp.path}/loose')..createSync();
-      await chmod('755', loose.path);
-      final path = '${loose.path}/token';
-      await expectLater(
-        TokenStore(path).ensure(),
-        throwsA(isA<TokenFileException>()),
-      );
-      expect(File(path).existsSync(), isFalse, reason: 'no secret written');
-    });
+    test(
+      'refuses to create the token in a directory others can enter',
+      () async {
+        final loose = Directory('${tmp.path}/loose')..createSync();
+        await chmod('755', loose.path);
+        final path = '${loose.path}/token';
+        await expectLater(
+          TokenStore(path).ensure(),
+          throwsA(isA<TokenFileException>()),
+        );
+        expect(File(path).existsSync(), isFalse, reason: 'no secret written');
+      },
+    );
 
     test('refuses an existing token in a directory others can enter', () async {
       await chmod('755', '${tmp.path}/state');
