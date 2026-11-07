@@ -246,3 +246,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   substituted values, now covered by a test. Still manual for the owner:
   migrating the live agent; the live install is untouched.
 
+- **L17** — Parent check before the PR: real signing with a throwaway
+  RSA key (no network) through `_private_key_pem` + `_sign_rs256`;
+  `openssl dgst -verify` reports Verified OK, the PEM is 0600 while in use
+  and removed afterwards. Notifier suite 84 green on /usr/bin/python3.
