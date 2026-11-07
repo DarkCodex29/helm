@@ -127,6 +127,16 @@ con `python3 -m unittest discover -s host/notifier/tests`.
 > anterior (`launchctl bootout`), corré `install.sh`, verificá que la credencial y los
 > tokens estén en el directorio de instalación y cargá el agente nuevo.
 
+### Daemon de agentes (opcional)
+
+`helm-agentd` (en [`packages/helm_agentd`](packages/helm_agentd/)) maneja Pi en modo RPC y
+sirve el protocolo al teléfono. Se instala como LaunchAgent con `host/agentd/install.sh`
+(`--dry-run` para ver el plan; solo ejecuta `launchctl` con `--load`): compila el binario,
+escucha **solo en la IP de Tailscale** y guarda el token en `~/.helm-agentd/token` (`0600`);
+el teléfono lo copia una vez por SFTP. Detalle y desinstalación en
+[`docs/HOST_SETUP.md`](docs/HOST_SETUP.md). Tests:
+`python3 -m unittest discover -s host/agentd/tests`.
+
 ### Estructura del código
 
 ```
