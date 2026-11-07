@@ -8,7 +8,7 @@ import 'package:helm/features/connection/domain/connection_profile.dart';
 import 'package:helm/features/terminal/data/observable_value_notifier.dart';
 import 'package:helm/features/terminal/data/terminal_session_timings.dart';
 
-/// The agent-tracking loop of one [TerminalSession]: the observer-gated
+/// The agent-tracking loop of one `TerminalSession`: the observer-gated
 /// arming, the single held `agent wait`, and the list that stays the
 /// authority.
 ///
@@ -17,7 +17,7 @@ import 'package:helm/features/terminal/data/terminal_session_timings.dart';
 /// comes in as a getter, so it always sees the CURRENT adapter and
 /// connection state. It creates no Timer and runs nothing at construction:
 /// the loop starts only from [enable] or an observer, both reached from
-/// [connect]'s call stack, so timers still bind to the zone of `connect()`.
+/// `TerminalSession.connect`'s call stack, so timers still bind to the zone of `connect()`.
 class AgentWatch {
   AgentWatch({
     required this.profile,
@@ -41,7 +41,7 @@ class AgentWatch {
   /// What this session last learned about the AI agents inside the
   /// multiplexer session it is attached to.
   ///
-  /// Unlike [advisoriesNotifier], this is published while the session is
+  /// Unlike `TerminalSession.advisoriesNotifier`, this is published while the session is
   /// HEALTHY — agent state is only useful live. It starts, and returns to,
   /// [AgentsNotProbed]: before the first poll answers, helm genuinely does
   /// not know, and saying so is cheaper than being wrong.
@@ -76,7 +76,7 @@ class AgentWatch {
   ///
   /// Defensive only: no reachable path arms twice while already armed
   /// today, because every entry point either transitions through a disarm
-  /// first or is guarded elsewhere ([connect] refuses to run while already
+  /// first or is guarded elsewhere (`TerminalSession.connect` refuses to run while already
   /// connected, and the observer callback fires only on transitions).
   /// Removing it therefore fails no test — verified by mutation — so it is
   /// kept as a cheap invariant for future callers, NOT presented as the
@@ -126,8 +126,8 @@ class AgentWatch {
   /// it is both meaningful and wanted.
   ///
   /// WHY THIS SESSION OWNS IT, for the same reason the probe does (see
-  /// [connect]): the only usable [HostCommandRunner] is the one bound to
-  /// the [SSHClient] this class created, and it reuses that client's
+  /// `TerminalSession.connect`): the only usable `HostCommandRunner` is the one bound to
+  /// the `SSHClient` this class created, and it reuses that client's
   /// channels instead of opening a second connection.
   ///
   /// WHY IT IS GATED ON AN OBSERVER, not merely on being connected:
@@ -135,7 +135,7 @@ class AgentWatch {
   /// "Do not hammer the host" is not satisfied by a slow cadence alone,
   /// and it is satisfied even less by an event-driven wait — a wait is a
   /// HELD channel, so an unobserved session would sit on one indefinitely
-  /// to produce a value nothing renders. A tracker armed by [connect]
+  /// to produce a value nothing renders. A tracker armed by `TerminalSession.connect`
   /// would also outlive any caller that builds a session without tearing
   /// it down, which is precisely how the first version of this code leaked
   /// a pending timer past the end of a widget test. Gating on

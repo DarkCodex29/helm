@@ -96,6 +96,39 @@ Future<_Harness> _connect(
   return _Harness(session, service, attaches);
 }
 
+/// Builds and connects a session INSIDE the running [FakeAsync] zone, so
+/// every timer the agent loop later arms is on the clock the test drives.
+/// Mirrors [_connect], with `flushMicrotasks` instead of `await`.
+_Harness _connectWithin(FakeAsync async, MultiplexerAdapter adapter) {
+  final service = FakeSSHService();
+  service.queueConnectSuccess(
+    SSHConnectionResult(client: _buildFakeClient(), session: FakeSSHSession()),
+  );
+  final attaches = <FakeSSHSession>[];
+  final session = TerminalSession(
+    profile: const ConnectionProfile(
+      id: 'profile-1',
+      name: 'Test Host',
+      host: 'example.test',
+      username: 'tester',
+    ),
+    sshService: service,
+    tmuxSessionName: 'helm-0',
+    terminal: _SilentTerminal(),
+    muxAdapter: adapter,
+    hostRunnerFactory: (_) => FakeHostCommandRunner(),
+    attachOpener: (client, command, pty) async {
+      final attach = FakeSSHSession();
+      attaches.add(attach);
+      return attach;
+    },
+  );
+  unawaited(session.connect('key'));
+  async.flushMicrotasks();
+  expect(session.status, ConnectionStatus.connected);
+  return _Harness(session, service, attaches);
+}
+
 const _agentA = (
   target: 'w1:p1',
   label: 'claude',
@@ -290,8 +323,8 @@ void main() {
   });
 
   group('wait arguments and call counts - exact', () {
-    test('arms one wait on the badge agent with the exact complement and '
-        'kAgentWaitWindow; ties break on the smaller target', () async {
+    test('arms one wait on the badge agent (most urgent, not the first '
+        'listed) with the exact complement and kAgentWaitWindow', () async {
       final adapter = FakeWaitingAgentAdapter()
         ..agentList = const MuxAgentsAvailable([_agentB, _agentA]);
       final h = await _connect(adapter);
@@ -303,6 +336,49 @@ void main() {
       expect(adapter.waits.length, 1);
       expect(adapter.waits[0].target, 'w1:p1');
       expect(adapter.waits[0].timeout, kAgentWaitWindow);
+      expect(
+        adapter.waits[0].until,
+        AgentState.values.where((s) => s != AgentState.blocked).toSet(),
+      );
+
+      h.session.agentsNotifier.removeListener(listener);
+      adapter.drainWaits();
+      await pumpEventQueue();
+      await h.session.dispose();
+    });
+
+    test('equal urgency, agents listed in REVERSE target order: the wait is '
+        'armed on the smaller target', () async {
+      const p1 = (
+        target: 'w1:p1',
+        label: 'claude',
+        state: AgentState.blocked,
+        tabId: null,
+        workspaceId: null,
+      );
+      const p2 = (
+        target: 'w1:p2',
+        label: 'codex',
+        state: AgentState.blocked,
+        tabId: null,
+        workspaceId: null,
+      );
+      const p3 = (
+        target: 'w1:p3',
+        label: 'pi',
+        state: AgentState.blocked,
+        tabId: null,
+        workspaceId: null,
+      );
+      final adapter = FakeWaitingAgentAdapter()
+        ..agentList = const MuxAgentsAvailable([p3, p2, p1]);
+      final h = await _connect(adapter);
+      void listener() {}
+      h.session.agentsNotifier.addListener(listener);
+      await pumpEventQueue();
+
+      expect(adapter.waits.length, 1);
+      expect(adapter.waits[0].target, 'w1:p1');
       expect(
         adapter.waits[0].until,
         AgentState.values.where((s) => s != AgentState.blocked).toSet(),
@@ -519,11 +595,13 @@ void main() {
       () async {
         final adapter = FakeAgentAdapter()..whenHangs();
         final h = await _connect(adapter);
+        // A real listener: it is also the observer that arms the loop, whose
+        // first refresh is the one held in flight.
         final seen = <AgentSnapshot>[];
-        // Observe through a manual notifier hook is not possible without
-        // arming the loop, so count via the value identity instead.
-        final first = h.session.refreshAgents();
+        void listener() => seen.add(h.session.agentsNotifier.value);
+        h.session.agentsNotifier.addListener(listener);
         await pumpEventQueue();
+        expect(adapter.listAgentsCalls, 1);
 
         var secondDone = false;
         unawaited(h.session.refreshAgents().then((_) => secondDone = true));
@@ -538,12 +616,20 @@ void main() {
         expect(seen, isEmpty);
 
         adapter.release();
-        await first;
-        expect((h.session.agentsNotifier.value as AgentsKnown).agents, isEmpty);
+        await pumpEventQueue();
+        expect(seen.length, 1, reason: 'the first publishes exactly once');
+        expect(seen.single, isA<AgentsKnown>());
+        expect((seen.single as AgentsKnown).agents, isEmpty);
 
+        h.session.agentsNotifier.removeListener(listener);
         adapter.whenAgents(const MuxAgentsAvailable([_agentB]));
+        final callsBefore = adapter.listAgentsCalls;
         await h.session.refreshAgents();
-        expect(adapter.listAgentsCalls, 2, reason: 'the guard lifted');
+        expect(
+          adapter.listAgentsCalls,
+          callsBefore + 1,
+          reason: 'guard lifted',
+        );
         expect((h.session.agentsNotifier.value as AgentsKnown).agents, [
           _agentB,
         ]);
@@ -748,27 +834,62 @@ void main() {
   });
 
   group('dispose', () {
-    test('no adapter call after dispose: neither the held wait answering, '
-        'time passing, nor a direct refreshAgents', () async {
-      final adapter = FakeWaitingAgentAdapter()
-        ..agentList = const MuxAgentsAvailable([_agentA]);
-      final h = await _connect(adapter);
-      void listener() {}
-      h.session.agentsNotifier.addListener(listener);
-      await pumpEventQueue();
-      h.session.agentsNotifier.removeListener(listener);
-      await h.session.dispose();
-
-      adapter.completeWait(const MuxAgentWaitMatched(_agentAWorking));
-      await pumpEventQueue();
-      await h.session.refreshAgents();
+    test('polling loop: dispose while observed kills the retry timer, and '
+        'no adapter call follows in any later window', () async {
+      final adapter = FakeAgentAdapter()
+        ..whenAgents(const MuxAgentsAvailable([_agentA]));
       FakeAsync().run((async) {
+        final h = _connectWithin(async, adapter);
+        void listener() {}
+        h.session.agentsNotifier.addListener(listener);
+        async.flushMicrotasks();
+        expect(adapter.listAgentsCalls, 1);
+        async.elapse(kAgentPollInterval);
+        async.flushMicrotasks();
+        expect(adapter.listAgentsCalls, 2, reason: 'the loop is really live');
+        expect(async.pendingTimers, isNotEmpty);
+
+        // Still observed: the listener is NOT removed before dispose.
+        unawaited(h.session.dispose());
+        async.flushMicrotasks();
+        expect(async.pendingTimers, isEmpty);
+
         async.elapse(kAgentWaitWindow * 3);
         async.flushMicrotasks();
+        unawaited(h.session.refreshAgents());
+        async.flushMicrotasks();
+        expect(adapter.listAgentsCalls, 2);
+        expect(async.pendingTimers, isEmpty);
       });
+    });
 
-      expect((adapter.listAgentsCalls, adapter.waits.length), (1, 1));
-      expect((h.session.agentsNotifier.value as AgentsKnown).agents, [_agentA]);
+    test('event-driven loop: dispose with a wait held, then the answer '
+        'arriving and time passing: no adapter call, no timer', () async {
+      final adapter = FakeWaitingAgentAdapter()
+        ..agentList = const MuxAgentsAvailable([_agentA]);
+      FakeAsync().run((async) {
+        final h = _connectWithin(async, adapter);
+        void listener() {}
+        h.session.agentsNotifier.addListener(listener);
+        async.flushMicrotasks();
+        expect((adapter.listAgentsCalls, adapter.waits.length), (1, 1));
+
+        // Still observed while disposing.
+        unawaited(h.session.dispose());
+        async.flushMicrotasks();
+
+        adapter.completeWait(const MuxAgentWaitMatched(_agentAWorking));
+        async.flushMicrotasks();
+        unawaited(h.session.refreshAgents());
+        async.elapse(kAgentWaitWindow * 3);
+        async.flushMicrotasks();
+
+        expect((adapter.listAgentsCalls, adapter.waits.length), (1, 1));
+        expect(async.pendingTimers, isEmpty);
+        expect((h.session.agentsNotifier.value as AgentsKnown).agents, [
+          _agentA,
+        ]);
+      });
     });
 
     test('dispose with a refresh in flight: the late answer is dropped and '
