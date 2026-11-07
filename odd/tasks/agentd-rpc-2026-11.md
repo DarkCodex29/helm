@@ -38,7 +38,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 |---|---|---|---|---|
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
 | T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
-| T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | |
+| T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | c33c2da, f708f9c |
 | T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | pending | |
 | T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
 
@@ -109,3 +109,9 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   tested with `test/support/stubborn_agent.dart` (ignores EOF and SIGTERM).
   CI: new `helm_agentd` job (`dart pub get`, `dart analyze --fatal-infos`,
   `dart test`), and the `flutter` job resolves the nested package too.
+- **L9** — T3 committed as two slices, each green alone: supervisor +
+  unit tests (`c33c2da`, 29 tests) and integration tests + CLI
+  (`f708f9c`, 34). Parent review read the run loop and checked the
+  `switch_session` shape against Pi's `rpc-commands.md`
+  (`{"type":"switch_session","sessionPath":...}`); it is not yet
+  exercised against the real Pi. Slice boundary: T3 is its own PR.
