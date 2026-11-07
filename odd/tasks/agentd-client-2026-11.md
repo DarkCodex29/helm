@@ -46,7 +46,7 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 | T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | 4cb1f93, adc4230, 50157f3, eb52fb2 (PR #12, merge dca8941) |
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer): this task covers four behavior-preserving slices (types/timings/factories, `ObservableValueNotifier`, `OutputSettle`, `HostQueries`) | worker | |
 | T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | worker | |
-| T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | pending | |
+| T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | worker | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
 ## Log
@@ -221,3 +221,22 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   origin/main across all of `data/`: only imports and a second
   `'TerminalSession'` logger tag differ. Mutating the join guard, the
   poll-in-flight guard and the epoch check each fails the new tests.
+- **L16** — T5b pushed to main as 37c7e07. Owner's delivery preference,
+  verbatim: "pero pushea, no crees PRs, al final solo nosotros trabajamos".
+  From now on, push to main and do not open PRs. T5c built by a worker (S1,
+  S4), uncommitted, behavior-preserving. Slice A: 18 characterization tests
+  (`host_probe_characterization_test.dart`) pin the exact report and
+  selection for herdr, tmux, zellij, no-choice default, substituted,
+  none-found, thrown and timed-out probes, the exact terminal notice text,
+  the advisories, which adapter drives focus (observed through the exact
+  command the host runner receives), no probe without a session ref or with
+  an explicit adapter, and the reset on dispose and reconnect; all green on
+  the old code. Slice B: the probe moved to `host_probe.dart` (`HostProbe`:
+  report, selection, `resolve()`, `reset()`), comments verbatim. It takes the
+  prober, a runner getter and callbacks to write the notice, publish the
+  advisories and adopt the adapter. `TerminalSession` keeps `_muxAdapter` as
+  the one source of truth (assigned by the adopt callback at the same point
+  as before), the `hostReport` / `multiplexerSelection` getters, the call
+  position in `connect` and both reset points. It creates no Timer. String
+  literals diffed against origin/main across `data/`: only imports and a
+  second `'TerminalSession'` logger tag differ.

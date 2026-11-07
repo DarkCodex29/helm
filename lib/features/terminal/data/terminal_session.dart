@@ -10,11 +10,9 @@ import 'package:helm/core/host/host_advisor.dart';
 import 'package:helm/core/host/host_advisory.dart';
 import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
-import 'package:helm/core/host/multiplexer_factory.dart';
 import 'package:helm/core/host/multiplexer_selection.dart';
 import 'package:helm/core/host/probe/host_prober.dart';
 import 'package:helm/core/host/probe/host_report.dart';
-import 'package:helm/core/host/session_reference.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
@@ -25,6 +23,7 @@ import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
 import 'package:helm/features/terminal/data/agent_watch.dart';
+import 'package:helm/features/terminal/data/host_probe.dart';
 import 'package:helm/features/terminal/data/host_queries.dart';
 import 'package:helm/features/terminal/data/output_settle.dart';
 import 'package:helm/features/terminal/data/session_factories.dart';
@@ -136,8 +135,6 @@ class TerminalSession {
   SftpFileService? _fileService;
   SftpDownloadService? _downloadService;
   SftpUploadService? _uploadService;
-  HostReport? _hostReport;
-  MultiplexerSelection? _multiplexerSelection;
 
   /// Size of the surface actually rendering [terminal], as last reported
   /// through [onResize]. Null until something has reported one.
@@ -229,10 +226,10 @@ class TerminalSession {
   /// A non-null report whose [HostReport.status] is not
   /// [HostReportStatus.ok] means the probe could not tell us what is on
   /// this host. It never means the host is empty.
-  HostReport? get hostReport => _hostReport;
+  HostReport? get hostReport => _hostProbe.report;
 
   /// Which multiplexer was selected and why, or null when no probe has run.
-  MultiplexerSelection? get multiplexerSelection => _multiplexerSelection;
+  MultiplexerSelection? get multiplexerSelection => _hostProbe.selection;
 
   /// Runs commands over the live connection, or null when not connected.
   ///
@@ -301,7 +298,7 @@ class TerminalSession {
   /// both are only published on the failure path — which is also the only
   /// place the UI renders them. A substitution the user needs to know
   /// about immediately is written into the terminal at connect time
-  /// instead; see [_resolveMultiplexer].
+  /// instead; see [HostProbe.resolve].
   final ValueNotifier<List<HostAdvisory>> advisoriesNotifier = ValueNotifier(
     const [],
   );
@@ -311,7 +308,7 @@ class TerminalSession {
   /// Held HERE, not in the card's `State`, and that placement is the fix
   /// for a defect verified on a real device: the card unmounts and
   /// remounts on every reconnect — [connect] clears [advisoriesNotifier]
-  /// and [_resolveMultiplexer] repopulates it — so widget state handed the
+  /// and [HostProbe.resolve] repopulates it — so widget state handed the
   /// user back every advisory they had already dealt with, on every drop.
   /// This notifier is untouched by that cycle; only [dispose] ends it.
   ///
@@ -435,10 +432,22 @@ class TerminalSession {
     muxAdapter: () => _muxAdapter,
     isDisposed: () => _disposed,
     status: () => statusNotifier.value,
-    hostReport: () => _hostReport,
+    hostReport: () => _hostProbe.report,
     agents: () => agentsNotifier.value,
     profileName: () => profile.name,
     sessionVitalityNotifier: sessionVitalityNotifier,
+  );
+
+  /// Connect-time host probe; see [HostProbe]. The adapter it picks is
+  /// assigned to [_muxAdapter], which stays the one source of truth.
+  late final HostProbe _hostProbe = HostProbe(
+    prober: _hostProber,
+    runner: () => _hostRunner,
+    profile: profile,
+    tmuxSessionName: tmuxSessionName,
+    writeNotice: (notice) => terminal.write('\r\n[Helm] $notice\r\n'),
+    adoptAdapter: (adapter) => _muxAdapter = adapter,
+    publishAdvisories: (advisories) => advisoriesNotifier.value = advisories,
   );
 
   /// See [AgentWatch.tracksAgents].
@@ -514,7 +523,7 @@ class TerminalSession {
         // Skipped entirely when the caller supplied its own adapter: an
         // explicit choice needs no evidence to second-guess it.
         if (_muxAdapterOverride == null) {
-          await _resolveMultiplexer();
+          await _hostProbe.resolve();
         }
 
         // Attach without a stdin race (session-attach spec): the attach
@@ -652,8 +661,7 @@ class TerminalSession {
     // transport that can only fail, and a stale report would describe a
     // host state nobody re-verified. connect() repopulates all four.
     _hostRunner = null;
-    _hostReport = null;
-    _multiplexerSelection = null;
+    _hostProbe.reset();
     // Closed BEFORE the client, and awaited: SftpClient.close() closes its
     // own SSH channel (sftp_client.dart:261-266), and doing that through a
     // transport that is already gone leaves the channel half-open on the
@@ -806,8 +814,7 @@ class TerminalSession {
     // See reconnect(): host state never outlives the connection it
     // describes.
     _hostRunner = null;
-    _hostReport = null;
-    _multiplexerSelection = null;
+    _hostProbe.reset();
     statusNotifier.value = ConnectionStatus.disconnected;
     statusNotifier.dispose();
     lastFailureNotifier.dispose();
@@ -836,62 +843,6 @@ class TerminalSession {
     _fileService = null;
     if (service == null) return;
     await service.close();
-  }
-
-  /// Probes the host and swaps in the adapter the result selects.
-  ///
-  /// Never throws: [HostProber.probe] absorbs every probe failure into an
-  /// explicitly unknown report, and an unknown report resolves to the
-  /// multiplexer the profile asked for under a bare binary name — which is
-  /// byte-for-byte what this class did before the probe existed. A host
-  /// that cannot be probed is therefore never worse off than before.
-  Future<void> _resolveMultiplexer() async {
-    final runner = _hostRunner;
-    if (runner == null) return;
-
-    final report = await _hostProber.probe(runner);
-    _hostReport = report;
-
-    final selection = resolveMultiplexer(
-      requested: decodeMultiplexer(profile.multiplexer),
-      report: report,
-    );
-    _multiplexerSelection = selection;
-    // The session ref is what makes herdr's agent queries answer for the
-    // session this class is actually attaching to. Measured on a real host:
-    // without it, `agent list` answers for herdr's DEFAULT session and
-    // reports zero agents while the attached session has one running.
-    // The mobile config is read off the SAME report the selection came
-    // from — the probe that already runs on connect, not a second round
-    // trip. A host that does not have one, or a report that never
-    // finished, yields null and leaves the attach command untouched.
-    _muxAdapter = buildMultiplexerAdapter(
-      selection,
-      runner,
-      sessionRef: tmuxSessionName,
-    );
-
-    _log.i('Multiplexer selected for ${profile.name}: ${selection.id.name}');
-
-    // Publish the probe-derived findings immediately.
-    //
-    // These cost nothing — the selection already carries everything they
-    // need — so unlike the HostDiagnostics-backed ones they do not wait
-    // for a failure. They must not: a substitution on a session that
-    // connects FINE is exactly the case the user would otherwise never
-    // learn about.
-    advisoriesNotifier.value = advisoriesForSelection(selection);
-
-    // Also written to the terminal, which is where it belongs when the
-    // attach itself fails and nothing takes the screen over. Verified on a
-    // real host that this is NOT sufficient on its own: tmux clears the
-    // screen when it attaches, erasing this line before it can be read.
-    // The notifier above is what survives that.
-    final notice = multiplexerSelectionNotice(selection);
-    if (notice != null) {
-      _log.w(notice);
-      terminal.write('\r\n[Helm] $notice\r\n');
-    }
   }
 
   void _bridgeIO(SSHSession session) {
@@ -993,7 +944,7 @@ class TerminalSession {
     unawaited(
       _advisor
           .collect(
-            selection: _multiplexerSelection,
+            selection: _hostProbe.selection,
             runner: _hostRunner,
             connectHost: profile.host,
           )
