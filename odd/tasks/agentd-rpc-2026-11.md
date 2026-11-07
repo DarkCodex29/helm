@@ -38,7 +38,7 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 |---|---|---|---|---|
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
 | T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
-| T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | pending | |
+| T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | c33c2da, f708f9c |
 | T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | pending | |
 | T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
 
@@ -84,3 +84,34 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   `dart analyze` in CI, because one info-level lint had passed unnoticed.
   Slice boundary: T2 ships as its own PR; T3 starts a new branch from
   `main` after it merges.
+- **L8** — T3 built (S1-S5, respecting S6). `packages/helm_agentd`: pure Dart,
+  path dependency on `helm_protocol`, same SDK/lints as it. `lib/src/pi_supervisor.dart`
+  is `PiSupervisor` with injectable process starter, timer factory, clock,
+  args/binary and grace periods; `bin/helm_agentd.dart` only starts it and logs
+  state to stderr (the WebSocket server is T4). Typed errors: `PiNotRunning`,
+  `PiProcessExited`, `PiCommandTimeout`. Events are `PiRecordEvent` or
+  `InterruptedEvent`; stderr and malformed stdout lines are diagnostics.
+  Policies decided: (1) spawn failure (starter throws, e.g. ENOENT) is retried
+  with the same backoff up to `maxSpawnAttempts` (3) consecutive attempts, then
+  `failed` is terminal and `failure` holds the error; the CLI exits 69.
+  (2) A process that starts and keeps crashing is retried forever at the capped
+  30 s rate (reference behaviour); backoff resets after 30 s of uptime.
+  (3) After a respawn, `get_state` then `switch_session{sessionPath}` run BEFORE
+  `running` is published, so callers cannot hit the wrong session; failures there
+  are diagnostics, not fatal. The session file is learned from `get_state`
+  (`data.sessionFile`), so the supervisor also sends one `get_state` after the
+  first start (`probeOnStart`, default on). (4) `PiCommand` is sealed in
+  `helm_protocol`, so `switch_session` is written as a raw map inside the
+  supervisor instead of a model. (5) A Pi exit with code 0 that was not
+  requested is still restarted. (6) `extension_ui_response` has no reply, so it
+  goes through `sendUiResponse`, not `send`. Note: the fake `hang` scenario
+  exits on stdin close, so SIGTERM/SIGKILL escalation against a real process is
+  tested with `test/support/stubborn_agent.dart` (ignores EOF and SIGTERM).
+  CI: new `helm_agentd` job (`dart pub get`, `dart analyze --fatal-infos`,
+  `dart test`), and the `flutter` job resolves the nested package too.
+- **L9** — T3 committed as two slices, each green alone: supervisor +
+  unit tests (`c33c2da`, 29 tests) and integration tests + CLI
+  (`f708f9c`, 34). Parent review read the run loop and checked the
+  `switch_session` shape against Pi's `rpc-commands.md`
+  (`{"type":"switch_session","sessionPath":...}`); it is not yet
+  exercised against the real Pi. Slice boundary: T3 is its own PR.
