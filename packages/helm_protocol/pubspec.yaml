@@ -1,0 +1,13 @@
+name: helm_protocol
+description: >-
+  Pure-Dart protocol layer shared by the helm app and helm-agentd: a strict
+  LF-only JSONL codec and typed models for Pi's RPC records.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.3
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
