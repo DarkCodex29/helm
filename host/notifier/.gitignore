@@ -1,0 +1,17 @@
+# Nothing in here may ever hold a credential: this repository is public.
+fcm-sa.*
+*.pem
+*.key
+# JSON is ignored (service accounts, device tokens), except test fixtures.
+*.json
+!tests/fixtures/
+!tests/fixtures/*.json
+device-tokens*
+!tests/fixtures/device-tokens.fake.json
+topic
+*.log
+*.log.*
+*.err
+__pycache__/
+*.pyc
+*.out
