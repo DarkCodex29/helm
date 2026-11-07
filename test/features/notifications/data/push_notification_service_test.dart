@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/host_command_runner.dart';
+import 'package:helm/features/notifications/data/ntfy_topic_service.dart';
 import 'package:helm/features/notifications/data/push_messaging_gateway.dart';
 import 'package:helm/features/notifications/data/push_notification_service.dart';
+import 'package:helm/features/notifications/domain/notification_channel.dart';
 import 'package:helm/features/notifications/domain/session_alert.dart';
 
 import '../../../helpers/fake_local_notification_presenter.dart';
+import '../../../helpers/fake_secure_storage.dart';
 import '../../../helpers/fake_push_messaging_gateway.dart';
 
 /// Records the scripts it is asked to run and always succeeds.
@@ -38,6 +41,11 @@ class _BrokenRunner implements HostCommandRunner {
       throw StateError('transport gone');
 }
 
+class _ThrowingTopicService extends NtfyTopicService {
+  @override
+  Future<String> topic() => throw StateError('keychain unavailable');
+}
+
 /// A gateway whose [initialize] never completes, modelling a platform
 /// channel that has gone away.
 class _WedgedGateway extends FakePushMessagingGateway {
@@ -50,8 +58,10 @@ void main() {
   late FakeLocalNotificationPresenter presenter;
   late List<SessionAlert> opened;
   late PushNotificationService service;
+  late FakeSecureStorage topicStorage;
 
   setUp(() {
+    topicStorage = FakeSecureStorage();
     gateway = FakePushMessagingGateway();
     presenter = FakeLocalNotificationPresenter();
     opened = [];
@@ -59,6 +69,7 @@ void main() {
       gateway: gateway,
       presenter: presenter,
       onAlertOpened: opened.add,
+      topicService: NtfyTopicService(storage: topicStorage),
     );
   });
 
@@ -309,14 +320,111 @@ void main() {
       expect(runner.scripts, hasLength(1));
     });
 
-    test('does nothing when FCM has no token for this device', () async {
+    test('a device with a token registers ONLY the token', () async {
+      final runner = _Runner();
+      await service.start();
+
+      await service.onAgentTrackingStarted(runner);
+
+      expect(runner.scripts, hasLength(1));
+      expect(runner.scripts.single, contains('fake-token'));
+      expect(runner.scripts.single, isNot(contains('ntfy_topics')));
+      expect(topicStorage.values, isEmpty, reason: 'no topic generated');
+    });
+  });
+
+  group('a device with no FCM channel registers its own ntfy topic', () {
+    String storedTopic() => topicStorage.values[kNtfyTopicStorageKey]!;
+
+    test('Firebase unavailable (iOS today): the topic is registered', () async {
+      gateway.initializeError = UnsupportedError('no ios options');
+      final runner = _Runner();
+      await service.start();
+
+      await service.onAgentTrackingStarted(runner);
+
+      expect(runner.scripts, hasLength(1));
+      expect(runner.scripts.single, contains('\n${storedTopic()}\n'));
+      expect(runner.scripts.single, contains('ntfy_topics'));
+    });
+
+    test('a null FCM token registers the topic too', () async {
       gateway.currentToken = null;
       final runner = _Runner();
       await service.start();
 
       await service.onAgentTrackingStarted(runner);
 
+      expect(runner.scripts, hasLength(1));
+      expect(runner.scripts.single, contains('ntfy_topics'));
+    });
+
+    test('re-registers on every attach with the SAME topic', () async {
+      gateway.currentToken = null;
+      final first = _Runner();
+      final second = _Runner();
+      await service.start();
+
+      await service.onAgentTrackingStarted(first);
+      final topic = storedTopic();
+      await service.onAgentTrackingStarted(second);
+
+      expect(second.scripts, hasLength(1));
+      expect(second.scripts.single, contains('\n$topic\n'));
+      expect(storedTopic(), topic);
+    });
+
+    test('a throwing token lookup does not invent a second channel', () async {
+      gateway.tokenError = StateError('no play services');
+      final runner = _Runner();
+      await service.start();
+
+      await service.onAgentTrackingStarted(runner);
+
       expect(runner.scripts, isEmpty);
+    });
+
+    test('a failing secure store never fails the connection', () async {
+      gateway.currentToken = null;
+      final broken = PushNotificationService(
+        gateway: gateway,
+        presenter: presenter,
+        onAlertOpened: opened.add,
+        topicService: _ThrowingTopicService(),
+      );
+      addTearDown(broken.dispose);
+      await broken.start();
+
+      await expectLater(broken.onAgentTrackingStarted(_Runner()), completes);
+    });
+  });
+
+  group('which channel this device uses', () {
+    test('FCM when a token exists', () async {
+      await service.start();
+      expect(await service.resolveChannel(), isA<FcmChannel>());
+    });
+
+    test('ntfy with the SAME topic that gets registered, without Firebase',
+        () async {
+      gateway.initializeError = UnsupportedError('no ios options');
+      final runner = _Runner();
+      await service.start();
+      await service.onAgentTrackingStarted(runner);
+
+      final channel = await service.resolveChannel();
+
+      expect(channel, isA<NtfyChannel>());
+      expect(
+        runner.scripts.single,
+        contains('\n${(channel as NtfyChannel).topic}\n'),
+      );
+    });
+
+    test('ntfy when FCM has no token', () async {
+      gateway.currentToken = null;
+      await service.start();
+      expect(await service.resolveChannel(), isA<NtfyChannel>());
     });
   });
 

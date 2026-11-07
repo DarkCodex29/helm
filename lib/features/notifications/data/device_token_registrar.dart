@@ -52,6 +52,9 @@ const int kMaxDeviceTokenLength = 4096;
 /// the newline, which is the ONLY character that can end the heredoc.
 final RegExp _tokenShape = RegExp(r'^[A-Za-z0-9_:.-]+$');
 
+/// The shape of a per-device ntfy topic: `[A-Za-z0-9_-]`, 8 to 64 chars.
+final RegExp _topicShape = RegExp(r'^[A-Za-z0-9_-]{8,64}$');
+
 /// How long the host gets to merge the token before we give up on it.
 ///
 /// The registration runs on the connect path, so an unbounded wait would
@@ -148,6 +151,47 @@ class DeviceTokenRegistrar {
     }
   }
 
+  /// Merges this device's ntfy [topic] into the Mac's `ntfy_topics` list.
+  ///
+  /// Same transport, same safety measures and same never-throws contract as
+  /// [register]. The topic is a bearer secret (whoever knows it reads the
+  /// alerts), so it is never logged.
+  Future<TokenRegistrationOutcome> registerNtfyTopic({
+    required String topic,
+    required HostCommandRunner runner,
+  }) async {
+    if (!isRegisterableTopic(topic)) {
+      _log.w('Refusing to register an ntfy topic that failed validation');
+      return TokenRegistrationOutcome.rejectedLocally;
+    }
+
+    try {
+      final result = await runner.runScript(
+        buildNtfyTopicRegistrationScript(topic),
+        timeout: kTokenRegistrationTimeout,
+      );
+      if (result.timedOut || result.exitCode != 0) {
+        _log.w(
+          'Host refused ntfy topic registration '
+          '(exit ${result.exitCode}, timedOut ${result.timedOut})',
+        );
+        return TokenRegistrationOutcome.hostRefused;
+      }
+      _log.i('ntfy topic registered with the host');
+      return TokenRegistrationOutcome.registered;
+    } catch (e) {
+      _log.w('ntfy topic registration failed on the transport: $e');
+      return TokenRegistrationOutcome.transportFailed;
+    }
+  }
+
+  /// Whether [topic] is in the ntfy-safe alphabet and cannot close the
+  /// heredoc. Rejects every shell metacharacter and the newline.
+  static bool isRegisterableTopic(String topic) =>
+      _topicShape.hasMatch(topic) &&
+      !topic.contains(kTokenHeredocDelimiter) &&
+      !topic.contains(kMergeHeredocDelimiter);
+
   /// Whether [token] is safe and plausible enough to send.
   ///
   /// The delimiter check is not redundant with [_tokenShape], and that is
@@ -200,7 +244,21 @@ class DeviceTokenRegistrar {
 /// and that is accepted: the loser re-registers on its next connect or
 /// token refresh, and locking a file to protect a list of at most a few
 /// strings would cost more than the failure does.
-String buildTokenRegistrationScript(String token) {
+String buildTokenRegistrationScript(String token) =>
+    _buildMergeScript(token, 'tokens');
+
+/// The script that merges [topic] into the `ntfy_topics` list of the same
+/// file, leaving `tokens` untouched. See [buildTokenRegistrationScript] for
+/// the delivery design: the value crosses in a quoted heredoc, into a temp
+/// file removed by an `EXIT` trap.
+String buildNtfyTopicRegistrationScript(String topic) =>
+    _buildMergeScript(topic, 'ntfy_topics');
+
+/// [key] is `tokens` or `ntfy_topics`, a constant chosen by this file, never
+/// user input. The program keeps every OTHER key of the file as it found it
+/// (a file with only `tokens` stays valid), cleans and dedupes the list it
+/// updates, and repairs an unreadable file instead of obeying it.
+String _buildMergeScript(String value, String key) {
   return '''
 set -eu
 dir="\$HOME/helm-notifier"
@@ -208,35 +266,42 @@ mkdir -p "\$dir"
 tmp="\$dir/.helm-device-token.\$\$"
 trap 'rm -f "\$tmp"' EXIT
 cat > "\$tmp" <<'$kTokenHeredocDelimiter'
-$token
+$value
 $kTokenHeredocDelimiter
-python3 - "\$dir/device-tokens.json" "\$tmp" <<'$kMergeHeredocDelimiter'
+python3 - "\$dir/device-tokens.json" "\$tmp" "$key" <<'$kMergeHeredocDelimiter'
 import json, os, sys
 
-target, token_file = sys.argv[1], sys.argv[2]
+target, value_file, key = sys.argv[1], sys.argv[2], sys.argv[3]
 
-with open(token_file) as handle:
-    token = handle.read().strip()
+with open(value_file) as handle:
+    value = handle.read().strip()
 
 # An unreadable file is repaired rather than obeyed. Refusing to write
 # would wedge registration permanently on bytes nobody can use, and the
-# token in hand is worth more than a file that no longer parses.
-tokens = []
+# value in hand is worth more than a file that no longer parses.
+doc = {}
 if os.path.exists(target):
     try:
         with open(target) as handle:
             loaded = json.load(handle)
         if isinstance(loaded, dict):
-            tokens = [t for t in loaded.get("tokens", []) if isinstance(t, str)]
+            doc = loaded
     except (ValueError, OSError):
-        tokens = []
+        doc = {}
 
-if token and token not in tokens:
-    tokens.append(token)
+current = doc.get(key, [])
+items = []
+if isinstance(current, list):
+    for item in current:
+        if isinstance(item, str) and item.strip() and item.strip() not in items:
+            items.append(item.strip())
+if value and value not in items:
+    items.append(value)
+doc[key] = items
 
 staging = target + ".helm-new"
 with open(staging, "w") as handle:
-    json.dump({"tokens": tokens}, handle)
+    json.dump(doc, handle)
 os.replace(staging, target)
 $kMergeHeredocDelimiter
 ''';

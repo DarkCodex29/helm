@@ -4,7 +4,9 @@ import 'package:helm/core/host/host_command_runner.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/notifications/data/device_token_registrar.dart';
 import 'package:helm/features/notifications/data/local_notification_presenter.dart';
+import 'package:helm/features/notifications/data/ntfy_topic_service.dart';
 import 'package:helm/features/notifications/data/push_messaging_gateway.dart';
+import 'package:helm/features/notifications/domain/notification_channel.dart';
 import 'package:helm/features/notifications/domain/session_alert.dart';
 
 /// How long launch will wait to find out whether a notification started it.
@@ -33,11 +35,13 @@ class PushNotificationService {
     required LocalNotificationPresenter presenter,
     required void Function(SessionAlert alert) onAlertOpened,
     DeviceTokenRegistrar registrar = const DeviceTokenRegistrar(),
+    NtfyTopicService? topicService,
     Duration launchTimeout = kLaunchResolutionTimeout,
   }) : _gateway = gateway,
        _presenter = presenter,
        _onAlertOpened = onAlertOpened,
        _registrar = registrar,
+       _topicService = topicService ?? NtfyTopicService(),
        _launchTimeout = launchTimeout;
 
   static final _log = HelmLogger('PushNotificationService');
@@ -46,6 +50,7 @@ class PushNotificationService {
   final LocalNotificationPresenter _presenter;
   final void Function(SessionAlert alert) _onAlertOpened;
   final DeviceTokenRegistrar _registrar;
+  final NtfyTopicService _topicService;
   final Duration _launchTimeout;
 
   final List<StreamSubscription<void>> _subscriptions = [];
@@ -57,6 +62,11 @@ class PushNotificationService {
   /// until something attaches, and a refresh that arrives before then is
   /// simply dropped — the next attach reads the current token anyway.
   HostCommandRunner? _runner;
+
+  /// False once [start] saw Firebase fail to initialize (iOS today: there
+  /// is no `GoogleService-Info.plist`). Such a device can never hold an FCM
+  /// token, so it uses its own ntfy topic instead.
+  var _firebaseAvailable = true;
 
   var _permissionAsked = false;
   var _started = false;
@@ -135,6 +145,7 @@ class PushNotificationService {
       await _gateway.initialize();
     } catch (e) {
       firebaseAvailable = false;
+      _firebaseAvailable = false;
       // Matches the WARN `resolveLaunchAlert` already logs for the same
       // failure: a device with no Play Services, or
       // `DefaultFirebaseOptions` throwing `UnsupportedError` for a
@@ -204,6 +215,24 @@ class PushNotificationService {
     await _registerCurrentToken(runner);
   }
 
+  /// The channel this device is (or will be) reached on, for Settings.
+  ///
+  /// Mirrors the registration decision: FCM when Firebase works and holds a
+  /// token, otherwise this device's own ntfy topic (created on first ask,
+  /// the same one [onAgentTrackingStarted] registers).
+  Future<NotificationChannel> resolveChannel() async {
+    if (_firebaseAvailable) {
+      String? token;
+      try {
+        token = await _gateway.token();
+      } catch (_) {
+        token = null;
+      }
+      if (token != null) return const FcmChannel();
+    }
+    return NtfyChannel(await _topicService.topic());
+  }
+
   /// Releases the stream subscriptions.
   Future<void> dispose() async {
     for (final subscription in _subscriptions) {
@@ -223,6 +252,13 @@ class PushNotificationService {
   /// simply never have existed. Re-sending costs one round trip and the
   /// merge is idempotent, so the cheap thing and the correct thing agree.
   Future<void> _registerCurrentToken(HostCommandRunner runner) async {
+    // One channel per device: FCM when this device has a token, its own ntfy
+    // topic when it cannot have one.
+    if (!_firebaseAvailable) {
+      await _registerNtfyTopic(runner);
+      return;
+    }
+
     String? token;
     try {
       token = await _gateway.token();
@@ -232,13 +268,30 @@ class PushNotificationService {
     }
 
     if (token == null) {
-      _log.w('FCM has no token for this device yet; nothing to register');
+      _log.w('FCM has no token for this device; using an ntfy topic');
+      await _registerNtfyTopic(runner);
       return;
     }
 
     final outcome = await _registrar.register(token: token, runner: runner);
     if (outcome != TokenRegistrationOutcome.registered) {
       _log.w('Device token not registered: ${outcome.name}');
+    }
+  }
+
+  /// Never logs the topic: it is a bearer secret.
+  Future<void> _registerNtfyTopic(HostCommandRunner runner) async {
+    try {
+      final topic = await _topicService.topic();
+      final outcome = await _registrar.registerNtfyTopic(
+        topic: topic,
+        runner: runner,
+      );
+      if (outcome != TokenRegistrationOutcome.registered) {
+        _log.w('ntfy topic not registered: ${outcome.name}');
+      }
+    } catch (e) {
+      _log.w('Could not register an ntfy topic: ${e.runtimeType}');
     }
   }
 
