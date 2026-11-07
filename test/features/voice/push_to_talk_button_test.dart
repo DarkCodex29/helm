@@ -10,6 +10,8 @@
 // channel); a fake transcribe function stands in for VoiceTranscriber (no
 // SSH session, no upload) — VoiceTranscriber itself is already covered by
 // `voice_transcriber_test.dart`. This file only proves the WIRING.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -251,5 +253,38 @@ void main() {
       isTrue,
       reason: 'statuses were: $statuses',
     );
+  });
+
+  testWidgets('resolveTranscribe throwing still deletes the local recording '
+      'and surfaces a failure', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('ptt_button_test_');
+    final wav = File('${dir.path}/ptt_throw.wav')..writeAsBytesSync([0, 1]);
+    final recorder = _FakeVoiceRecorder()
+      ..stopResult = VoiceRecording(wav.path);
+    final typed = <String>[];
+    final statuses = <String?>[];
+
+    await _pumpButton(
+      tester,
+      recorder: recorder,
+      resolveTranscribe: () => throw StateError('no session'),
+      typeAtPrompt: typed.add,
+      onStatus: statuses.add,
+    );
+
+    final button = find.bySemanticsIdentifier(KeyboardLayoutSemantics.voice);
+    final gesture = await tester.startGesture(tester.getCenter(button));
+    await tester.pump();
+    await tester.runAsync(() async {
+      await gesture.up();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+
+    expect(wav.existsSync(), isFalse);
+    expect(typed, isEmpty);
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
   });
 }

@@ -39,25 +39,49 @@ class PushToTalkRecorder {
 
   final VoiceRecorder _recorder;
   bool _recording = false;
+  bool _disposed = false;
+
+  /// The in-flight [onPressStart], so a release or dispose that lands
+  /// before the platform finished starting can wait for it instead of
+  /// leaving the microphone open and the temp wav undeleted.
+  Future<PushToTalkStartResult>? _starting;
 
   /// Call when the press begins. Requests microphone permission on first
   /// use, through [VoiceRecorder.start].
-  Future<PushToTalkStartResult> onPressStart() async {
+  Future<PushToTalkStartResult> onPressStart() {
+    final flow = _start();
+    _starting = flow;
+    return flow.whenComplete(() {
+      if (identical(_starting, flow)) _starting = null;
+    });
+  }
+
+  Future<PushToTalkStartResult> _start() async {
     final result = await _recorder.start();
-    return switch (result) {
-      VoiceRecordingStarted() => () {
+    switch (result) {
+      case VoiceRecordingStarted():
+        if (_disposed) {
+          // Disposed while start was in flight: nothing asked for this
+          // recording any more. Discard it rather than leak the mic.
+          unawaited(_recorder.cancel());
+          return PushToTalkStartResult.failed;
+        }
         _recording = true;
         return PushToTalkStartResult.started;
-      }(),
-      VoiceRecordingDenied() => PushToTalkStartResult.denied,
-      VoiceRecordingStartFailed() => PushToTalkStartResult.failed,
-    };
+      case VoiceRecordingDenied():
+        return PushToTalkStartResult.denied;
+      case VoiceRecordingStartFailed():
+        return PushToTalkStartResult.failed;
+    }
   }
 
   /// Call when the press ends normally. Returns the finished recording, or
   /// null if nothing was recording (a denied or failed [onPressStart]) or
-  /// the platform could not produce a file.
+  /// the platform could not produce a file. A release that arrives while
+  /// start is still in flight waits for it, then stops normally.
   Future<VoiceRecording?> onPressEnd() async {
+    final starting = _starting;
+    if (starting != null) await starting;
     if (!_recording) return null;
     _recording = false;
     return _recorder.stop();
@@ -65,13 +89,15 @@ class PushToTalkRecorder {
 
   /// Call when the widget holding the press is disposed. If a recording
   /// is still open — the press never released cleanly — it is cancelled
-  /// and its temp file discarded, not left running or silently kept.
+  /// and its temp file discarded, not left running or silently kept. If
+  /// start is still in flight, the cancel happens as soon as it resolves.
   ///
   /// Fire-and-forget on purpose: `dispose()` methods in this codebase (see
   /// [PlatformSharedTextReceiver.dispose]) are synchronous, and a widget's
   /// `State.dispose()` cannot await one that is not. The cancellation
   /// still happens; it is simply not awaited by the caller.
   void dispose() {
+    _disposed = true;
     if (!_recording) return;
     _recording = false;
     unawaited(_recorder.cancel());

@@ -105,7 +105,16 @@ class _PushToTalkButtonState extends ConsumerState<PushToTalkButton> {
     // failure above; there is no recording to transcribe or discard.
     if (recording == null) return;
 
-    final transcribe = widget.resolveTranscribe();
+    final VoiceTranscribe? transcribe;
+    try {
+      transcribe = widget.resolveTranscribe();
+    } catch (_) {
+      // The recording is ours to delete; never leave a wav behind because
+      // resolving the transcriber threw.
+      await recording.delete();
+      if (mounted) widget.onStatus('Transcription failed');
+      return;
+    }
     if (transcribe == null) {
       await recording.delete();
       if (mounted) widget.onStatus('Not connected');
