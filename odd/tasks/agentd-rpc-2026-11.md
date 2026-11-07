@@ -39,7 +39,9 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
 | T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
 | T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | c33c2da, f708f9c |
-| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | pending | |
+| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | worker | |
+| T4b | S1 | History and resync: on a `seq` gap the phone asks for `get_messages` (Pi) so it can rebuild the transcript | pending | |
+| T4c | S1, S5 | Per-client backpressure: bound each socket's outgoing queue, drop or disconnect a slow client without stalling the others | pending | |
 | T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
 
 ## Log
@@ -115,3 +117,53 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   `switch_session` shape against Pi's `rpc-commands.md`
   (`{"type":"switch_session","sessionPath":...}`); it is not yet
   exercised against the real Pi. Slice boundary: T3 is its own PR.
+- **L10** — T4 built (S1-S5, respecting S6), in four slices. (1) Phone
+  protocol models in `helm_protocol` (`phone_protocol.dart`, `e569564`).
+  (2) `lib/src/token_store.dart` + `lib/src/server.dart`: dart:io only
+  (`HttpServer` + `WebSocketTransformer`); binds `127.0.0.1` by default
+  (`--host` takes the Tailscale IP, never defaulted to `0.0.0.0`); token =
+  32 bytes `Random.secure()` base64url in `~/.helm-agentd/token` (0600 file in
+  a 0700 dir, tightened before the secret is written), refused at start if
+  group/world-readable, re-read and re-checked on every authentication,
+  constant-time compare, never logged or put in an error (the CLI prints the
+  FILE path). First frame must be `hello` within 5 s else close 4401; wrong
+  token 4401, wrong protocol 4400 (token is checked first, so a bad token
+  reveals nothing about the protocol); any `Origin` outside the allowlist
+  (default empty) gets HTTP 403 before the upgrade; non-upgrade HTTP gets 426;
+  binary frames close 1003, frames over 1 MiB (bytes, not characters) close
+  1009. A socket that has not authenticated is never handed to the bridge and
+  cannot receive a frame (`send` is a no-op until authenticated). `seq` is
+  per connection from 1. Known limit: dart:io delivers whole messages, so the
+  1 MiB cap bounds what is processed, not what a hostile peer can make the
+  process buffer; reachability (loopback/tailnet) is the first defence.
+  (3) `lib/src/bridge.dart`, `delta_coalescer.dart`, `request_ids.dart`:
+  `deriveState()` is the one place that decides the state (supervisor
+  lifecycle first, then open asks > idle > working > thinking) and
+  `agent_state` is broadcast only on change; deltas are coalesced per message
+  and flushed every 50 ms or before any other event (activity, `message_done`,
+  `interrupted`, `ask`), so text is never dropped or reordered; only assistant
+  text deltas are forwarded (thinking and user messages are not). Dialogs
+  become `ask`; the first `ui_response` wins and is forwarded once, later ones
+  get `error{ask_resolved}`, an answer for an unknown id gets
+  `error{unknown_ask}`; non-dialog `extension_ui_request`s (notify,
+  setStatus...) are deliberately not forwarded. Pending asks are resolved when
+  the supervisor leaves `running` and on `interrupted`. `send` is a `prompt`
+  (with `streamingBehavior: steer` when busy); `requestId` idempotency is an LRU
+  of 256, a duplicate (even while the first is in flight) is
+  `ack{duplicate:true}` and not forwarded, `ack{duplicate:false}` follows Pi's
+  acceptance, a failure releases the id so the client can retry and reports
+  `error{code,message}` with the requestId in the message (`not_running`,
+  `rejected`, `timeout`, `interrupted`). A new client gets `ready` with the
+  current state plus the pending asks and the last non-empty queue.
+  (4) integration tests (real server + real `PiSupervisor` + the fake Pi + real
+  WebSocket clients) and the CLI (`--host`, `--port` default 7480, `--pi`,
+  `--session-dir`, `--token-file`, `--help`; exit codes 0/64/69/78; SIGINT and
+  SIGTERM close the server, then `supervisor.shutdown()`). `--pi` takes a
+  binary only; tests wrap the fake in a launcher script. Port 7480 was chosen
+  as a fixed non-privileged default. Hang-proofing: every socket wait in the
+  tests is bounded (`bound` = 8 s, 15 s for Pi round trips), every test file
+  has a `@Timeout`, servers/clients/supervisors are closed in `tearDown`, and
+  every runner invocation was wrapped in `perl -e 'alarm N; exec @ARGV'`.
+  Pending (not in T4): T4b history/resync via `get_messages` on a `seq` gap;
+  T4c per-client backpressure; a dialog's own `timeout` is not tracked, so an
+  expired ask stays listed until answered or the next restart.
