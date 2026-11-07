@@ -1,7 +1,10 @@
 @Timeout(Duration(seconds: 30))
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/features/agentd/data/agentd_client.dart';
 import 'package:helm/features/agentd/data/agentd_providers.dart';
@@ -19,6 +22,28 @@ const _token = 'FAKEfakeFAKEfakeFAKEfakeFAKEfakeFAKEfakeFAK';
 Future<void> settle() async {
   for (var i = 0; i < 20; i++) {
     await Future<void>.delayed(Duration.zero);
+  }
+}
+
+/// Secure storage whose reads wait on [gate], to hold a provider mid-build.
+class _GatedStorage extends FakeSecureStorage {
+  _GatedStorage(super.initial);
+  final gate = Completer<void>();
+  final reads = Completer<void>();
+
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (!reads.isCompleted) reads.complete();
+    await gate.future;
+    return values[key];
   }
 }
 
@@ -133,6 +158,57 @@ void main() {
       ),
     );
   });
+
+  test(
+    'disposing while the token read is pending raises no error and leaks no client',
+    () async {
+      final storage = _GatedStorage({
+        AgentdTokenStore.storageKey('p1'): _token,
+      });
+      final errors = <Object>[];
+      final made = <AgentdClient>[];
+      await runZonedGuarded(() async {
+        final container = ProviderContainer(
+          overrides: [
+            agentdSecureStorageProvider.overrideWithValue(storage),
+            agentdClientFactoryProvider.overrideWithValue((endpoint, token) {
+              final c = AgentdClient(
+                endpoint: endpoint,
+                token: token,
+                connect: connector.call,
+              );
+              made.add(c);
+              return c;
+            }),
+            agentdEndpointProvider.overrideWith(
+              (ref, id) async => const AgentdEndpoint(host: '127.0.0.1'),
+            ),
+          ],
+        );
+        final sub = container.listen(agentdClientProvider('p1'), (_, _) {});
+        await storage.reads.future.timeout(const Duration(seconds: 5));
+        sub.close();
+        await settle();
+        storage.gate.complete();
+        await settle();
+        container.dispose();
+      }, (e, _) => errors.add(e));
+      expect(errors, isEmpty);
+      // Either no client was built, or every built client was closed.
+      for (final client in made) {
+        await expectLater(
+          client.send('x').timeout(const Duration(seconds: 5)),
+          throwsA(
+            isA<AgentdCommandException>().having(
+              (e) => e.kind,
+              'kind',
+              AgentdCommandError.closed,
+            ),
+          ),
+        );
+      }
+    },
+  );
 
   group('SftpFileService shares its single SFTP session', () {
     test('sharedSession is the session listings use (one open)', () async {

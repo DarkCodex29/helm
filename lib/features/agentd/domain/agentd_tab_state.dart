@@ -33,6 +33,9 @@ class AgentdTabUnavailable extends AgentdTabState {
 
 /// Pure mapping from the connection state to the tab state.
 AgentdTabState agentdTabStateFor(AsyncValue<AgentdConnectionState> async) {
+  // valueOrNull keeps the PREVIOUS data during loading/error; nothing is
+  // measured then, so never show it.
+  if (async.isLoading || async.hasError) return const AgentdTabAbsent();
   final s = async.valueOrNull;
   if (s == null) return const AgentdTabAbsent();
   return switch (s) {

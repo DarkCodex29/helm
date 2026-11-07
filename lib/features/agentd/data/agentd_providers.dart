@@ -44,6 +44,16 @@ final agentdEndpointProvider = FutureProvider.family<AgentdEndpoint?, String>((
   return null;
 });
 
+/// How an [AgentdClient] is built from an endpoint and token. Overridable in
+/// tests (to observe or fake the client); production uses the real client.
+typedef AgentdClientFactory =
+    AgentdClient Function(AgentdEndpoint endpoint, String token);
+
+final agentdClientFactoryProvider = Provider<AgentdClientFactory>(
+  (_) =>
+      (endpoint, token) => AgentdClient(endpoint: endpoint, token: token),
+);
+
 /// The [AgentdClient] of one profile, built from its endpoint and the
 /// token in the keystore, and closed when the provider is disposed (it is
 /// autoDispose: the socket closes when the last tab of the profile is gone).
@@ -53,15 +63,21 @@ final agentdEndpointProvider = FutureProvider.family<AgentdEndpoint?, String>((
 /// calls [AgentdClient.connect].
 final agentdClientProvider = FutureProvider.autoDispose
     .family<AgentdClient?, String>((ref, profileId) async {
+      // Registered before any await: a provider disposed mid-build must not
+      // construct (or leak) a client, nor call onDispose on a dead ref.
+      var disposed = false;
+      ref.onDispose(() => disposed = true);
       final endpoint = await ref.watch(
         agentdEndpointProvider(profileId).future,
       );
+      if (disposed) return null;
       // A token write/delete bumps this and rebuilds; onDispose closes the old.
       ref.watch(agentdTokenVersionProvider(profileId));
       if (endpoint == null) return null;
       final token = await ref.watch(agentdTokenStoreProvider).read(profileId);
+      if (disposed) return null;
       if (token == null || token.isEmpty) return null;
-      final client = AgentdClient(endpoint: endpoint, token: token);
+      final client = ref.read(agentdClientFactoryProvider)(endpoint, token);
       ref.onDispose(client.close);
       return client;
     });

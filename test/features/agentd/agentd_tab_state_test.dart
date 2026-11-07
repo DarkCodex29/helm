@@ -23,6 +23,32 @@ void main() {
         isA<AgentdTabAbsent>(),
       );
     });
+    // A rebuild after a token or host change keeps the PREVIOUS value while
+    // the new one loads. That value was measured on another connection, so
+    // showing it would claim a state nobody has measured on this one.
+    test('loading that still carries the previous state', () {
+      const previous = AgentdConnected(AgentState.needsYou);
+      expect(
+        agentdTabStateFor(
+          const AsyncLoading<AgentdConnectionState>().copyWithPrevious(
+            const AsyncData(previous),
+          ),
+        ),
+        isA<AgentdTabAbsent>(),
+      );
+    });
+    test('error that still carries the previous state', () {
+      const previous = AgentdConnected(AgentState.working);
+      expect(
+        agentdTabStateFor(
+          AsyncError<AgentdConnectionState>(
+            'x',
+            StackTrace.empty,
+          ).copyWithPrevious(const AsyncData(previous)),
+        ),
+        isA<AgentdTabAbsent>(),
+      );
+    });
     test('disconnected', () {
       expect(_map(const AgentdDisconnected()), isA<AgentdTabAbsent>());
     });
