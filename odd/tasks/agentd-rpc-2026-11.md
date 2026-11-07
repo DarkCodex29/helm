@@ -39,9 +39,11 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
 | T1 | S2, S5 | CI: analyze + tests on push and PR | inline | cc90de5 |
 | T2 | S2-S6 | `packages/helm_protocol` (LF-only JSONL codec, Pi RPC records) + fake Pi RPC agent with scripted scenarios + CI step | worker | d6e92de, f5316c5, 638aa22 |
 | T3 | S1-S5 | `helm-agentd` supervisor: spawn `pi --mode rpc`, restart backoff, `interrupted`, orderly shutdown; tested against the fake agent | worker | c33c2da, f708f9c |
-| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | worker | |
+| T4 | S1-S5 | `helm-agentd` WebSocket server: `hello{token,protocol}`, per-connection `seq`, `requestId` idempotency, `deriveState()`, delta coalescing | worker | e569564, f4a9458, 3d70318, a9aab95 + fixes |
 | T4b | S1 | History and resync: on a `seq` gap the phone asks for `get_messages` (Pi) so it can rebuild the transcript | pending | |
 | T4c | S1, S5 | Per-client backpressure: bound each socket's outgoing queue, drop or disconnect a slow client without stalling the others | pending | |
+| T4d | S1, S6 | Cap concurrent unauthenticated connections and pre-auth buffering in helm-agentd | pending | |
+| T4e | S6 | Replace owner-specific path fixtures in the app tests with neutral ones | pending | |
 | T5 | S2, S5, S6 | Move the push notifier into the repo as a versioned component | pending | |
 
 ## Log
@@ -167,3 +169,25 @@ to the phone. Phases 0-1 of the plan approved on 2026-11-06.
   Pending (not in T4): T4b history/resync via `get_messages` on a `seq` gap;
   T4c per-client backpressure; a dialog's own `timeout` is not tracked, so an
   expired ask stays listed until answered or the next restart.
+- **L11** — T4 committed in four slices: protocol models (`e569564`,
+  61 tests), auth + server (`f4a9458`, 65), bridge (`3d70318`, 106), CLI +
+  integration (`a9aab95`, 131). The first worker hung on a test that never
+  returned and was relaunched with every dart command under a `perl alarm`
+  and every await bounded. Parent mutants: token check, Origin check, flush
+  before other events, second ask answer, duplicate forwarding and failure
+  release were all caught; pre-auth send survives but is unreachable
+  (attach only after auth), confirmed equivalent by the verifier.
+- **L12** — Independent verifier (gentle-ai-verify): network auth PASS;
+  FAIL on (a) token file race in a directory others can enter, plus
+  followed symlinks, and (b) the requestId LRU evicting in-flight ids.
+  Fixed test-first: `fix(agentd)` token store refuses symlinks and loose
+  directories (3 RED on old code), and the cache pins in-flight ids
+  (RED: methods missing). Package tests 136 green. Lesson: run mutants in a
+  separate worktree, never in the checkout a verifier is testing (one
+  verifier run was invalidated that way).
+- **L13** — Deferred, recorded as T4d: cap concurrent unauthenticated
+  connections and the pre-auth buffer (dart:io buffers whole messages;
+  reachability is loopback or the Tailscale IP only, so medium). Also
+  noted: pre-existing owner-path fixtures in the app tests (e.g.
+  `test/features/files/domain/remote_path_test.dart:15`) violate S6
+  repo-wide; recorded as T4e.
