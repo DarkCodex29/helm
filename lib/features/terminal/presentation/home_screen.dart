@@ -20,6 +20,7 @@ import 'package:helm/features/terminal/data/session_snapshot_repository.dart';
 import 'package:helm/features/terminal/data/terminal_session.dart';
 import 'package:helm/features/terminal/presentation/providers/keyboard_provider.dart';
 import 'package:helm/features/terminal/presentation/providers/tabs_provider.dart';
+import 'package:helm/features/terminal/presentation/widgets/agent_ask_banner.dart';
 import 'package:helm/features/terminal/presentation/widgets/session_recovery_banner.dart';
 import 'package:helm/features/terminal/presentation/widgets/tab_bar_widget.dart';
 import 'package:helm/features/terminal/presentation/widgets/terminal_keyboard.dart';
@@ -464,6 +465,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 await ref.read(sessionSnapshotRepoProvider).markClean();
                 if (mounted) setState(() => _pendingRecovery = null);
               },
+            ),
+          // Only the ACTIVE tab's profile: its agent is the one asking.
+          if (tabsState.activeTab != null)
+            AgentAskBanner(
+              key: ValueKey('agent-ask-${tabsState.activeTab!.profile.id}'),
+              profileId: tabsState.activeTab!.profile.id,
             ),
           Expanded(
             child: tabsState.hasTabs
