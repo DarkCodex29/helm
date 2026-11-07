@@ -40,9 +40,9 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 
 | ID | Specs | Task | Route | Commit |
 |---|---|---|---|---|
-| T1 | S1-S5 | App protocol client `AgentdClient` + token provisioning over SFTP into the Keychain; tested against an in-process `AgentServer` + fake Pi | worker | |
-| T2 | S1, S4, S5 | Run `helm-agentd` on the Mac as a LaunchAgent bound to the Tailscale IP (installer like the notifier's) | pending | |
-| T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | pending | |
+| T1 | S1-S5 | App protocol client `AgentdClient` + token provisioning over SFTP into the Keychain; tested against an in-process `AgentServer` + fake Pi | worker | 8102e58, c993ef6, 75b4b3e, 1b924f4, 06f2b74, 5dc51ba (PR #10, merge b5e0c88) |
+| T2 | S1, S4, S5 | Run `helm-agentd` on the Mac as a LaunchAgent bound to the Tailscale IP (installer like the notifier's) | worker | 8df6919, b333ec0, 93ad16a, 44f63de, e2f44c2 (PR #9, merge 960ca7d) |
+| T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | |
 | T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | pending | |
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer) | pending | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
@@ -131,3 +131,17 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   Added adversarial tests: stale-channel frame/close after a reconnect,
   `close()` during an in-flight connect, duplicate `ready` not re-sending.
   Unverified: Linux CI run, real WebSocket against a Tailscale address.
+- **L10** — T1 merged as PR #10 (`b5e0c88`), CI green. T2 merged as PR #9
+  (`960ca7d`). The independent verifier failed the installer on canonical
+  IPv4 parsing, control characters reaching sed/XML and argv boundaries in
+  the fakes; fixed in `93ad16a` with ThrottleInterval 10. Linux CI then
+  exposed two phase-1 tests that only passed by luck: the SIGKILL
+  escalation test raced the stubborn agent's SIGTERM handler (`44f63de`,
+  the agent now reports ready first) and the notifier install test
+  rejected any `__`, which a temp dir named `tmp__…` contained (`e2f44c2`).
+- **L11** — T3 built by a worker. Parent review found that putting the
+  agentd badge in place of the herdr builder unmounted herdr's listener,
+  which disarms the herdr agent poll: the PTY lane was not untouched.
+  Pinned by a new arming test (RED: 0 host polls under an agentd badge);
+  fixed by keeping the `agentsNotifier` listener mounted in every branch
+  and switching only what is drawn.

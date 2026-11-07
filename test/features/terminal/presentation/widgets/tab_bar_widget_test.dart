@@ -11,6 +11,9 @@
 //    working session is a lie the user sees on every single connect.
 //  * The agent badge must be absent unless somebody measured a state.
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:helm/features/agentd/data/agentd_providers.dart';
+import 'package:helm/features/agentd/domain/agentd_tab_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helm/core/host/agent_snapshot.dart';
 import 'package:helm/core/host/multiplexer_adapter.dart';
@@ -51,17 +54,24 @@ TerminalSession _session({
 TerminalTab _tab(TerminalSession session, {String id = 'tab-1'}) =>
     TerminalTab(id: id, title: id, session: session, profile: _profile);
 
-Future<void> _pumpTabs(WidgetTester tester, List<TerminalTab> tabs) {
+Future<void> _pumpTabs(
+  WidgetTester tester,
+  List<TerminalTab> tabs, {
+  AgentdTabState agentd = const AgentdTabAbsent(),
+}) {
   return tester.pumpWidget(
-    MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: TerminalTabBar(
-            tabs: tabs,
-            activeIndex: 0,
-            onTabTap: (_) {},
-            onTabClose: (_) {},
-            onAddTab: () {},
+    ProviderScope(
+      overrides: [agentdTabStateProvider.overrideWith((ref, id) => agentd)],
+      child: MaterialApp(
+        home: Scaffold(
+          appBar: AppBar(
+            title: TerminalTabBar(
+              tabs: tabs,
+              activeIndex: 0,
+              onTabTap: (_) {},
+              onTabClose: (_) {},
+              onAddTab: () {},
+            ),
           ),
         ),
       ),
@@ -83,6 +93,10 @@ List<Color> _dotColors(WidgetTester tester) => tester
     )
     .map((c) => (c.decoration! as BoxDecoration).color!)
     .toList();
+
+Finder _labelled(String label) => find.byWidgetPredicate(
+  (w) => w is Semantics && w.properties.label == label,
+);
 
 void main() {
   group('connection dot - follows the live session, not a stale read', () {
@@ -257,27 +271,96 @@ void main() {
       await session.dispose();
     });
 
-    testWidgets('appears live when the first agent reading lands', (
+    testWidgets(
+      'appears live when the first agent reading lands',
+      (tester) async {
+        final session = _session();
+
+        await _pumpTabs(tester, [_tab(session)]);
+        expect(find.byType(AgentBadge), findsNothing);
+
+        session.agentsNotifier.value = const AgentsKnown([
+          (
+            target: 'a',
+            label: 'a',
+            state: AgentState.working,
+            tabId: null,
+            workspaceId: null,
+          ),
+        ]);
+        await tester.pump();
+
+        expect(find.byType(AgentBadge), findsOneWidget);
+
+        await session.dispose();
+      },
+    );
+  });
+
+  group('agentd badge - precedence over the herdr lane', () {
+    const idleHerdr = AgentsKnown([
+      (
+        target: 'a',
+        label: 'a',
+        state: AgentState.idle,
+        tabId: null,
+        workspaceId: null,
+      ),
+    ]);
+
+    testWidgets('Known(needsYou) shows Needs you even when herdr says idle', (
       tester,
     ) async {
-      final session = _session();
-
-      await _pumpTabs(tester, [_tab(session)]);
+      final session = _session(agents: idleHerdr);
+      await _pumpTabs(tester, [
+        _tab(session),
+      ], agentd: const AgentdTabKnown(AgentdUiState.needsYou));
+      expect(find.byType(AgentdBadge), findsOneWidget);
       expect(find.byType(AgentBadge), findsNothing);
+      expect(find.byTooltip('Needs you'), findsOneWidget);
+      expect(_labelled('Needs you'), findsOneWidget);
+      await session.dispose();
+    });
 
-      session.agentsNotifier.value = const AgentsKnown([
-        (
-          target: 'a',
-          label: 'a',
-          state: AgentState.working,
-          tabId: null,
-          workspaceId: null,
-        ),
-      ]);
-      await tester.pump();
+    testWidgets('every agentd state has a tooltip and a semantics label', (
+      tester,
+    ) async {
+      const labels = {
+        AgentdUiState.needsYou: 'Needs you',
+        AgentdUiState.working: 'Working',
+        AgentdUiState.thinking: 'Thinking',
+        AgentdUiState.idle: 'Idle',
+      };
+      for (final e in labels.entries) {
+        final session = _session();
+        await _pumpTabs(tester, [_tab(session)], agentd: AgentdTabKnown(e.key));
+        expect(find.byTooltip(e.value), findsOneWidget, reason: '${e.key}');
+        expect(_labelled(e.value), findsOneWidget);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await session.dispose();
+      }
+    });
 
+    testWidgets('Absent leaves the herdr badge exactly as before', (
+      tester,
+    ) async {
+      final session = _session(agents: idleHerdr);
+      await _pumpTabs(tester, [_tab(session)]);
+      expect(find.byType(AgentdBadge), findsNothing);
       expect(find.byType(AgentBadge), findsOneWidget);
+      await session.dispose();
+    });
 
+    testWidgets('Unavailable shows a non-circular hint with a label', (
+      tester,
+    ) async {
+      final session = _session(status: ConnectionStatus.connected);
+      await _pumpTabs(tester, [
+        _tab(session),
+      ], agentd: const AgentdTabUnavailable('Agent stopped'));
+      expect(find.byTooltip('Agent stopped'), findsOneWidget);
+      expect(_labelled('Agent stopped'), findsOneWidget);
+      expect(_dotColors(tester), hasLength(1), reason: 'only the conn. dot');
       await session.dispose();
     });
   });
