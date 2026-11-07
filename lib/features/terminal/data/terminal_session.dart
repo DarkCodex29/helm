@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:clock/clock.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:helm/core/constants/app_constants.dart';
 import 'package:helm/core/host/adapters/tmux_adapter.dart';
@@ -16,7 +15,6 @@ import 'package:helm/core/host/multiplexer_selection.dart';
 import 'package:helm/core/host/probe/host_prober.dart';
 import 'package:helm/core/host/probe/host_report.dart';
 import 'package:helm/core/host/session_reference.dart';
-import 'package:helm/core/host/ssh_host_command_runner.dart';
 import 'package:helm/core/utils/logger.dart';
 import 'package:helm/features/connection/data/known_hosts_service.dart';
 import 'package:helm/features/connection/data/ssh_key_service.dart';
@@ -26,406 +24,39 @@ import 'package:helm/features/connection/domain/connection_status.dart';
 import 'package:helm/features/files/data/sftp_download_service.dart';
 import 'package:helm/features/files/data/sftp_file_service.dart';
 import 'package:helm/features/files/data/sftp_upload_service.dart';
+import 'package:helm/features/terminal/data/host_queries.dart';
+import 'package:helm/features/terminal/data/observable_value_notifier.dart';
+import 'package:helm/features/terminal/data/output_settle.dart';
+import 'package:helm/features/terminal/data/session_factories.dart';
+import 'package:helm/features/terminal/data/terminal_session_timings.dart';
+import 'package:helm/features/terminal/data/terminal_session_types.dart';
 import 'package:xterm/xterm.dart';
 
-/// Opens the exec channel used to attach to a multiplexer session,
-/// allocating the pseudo-terminal as part of the same request rather than
-/// writing the attach command into an already-open shell's stdin. See the
-/// session-attach spec's "Attach Without a Stdin Race" requirement.
-///
-/// Defaults to [SSHClient.execute], which — verified against dartssh2
-/// 3.3.1's source (`ssh_client.dart:542` precedes `:562` in `execute()`,
-/// and `:609` precedes `:628` in `shell()`) — sends the pty-req before
-/// the exec request, exactly like [SSHClient.shell] does, and returns
-/// the same [SSHSession] type, so [TerminalSession._bridgeIO] needs no
-/// changes to work with either path.
-/// Tests inject a scripted implementation to avoid a live SSH transport,
-/// mirroring `SshChannelOpener` in `ssh_host_command_runner.dart`.
-typedef AttachSessionOpener =
-    Future<SSHSession> Function(
-      SSHClient client,
-      String command,
-      SSHPtyConfig pty,
-    );
-
-Future<SSHSession> _defaultAttachOpener(
-  SSHClient client,
-  String command,
-  SSHPtyConfig pty,
-) => client.execute(command, pty: pty);
-
-/// Builds the [HostCommandRunner] used to probe and diagnose the host,
-/// bound to an already-connected [SSHClient].
-///
-/// Defaults to [SshHostCommandRunner], which opens a NEW CHANNEL on the
-/// existing client — never a second SSH connection. Tests inject a scripted
-/// runner to avoid a live transport, mirroring [AttachSessionOpener].
-typedef HostRunnerFactory = HostCommandRunner Function(SSHClient client);
-
-HostCommandRunner _defaultHostRunnerFactory(SSHClient client) =>
-    SshHostCommandRunner(client);
-
-/// Builds the [SftpFileService] used to browse the remote filesystem,
-/// bound to an already-connected [SSHClient].
-///
-/// Mirrors [HostRunnerFactory] exactly, and for the same two reasons: the
-/// service multiplexes a NEW CHANNEL over the existing client rather than
-/// dialing a second connection, and tests inject a scripted opener to
-/// avoid a live transport.
-typedef FileServiceFactory = SftpFileService Function(SSHClient client);
-
-SftpFileService _defaultFileServiceFactory(SSHClient client) =>
-    SftpFileService(client);
-
-/// Builds the [SftpDownloadService] used to fetch a remote file onto the
-/// device, bound to an already-connected [SSHClient].
-///
-/// A THIRD factory beside [HostRunnerFactory] and [FileServiceFactory]
-/// rather than a capability added to the second, because the two services
-/// deliberately do not share a channel: the download service opens its own
-/// SFTP session per transfer so a large file cannot stall the browser that
-/// started it. See [SftpDownloadService].
-typedef DownloadServiceFactory = SftpDownloadService Function(SSHClient client);
-
-SftpDownloadService _defaultDownloadServiceFactory(SSHClient client) =>
-    SftpDownloadService(client);
-
-/// Builds the [SftpUploadService] used to send a local file to the device,
-/// bound to an already-connected [SSHClient].
-///
-/// A FOURTH factory beside [DownloadServiceFactory] rather than a
-/// capability added to it, for the identical reason: the upload service
-/// opens its own SFTP session per transfer, same as the download service
-/// does, so neither can share the other's channel — see
-/// [SftpUploadService]'s class comment.
-typedef UploadServiceFactory = SftpUploadService Function(SSHClient client);
-
-SftpUploadService _defaultUploadServiceFactory(SSHClient client) =>
-    SftpUploadService(client);
-
-/// Fallback [MultiplexerAdapter] for the window before the probe has run.
-///
-/// Replaces the former `_UnusedHostCommandRunner` stub, which existed only
-/// because [TerminalSession] had no [HostCommandRunner] at construction
-/// time and [TmuxAdapter.attachCommand] is pure (design.md AD-3), so the
-/// runner it was handed could never legitimately be called. That hole is
-/// closed now: the real adapter is built during [TerminalSession.connect]
-/// from a runner bound to the live client, so this fallback is only ever
-/// read if something asks for the adapter before a connection exists.
-///
-/// It keeps the stub's fail-loudly discipline for exactly that reason —
-/// reaching a host command through it would mean the probe wiring was
-/// bypassed, which is a bug worth surfacing rather than papering over with
-/// an empty result.
-class _UnconnectedHostCommandRunner implements HostCommandRunner {
-  @override
-  Future<HostCommandResult> run(String command, {Duration? timeout}) =>
-      throw UnsupportedError(
-        'TerminalSession has no host connection yet: the real '
-        'MultiplexerAdapter is built during connect(), once a runner is '
-        'bound to the live SSHClient.',
-      );
-
-  @override
-  Future<HostCommandResult> runScript(String script, {Duration? timeout}) =>
-      throw UnsupportedError(
-        'TerminalSession has no host connection yet: the real '
-        'MultiplexerAdapter is built during connect(), once a runner is '
-        'bound to the live SSHClient.',
-      );
-}
-
-/// How the attach session ended, classified from dartssh2's own exit
-/// status. See the session-attach spec's "Attach Exit Status Reflects the
-/// Multiplexer Session" requirement.
-///
-/// Read from [SSHSession.exitCode]/[SSHSession.exitSignal] once the attach
-/// session's [SSHSession.done] completes. Verified against dartssh2
-/// 3.3.1's source (ssh_session.dart:141-160): both are set synchronously
-/// inside `_handleRequest`, which runs for the `exit-status`/`exit-signal`
-/// channel request the remote sends before closing the channel — so both
-/// are already populated by the time `done` completes; no extra await or
-/// polling is needed. The same structure existed in 2.16.0, which this
-/// was originally verified against; re-checked here because the method
-/// moved line numbers between versions.
-///
-/// Empirically verified against real tmux 3.6a and zellij 0.44.3 hosts
-/// (exact commands and observed exit codes recorded in this remediation's
-/// apply-progress entry): a user-initiated detach and the target
-/// multiplexer session being killed while the multiplexer's own server
-/// process stays alive are INDISTINGUISHABLE from exit status alone.
-/// Both report `exitCode == 0` with no exit signal, for both
-/// multiplexers — zellij additionally prints the identical farewell text
-/// ("Bye from Zellij!") for both cases, so there is no dartssh2-observable
-/// signal that separates them. Only the multiplexer's entire server
-/// process dying is distinguishable this way (verified: tmux
-/// `kill-server` → exitCode 1). tmux also prints a different status line
-/// for each case (`[detached (from session ...)]` vs `[exited]` vs
-/// `[server exited]`), but that is rendered terminal output, not exit
-/// status — this classification deliberately does not parse it, since
-/// zellij offers no equivalent and parsing rendered text would make this
-/// file multiplexer-specific, which it is not anywhere else.
-///
-/// Per this change's own discipline — never collapse "could not
-/// determine" into a definite answer (see `MuxSessionsResult`,
-/// `HostDiagnostics`'s tri-state combine) — the ambiguous case is
-/// reported honestly as [AttachEndedCleanly] rather than guessing
-/// "detached".
-sealed class AttachExitOutcome {
-  const AttachExitOutcome();
-}
-
-/// The attach session exited with code 0 and no exit signal. Covers BOTH
-/// a user-initiated detach and the target session being killed while the
-/// multiplexer's server process survives — see [AttachExitOutcome]'s
-/// class doc comment for why exit status alone cannot separate these.
-final class AttachEndedCleanly extends AttachExitOutcome {
-  const AttachEndedCleanly();
-}
-
-/// The attach session ended abnormally: a non-zero exit code, an exit
-/// signal, or both. Distinct from a clean end or an ambiguous session
-/// kill — observed empirically when tmux's entire server process dies
-/// (`kill-server`), not merely the one session.
-final class AttachEndedAbnormally extends AttachExitOutcome {
-  const AttachEndedAbnormally({this.exitCode, this.exitSignal});
-
-  final int? exitCode;
-  final SSHSessionExitSignal? exitSignal;
-}
-
-/// The attach session's exit status could not be read at all — neither
-/// [SSHSession.exitCode] nor [SSHSession.exitSignal] was ever populated,
-/// e.g. because the underlying transport dropped before the remote sent
-/// either channel request. Never collapsed into [AttachEndedCleanly].
-final class AttachExitUnknown extends AttachExitOutcome {
-  const AttachExitUnknown();
-}
-
-/// How long a session waits before RETRYING agent tracking when it cannot
-/// currently be event-driven.
-///
-/// This is a fallback cadence, not the main mechanism: see
-/// [TerminalSession._trackAgents]. It is reached when the active
-/// multiplexer does not advertise [MuxCapability.agentWait], when there is
-/// no agent to target a wait at yet, or when a wait broke. The cadence
-/// itself is covered in
-/// `test/features/terminal/data/terminal_session_agents_test.dart`,
-/// against a virtual clock.
-///
-/// Chosen against the two failure modes at the extremes. Sub-second polling
-/// opens one exec channel per second PER OPEN TAB against a host the user
-/// is also working on — the "do not hammer the host" constraint. A minute
-/// makes the blocked → "Needs you" transition arrive long after the agent
-/// started waiting, which is the single interaction this whole feature
-/// exists for. Ten seconds is one short-lived channel per tab per ten
-/// seconds, on a connection that is already open.
-const kAgentPollInterval = Duration(seconds: 10);
-
-/// C0 controls (except tab, LF and CR, which typeAtPrompt maps to spaces
-/// first), DEL, and C1 controls. Each one is a keystroke to a remote TUI.
-final _controlCharacters = RegExp('[\x00-\x08\x0b-\x1f\x7f-\x9f]');
-
-/// How long each `agent wait` is armed on the HOST before it gives up and
-/// is re-armed.
-///
-/// Spent by the multiplexer, not by this side: it is handed to
-/// [AgentAwareMultiplexer.waitForAgent], whose contract is that the
-/// implementation bounds the wait remotely. herdr's `--timeout` makes the
-/// remote process EXIT, which closes its channel; a deadline applied here
-/// would only stop listening and leave the channel held. See
-/// [kAgentListTimeout] for the incident that distinction comes from.
-///
-/// A timeout is not a failure — the loop re-arms — so this value trades
-/// only re-arm frequency against how long a silently wedged wait can sit
-/// unnoticed. Five minutes is 12 short command invocations an hour instead
-/// of the 360 the poll made, while still bounding a stuck window to
-/// something a user could sit through at most once.
-const kAgentWaitWindow = Duration(minutes: 5);
-
-/// Ceiling on a single agent query before it is treated as unreachable.
-///
-/// `HerdrAdapter.listAgents` takes no timeout parameter and
-/// [SshHostCommandRunner] applies none by default, so a wedged host would
-/// otherwise leave the poll waiting forever on a Future that never
-/// completes — freezing the UI on stale agent state that looks current.
-///
-/// WHAT THIS DOES NOT DO, precisely.
-///
-/// `Future.timeout` abandons the Future; it does not cancel the remote
-/// command. Nothing in the path can, today, and the reason is a specific
-/// missing capability rather than a general difficulty:
-/// [SshHostCommandRunner] reaches the transport through its own
-/// `SshCommandChannel` interface, and that interface exposes only `stdin`,
-/// `stdout`, `stderr`, `exitCode` and `done` — there is no `close`. The
-/// real dartssh2 [SSHSession] behind it does have `close()`, so
-/// cancellation is genuinely reachable, but only by widening
-/// `SshCommandChannel`, its production adapter and every test fake that
-/// implements it, then threading a deadline down through
-/// `HostCommandRunner.run` and `AgentAwareMultiplexer.listAgents` — a
-/// change across the multiplexer-abstraction and host-command-port
-/// contracts, well outside the surface this timeout belongs to.
-///
-/// THE ACTUAL CEILING ON LEAKED INVOCATIONS: exactly one per session.
-///
-/// That is enforced, not hoped for. [TerminalSession._agentPollInFlight]
-/// is released by the query's own completion rather than by this timeout
-/// firing (see [TerminalSession.refreshAgents]), so a poll whose answer
-/// never arrives blocks every later poll on that session instead of
-/// stacking beside it. Without that, an 8-second ceiling against a
-/// 10-second cadence adds one abandoned exec channel every interval —
-/// six a minute, unbounded — and OpenSSH's default `MaxSessions` of 10
-/// would starve the connection within two minutes, at which point even a
-/// reconnect could not open the channel it needs to attach. Losing the
-/// terminal because the badge could not be refreshed is a far worse
-/// failure than a stale badge.
-///
-/// The single abandoned channel is reclaimed when the host finally
-/// answers, or when the transport is torn down by `dispose`/`reconnect`,
-/// whichever comes first.
-const kAgentListTimeout = Duration(seconds: 8);
-
-/// Ceiling on the single pane query before the session's vitality is
-/// treated as unreachable.
-///
-/// Same value and same reasoning as [kAgentListTimeout] — `listPanes` takes
-/// no timeout parameter either, so a wedged host would otherwise park the
-/// query forever. The leak it bounds is smaller: this query runs at most
-/// ONCE per connection (see [TerminalSession.refreshSessionVitality]), so
-/// the ceiling on abandoned channels is one per session by construction
-/// rather than one per poll interval.
-const kPaneListTimeout = Duration(seconds: 8);
-
-/// Ceiling on a single focus request before it is reported as failed.
-///
-/// Same value and same reasoning as [kAgentListTimeout] —
-/// `AgentAwareMultiplexer.focusAgent` takes no timeout, and there is no
-/// host-side flag to give it one, so a wedged host would otherwise park a
-/// tap forever and leave the drawer waiting on an answer that never comes.
-///
-/// The leak it bounds is the one this app has already paid for once. The
-/// list and the pane query are issued by helm on ITS schedule; focus is
-/// issued by a THUMB, and a user who taps a row again because nothing
-/// happened is doing the most natural thing in the world. `.timeout`
-/// abandons the Future without closing the remote channel, so a release on
-/// abandonment would hand every repeat tap a fresh channel — six taps,
-/// six held channels, and OpenSSH's default `MaxSessions` of 10 four taps
-/// further on, at which point a reconnect has no channel left to attach
-/// through. That is commit 773888f's failure with a new trigger, and
-/// [TerminalSession.focusAgent] closes it the same way: the in-flight
-/// guard is released by the QUERY settling, never by the caller giving up.
-const kAgentFocusTimeout = Duration(seconds: 8);
-
-/// Ceiling on the workspace-tree query before the tree is reported unknown.
-///
-/// Same value and same reasoning as [kAgentListTimeout], with the rate of
-/// [kAgentFocusTimeout]: `listWorkspaceTree` takes no timeout parameter,
-/// and this query is issued when a THUMB opens the drawer, not on helm's
-/// own schedule. Reopening a drawer against a wedged host is as natural as
-/// re-tapping a row, so [TerminalSession.refreshWorkspaceTree] releases its
-/// guard on the QUERY settling rather than on this deadline firing — which
-/// is what keeps the abandoned-channel count at one per session instead of
-/// one per open.
-///
-/// It bounds TWO remote commands, not one: `workspace list` then `tab list`
-/// (see `HerdrAdapter.listWorkspaceTree`). They run in sequence on a single
-/// awaited future, so the ceiling covers the pair and the channel budget is
-/// unchanged — at no point are both open at once.
-const kWorkspaceTreeTimeout = Duration(seconds: 8);
-
-/// Ceiling on a single tab focus before it is reported as failed.
-///
-/// Same value and same reasoning as [kAgentFocusTimeout], which is the
-/// timeout for the same gesture aimed at a different target.
-const kTabFocusTimeout = Duration(seconds: 8);
-
-/// Ceiling on how long [TerminalSession.connect] waits for an attached view
-/// to report its first real size.
-///
-/// Not a timing guess about layout — it is a safety valve. A view calls
-/// [TerminalSession.attachViewport] from `initState` and lays out on the
-/// very next frame, so the measured wait on an iPhone 17 Pro is under one
-/// frame and this deadline is never reached in practice. It exists so a
-/// view that is built but never laid out (kept offstage, or inside a
-/// zero-height parent) degrades to the documented default instead of
-/// parking the connect forever.
-///
-/// Deliberately far longer than a frame: expiring early would put back
-/// exactly the bug this unit removes — a PTY opened at a fabricated size.
-const kViewportLayoutDeadline = Duration(seconds: 3);
-
-/// How long the remote must stay SILENT before [TerminalSession.
-/// waitForOutputToSettle] considers it attached and ready to receive text.
-///
-/// Measured on an S22, cold start via the Android share sheet: herdr
-/// attaches and repaints the screen in bursts for roughly 150-300ms after
-/// "Session connected" fires, and text sent into that window is silently
-/// discarded — confirmed by scanning every herdr pane with a
-/// verified-working instrument. 500ms gives that repainting a full extra
-/// beat of margin past the slowest burst actually measured, while still
-/// being short enough that an ALREADY-idle session (the warm path, which
-/// this must never delay) only pays it once, briefly, rather than
-/// noticeably.
-const kOutputSettleQuietWindow = Duration(milliseconds: 500);
-
-/// Absolute ceiling on [TerminalSession.waitForOutputToSettle], independent
-/// of how often the remote keeps resetting the quiet window.
-///
-/// A chatty remote — a long-running build, a tail -f left on the prompt,
-/// a motd that staggers across several writes — could otherwise defer the
-/// share indefinitely by simply never going quiet. 5 seconds is roughly 10x
-/// [kOutputSettleQuietWindow]: enough resets to absorb a genuinely bursty
-/// attach, while still landing the text well inside a single glance at the
-/// screen rather than making the owner wonder if the share was lost again.
-const kOutputSettleCap = Duration(seconds: 5);
-
-/// [ValueNotifier] that reports when it goes from unobserved to observed
-/// and back, so its owner can start and stop the work that produces its
-/// value.
-///
-/// Its arm/disarm transitions are covered through
-/// [TerminalSession.agentsNotifier] in
-/// `test/features/terminal/data/terminal_session_agents_test.dart`.
-///
-/// Exists so agent polling is driven by demand rather than by the mere
-/// existence of a connection: a session no widget is rendering must not
-/// keep asking the host questions nobody reads. See
-/// [TerminalSession._syncAgentPolling].
-class _ObservableValueNotifier<T> extends ValueNotifier<T> {
-  _ObservableValueNotifier(super.value, {required this.onObservedChanged});
-
-  /// Called with true on the first listener and false when the last one
-  /// leaves. Never called from [dispose], which clears listeners without
-  /// routing through [removeListener].
-  final void Function(bool observed) onObservedChanged;
-
-  @override
-  void addListener(VoidCallback listener) {
-    final wasObserved = hasListeners;
-    super.addListener(listener);
-    if (!wasObserved && hasListeners) onObservedChanged(true);
-  }
-
-  @override
-  void removeListener(VoidCallback listener) {
-    super.removeListener(listener);
-    if (!hasListeners) onObservedChanged(false);
-  }
-}
-
-/// Classifies [session]'s ending per [AttachExitOutcome]'s doc comment.
-/// Call only after [session]'s [SSHSession.done] has completed.
-AttachExitOutcome _classifyAttachExit(SSHSession session) {
-  final exitCode = session.exitCode;
-  final exitSignal = session.exitSignal;
-  if (exitSignal != null || (exitCode != null && exitCode != 0)) {
-    return AttachEndedAbnormally(exitCode: exitCode, exitSignal: exitSignal);
-  }
-  if (exitCode == 0) {
-    return const AttachEndedCleanly();
-  }
-  return const AttachExitUnknown();
-}
+export 'package:helm/features/terminal/data/session_factories.dart'
+    show
+        AttachSessionOpener,
+        DownloadServiceFactory,
+        FileServiceFactory,
+        HostRunnerFactory,
+        UploadServiceFactory;
+export 'package:helm/features/terminal/data/terminal_session_timings.dart'
+    show
+        kAgentFocusTimeout,
+        kAgentListTimeout,
+        kAgentPollInterval,
+        kAgentWaitWindow,
+        kOutputSettleCap,
+        kOutputSettleQuietWindow,
+        kPaneListTimeout,
+        kTabFocusTimeout,
+        kViewportLayoutDeadline,
+        kWorkspaceTreeTimeout;
+export 'package:helm/features/terminal/data/terminal_session_types.dart'
+    show
+        AttachEndedAbnormally,
+        AttachEndedCleanly,
+        AttachExitOutcome,
+        AttachExitUnknown;
 
 class TerminalSession {
   TerminalSession({
@@ -442,15 +73,15 @@ class TerminalSession {
     UploadServiceFactory? uploadServiceFactory,
   }) : _sshService = sshService,
        _muxAdapterOverride = muxAdapter,
-       _muxAdapter = muxAdapter ?? TmuxAdapter(_UnconnectedHostCommandRunner()),
-       _attachOpener = attachOpener ?? _defaultAttachOpener,
+       _muxAdapter = muxAdapter ?? TmuxAdapter(UnconnectedHostCommandRunner()),
+       _attachOpener = attachOpener ?? defaultAttachOpener,
        _hostProber = hostProber,
-       _hostRunnerFactory = hostRunnerFactory ?? _defaultHostRunnerFactory,
-       _fileServiceFactory = fileServiceFactory ?? _defaultFileServiceFactory,
+       _hostRunnerFactory = hostRunnerFactory ?? defaultHostRunnerFactory,
+       _fileServiceFactory = fileServiceFactory ?? defaultFileServiceFactory,
        _downloadServiceFactory =
-           downloadServiceFactory ?? _defaultDownloadServiceFactory,
+           downloadServiceFactory ?? defaultDownloadServiceFactory,
        _uploadServiceFactory =
-           uploadServiceFactory ?? _defaultUploadServiceFactory,
+           uploadServiceFactory ?? defaultUploadServiceFactory,
        terminal = terminal ?? Terminal(maxLines: 5000) {
     // Wired HERE, not in _bridgeIO, and this is the whole fix for the
     // remote drawing wider than the screen.
@@ -481,7 +112,7 @@ class TerminalSession {
 
   /// Resolves the command that attaches to [tmuxSessionName] on the active
   /// multiplexer. Reassigned during [connect] to the adapter the probe
-  /// selected — see [_UnconnectedHostCommandRunner] for what the initial
+  /// selected — see [UnconnectedHostCommandRunner] for what the initial
   /// value is and why it fails loudly if used.
   MultiplexerAdapter _muxAdapter;
 
@@ -784,7 +415,7 @@ class TerminalSession {
   /// [AgentsNotProbed]: before the first poll answers, helm genuinely does
   /// not know, and saying so is cheaper than being wrong.
   late final ValueNotifier<AgentSnapshot> agentsNotifier =
-      _ObservableValueNotifier<AgentSnapshot>(
+      ObservableValueNotifier<AgentSnapshot>(
         const AgentsNotProbed(),
         onObservedChanged: (observed) {
           _agentsObserved = observed;
@@ -803,22 +434,16 @@ class TerminalSession {
     const SessionVitalityNotProbed(),
   );
 
-  /// Guards against overlapping pane queries. Released by the query's own
-  /// completion, never by a timeout — see [refreshSessionVitality].
-  bool _vitalityQueryInFlight = false;
-
-  /// Guards against overlapping focus requests. Released by the request's
-  /// own completion, never by a timeout — see [focusAgent].
-  bool _focusRequestInFlight = false;
-
-  /// Guards against overlapping workspace-tree queries. Released by the
-  /// query's own completion, never by a timeout — see
-  /// [refreshWorkspaceTree].
-  bool _workspaceTreeQueryInFlight = false;
-
-  /// Guards against overlapping tab-focus requests. Released by the
-  /// request's own completion, never by a timeout — see [focusTab].
-  bool _tabFocusInFlight = false;
+  /// Focus, workspace-tree and vitality queries; see [HostQueries].
+  late final HostQueries _hostQueries = HostQueries(
+    muxAdapter: () => _muxAdapter,
+    isDisposed: () => _disposed,
+    status: () => statusNotifier.value,
+    hostReport: () => _hostReport,
+    agents: () => agentsNotifier.value,
+    profileName: () => profile.name,
+    sessionVitalityNotifier: sessionVitalityNotifier,
+  );
 
   /// Pending re-entry into [_trackAgents] when tracking could not be
   /// event-driven this cycle. Non-null only while a retry is genuinely
@@ -1005,7 +630,7 @@ class TerminalSession {
         final attachSession = _session!;
         attachSession.done.then((_) {
           _log.i('Attach session ended for ${profile.name}');
-          _handleDisconnect(_classifyAttachExit(attachSession));
+          _handleDisconnect(classifyAttachExit(attachSession));
         });
       } else {
         _session = result.session;
@@ -1026,7 +651,7 @@ class TerminalSession {
       // remote — reintroducing the exact defect this tracking exists to
       // fix, with every test still green except the one that asserted the
       // intermediate state.
-      _armOutputSettleTracking();
+      _outputSettle.armTracking();
       statusNotifier.value = ConnectionStatus.connected;
       _log.i('Session connected: ${profile.name}');
 
@@ -1191,7 +816,7 @@ class TerminalSession {
     final flattened = text
         .replaceAll(RegExp(r'[\r\n]+'), ' ')
         .replaceAll('\t', ' ')
-        .replaceAll(_controlCharacters, '')
+        .replaceAll(controlCharacters, '')
         .trim();
     if (flattened.isEmpty) return;
 
@@ -1201,160 +826,14 @@ class TerminalSession {
     sessionRef.write(utf8.encode(payload));
   }
 
-  /// When the last output activity was observed for the CURRENT connection
-  /// — `terminal` receiving a write, or the connect itself, which counts
-  /// as the first activity (a multiplexer begins attaching and repainting
-  /// immediately on attach, before anything has reached [terminal]). Null
-  /// only before the first [connect] ever completes.
-  ///
-  /// This, rather than a Timer armed unconditionally on every [connect], is
-  /// what [waitForOutputToSettle] below reads to decide whether a session
-  /// is already settled — so a connection nobody ever asks to settle costs
-  /// NOTHING: no Timer exists until something actually calls
-  /// [waitForOutputToSettle]. That matters beyond this feature: dozens of
-  /// existing tests connect a session and never touch sharing at all, and
-  /// `flutter_test`'s own binding fails a test outright if ANY Timer is
-  /// still pending when it ends — regardless of whether that Timer would
-  /// have resolved harmlessly on its own. Arming one unconditionally at
-  /// every connect broke eleven of them the first time this was tried.
-  DateTime? _lastOutputActivityAt;
+  /// Settle tracking; see [OutputSettle]. Holds no Timer and no clock
+  /// reading until [connect] calls into it.
+  late final OutputSettle _outputSettle = OutputSettle(
+    isConnected: () => isConnected,
+  );
 
-  /// When the CURRENT connection's [kOutputSettleCap] ceiling started
-  /// counting from. Set once per [connect], alongside
-  /// [_lastOutputActivityAt].
-  DateTime? _connectedAt;
-
-  /// Completed by [_resolveOutputSettle] the moment the remote is judged
-  /// settled, or null when nothing is waiting. Shared rather than
-  /// per-call: at most one pending share exists at a time (see
-  /// `HomeScreen._pendingSharedText`), so a second concurrent caller joins
-  /// the same wait instead of arming a second pair of timers.
-  Completer<void>? _outputSettleCompleter;
-
-  /// Restarted by every observed write to the terminal while a settle wait
-  /// is in progress — see [_noteOutputActivity]. Firing this (uninterrupted
-  /// by further output) is what "settled" means. Exists ONLY between a
-  /// [waitForOutputToSettle] call that had to wait and that wait resolving
-  /// — see [_lastOutputActivityAt]'s doc comment for why nothing is armed
-  /// outside that window.
-  Timer? _outputSettleQuietTimer;
-
-  /// Armed alongside [_outputSettleQuietTimer] and never restarted, so a
-  /// remote that keeps resetting the quiet timer still settles by
-  /// [kOutputSettleCap] after the connect that started this wait.
-  Timer? _outputSettleCapTimer;
-
-  /// Resolves once the remote has gone quiet for [kOutputSettleQuietWindow]
-  /// since the last [connect], or after [kOutputSettleCap] elapses since
-  /// that same connect, whichever comes first — or IMMEDIATELY if that has
-  /// already happened by the time this is called.
-  ///
-  /// This is the fix for the cold-start share defect measured on a real
-  /// S22: `statusNotifier` reporting `connected` is the moment the SSH
-  /// channel opened, not the moment herdr has finished attaching and
-  /// repainting the screen. Text written into that gap reached nowhere —
-  /// confirmed by scanning every herdr pane with a verified-working
-  /// instrument. Waiting for OUTPUT ACTIVITY to settle, rather than typing
-  /// the instant `connected` fires, is what closes that gap: a remote that
-  /// is still attaching is still writing to [terminal], and a remote that
-  /// has nothing left to repaint goes quiet almost immediately.
-  ///
-  /// Resolves IMMEDIATELY in two cases. Not connected at all — the caller's
-  /// own connected-check already guards delivery, so there is nothing to
-  /// settle. And the already-idle WARM path: [_lastOutputActivityAt] is
-  /// already more than [kOutputSettleQuietWindow] in the past by the time
-  /// this is called — measured on-device as the path that already worked
-  /// before this fix, and which must not regress into a delay. Only a
-  /// session that is STILL within its post-connect quiet/cap window
-  /// actually arms anything and waits.
-  Future<void> waitForOutputToSettle() {
-    if (statusNotifier.value != ConnectionStatus.connected) {
-      return Future.value();
-    }
-
-    final lastActivity = _lastOutputActivityAt;
-    final connectedAt = _connectedAt;
-    if (lastActivity == null || connectedAt == null) {
-      // connect() always sets both before statusNotifier reports
-      // `connected` — reached only if that invariant is ever broken, and
-      // degrading to "nothing to wait for" is the safe direction: it
-      // reproduces the pre-fix behaviour, never a hang.
-      return Future.value();
-    }
-
-    final now = clock.now();
-    if (now.difference(lastActivity) >= kOutputSettleQuietWindow) {
-      return Future.value();
-    }
-
-    final existing = _outputSettleCompleter;
-    if (existing != null) return existing.future;
-
-    final completer = Completer<void>();
-    _outputSettleCompleter = completer;
-    _armOutputSettleQuietTimer();
-    final capRemaining = kOutputSettleCap - now.difference(connectedAt);
-    _outputSettleCapTimer = Timer(
-      capRemaining.isNegative ? Duration.zero : capRemaining,
-      _resolveOutputSettle,
-    );
-    return completer.future;
-  }
-
-  /// Opens the settle window for the connection that just stood up.
-  ///
-  /// Records WHEN rather than arming anything. Both the quiet timer and
-  /// the cap are armed lazily, by [waitForOutputToSettle], and only when a
-  /// share is actually waiting: `flutter_test`'s binding fails any test
-  /// that ends with a Timer still pending, so arming one at every connect
-  /// would charge dozens of tests that never share anything for a feature
-  /// they do not use — see [_lastOutputActivityAt]'s doc comment.
-  ///
-  /// Seeding [_lastOutputActivityAt] with the connect instant (rather than
-  /// leaving it null until the first byte arrives) is what makes the quiet
-  /// window measure "silence since connecting", so a remote that says
-  /// nothing at all settles after one window instead of waiting out the cap.
-  void _armOutputSettleTracking() {
-    final now = clock.now();
-    _connectedAt = now;
-    _lastOutputActivityAt = now;
-  }
-
-  void _armOutputSettleQuietTimer() {
-    _outputSettleQuietTimer?.cancel();
-    _outputSettleQuietTimer = Timer(
-      kOutputSettleQuietWindow,
-      _resolveOutputSettle,
-    );
-  }
-
-  /// Called from every point [_bridgeIO] observes a write reaching
-  /// [terminal] — stdout, stderr. Records the activity unconditionally
-  /// (cheap: a timestamp assignment, no Timer), and additionally restarts
-  /// the quiet timer when a [waitForOutputToSettle] call is actively
-  /// waiting, so output that keeps arriving keeps deferring settlement up
-  /// to [kOutputSettleCap].
-  void _noteOutputActivity() {
-    _lastOutputActivityAt = clock.now();
-    if (_outputSettleCompleter == null) return;
-    _armOutputSettleQuietTimer();
-  }
-
-  /// Ends whatever [waitForOutputToSettle] call is in flight, however it
-  /// got here — the quiet window finally elapsing, [kOutputSettleCap]
-  /// forcing the issue, a disconnect making the wait moot, or [dispose]
-  /// tearing the session down. Safe to call when nothing is waiting.
-  void _resolveOutputSettle() {
-    _outputSettleQuietTimer?.cancel();
-    _outputSettleQuietTimer = null;
-    _outputSettleCapTimer?.cancel();
-    _outputSettleCapTimer = null;
-    final completer = _outputSettleCompleter;
-    _outputSettleCompleter = null;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete();
-    }
-  }
+  /// See [OutputSettle.waitForOutputToSettle].
+  Future<void> waitForOutputToSettle() => _outputSettle.waitForOutputToSettle();
 
   Future<void> dispose() async {
     _log.i('Disposing session for ${profile.name}');
@@ -1369,7 +848,7 @@ class TerminalSession {
     _releaseViewportWaiters();
     // Same reasoning as [_handleDisconnect]: a settle wait parked on a
     // session that is being torn down must not outlive it.
-    _resolveOutputSettle();
+    _outputSettle.resolve();
     _stopAgentTracking();
     await _stdoutSub?.cancel();
     await _stderrSub?.cancel();
@@ -1485,7 +964,7 @@ class TerminalSession {
         // Every byte that reaches the terminal while a share is held is
         // evidence the remote is still attaching/repainting — see
         // [waitForOutputToSettle].
-        _noteOutputActivity();
+        _outputSettle.noteOutputActivity();
       },
       onError: (e) => _log.e('stdout stream error', e),
       onDone: () => _log.i('stdout stream closed'),
@@ -1493,7 +972,7 @@ class TerminalSession {
 
     _stderrSub = session.stderr.listen((data) {
       terminal.write(utf8.decode(data, allowMalformed: true));
-      _noteOutputActivity();
+      _outputSettle.noteOutputActivity();
     }, onError: (e) => _log.e('stderr stream error', e));
 
     terminal.onOutput = (data) {
@@ -1517,7 +996,7 @@ class TerminalSession {
     // A settle wait is meaningless once there is no connection left to
     // settle — resolve it rather than leaving a caller waiting out the
     // full cap on a session that is already gone.
-    _resolveOutputSettle();
+    _outputSettle.resolve();
     _stopAgentTracking();
     // Agent state describes a host we can no longer ask. Leaving the last
     // reading on screen would keep asserting "Working" about an agent
@@ -1531,8 +1010,8 @@ class TerminalSession {
     // trigger, so a reconnect asks again rather than trusting a verdict
     // about the previous attach.
     sessionVitalityNotifier.value = const SessionVitalityNotProbed();
-    lastFailureNotifier.value = _disconnectSummaryFor(outcome);
-    terminal.write(_disconnectMessageFor(outcome));
+    lastFailureNotifier.value = disconnectSummaryFor(outcome);
+    terminal.write(disconnectMessageFor(outcome));
     _publishAdvisories();
   }
 
@@ -1847,263 +1326,23 @@ class TerminalSession {
     }
   }
 
-  /// Asks the host to bring [target]'s pane to the front, so the user is
-  /// looking at that agent.
-  ///
-  /// [target] is an [AgentStatus.target] straight from the snapshot the
-  /// caller is rendering — the pane id herdr's own focus accepts.
-  ///
-  /// Never throws and never rejects, because the caller is a tap handler
-  /// and an error escaping one surfaces as an unhandled async error rather
-  /// than as feedback. Every failure — a torn-down session, a dropped
-  /// connection, a multiplexer that cannot focus, a wedged host, or an
-  /// adapter that threw — becomes a [MuxAgentFocusResult] the caller must
-  /// switch over. It NEVER degrades to [MuxAgentFocused], which is the one
-  /// variant a caller is entitled to close its drawer on.
-  ///
-  /// The codes on [MuxAgentFocusFailed] are helm's OWN when the request
-  /// never reached the multiplexer, and the multiplexer's when it did.
-  /// They exist for logs and tests; nothing in the UI branches on them,
-  /// which is why they are strings rather than a second enum nobody reads.
-  ///
-  /// THE ONE IN-FLIGHT REQUEST is the whole reason this is not a two-line
-  /// pass-through. See [kAgentFocusTimeout]: the guard is released by the
-  /// request settling, never by this call giving up on it, so a wedged
-  /// host costs exactly one abandoned channel no matter how many times a
-  /// frustrated user taps the row.
-  Future<MuxAgentFocusResult> focusAgent(String target) async {
-    if (_disposed) return const MuxAgentFocusFailed('session_disposed');
-    if (statusNotifier.value != ConnectionStatus.connected) {
-      return const MuxAgentFocusFailed('not_connected');
-    }
-    if (_focusRequestInFlight) {
-      return const MuxAgentFocusFailed('focus_already_in_flight');
-    }
+  /// See [HostQueries.focusAgent].
+  Future<MuxAgentFocusResult> focusAgent(String target) =>
+      _hostQueries.focusAgent(target);
 
-    final support = AgentSupport.resolve(_muxAdapter);
-    if (support is! AgentSupportAvailable) {
-      return const MuxAgentFocusFailed('multiplexer_cannot_focus');
-    }
+  /// See [HostQueries.refreshWorkspaceTree].
+  Future<MuxWorkspaceTreeResult> refreshWorkspaceTree() =>
+      _hostQueries.refreshWorkspaceTree();
 
-    _focusRequestInFlight = true;
-    final request = support.agents.focusAgent(target);
-    // Released when the REQUEST settles, not when this call stops waiting —
-    // the discipline [kAgentListTimeout] documents. The error is swallowed
-    // here and handled on the awaited branch below: both observe the same
-    // Future, and an unobserved rejection on this one would surface as an
-    // unhandled async error.
-    unawaited(
-      request
-          .then<void>((_) {}, onError: (Object _) {})
-          .whenComplete(() => _focusRequestInFlight = false),
-    );
+  /// See [HostQueries.focusTab].
+  Future<MuxTabFocusResult> focusTab(String tabId) =>
+      _hostQueries.focusTab(tabId);
 
-    try {
-      return await request.timeout(kAgentFocusTimeout);
-    } catch (e) {
-      _log.w('Agent focus failed for ${profile.name} ($target): $e');
-      return const MuxAgentFocusFailed(null);
-    }
-  }
+  void _maybeJudgeSessionVitality() => _hostQueries.maybeJudgeSessionVitality();
 
-  /// Asks the host once for its workspace tree — the user's clients and the
-  /// projects inside them.
-  ///
-  /// Returned rather than published on a notifier, unlike [agentsNotifier].
-  /// Agent state is a LIVE fact worth tracking while nobody asked; the tree
-  /// is structure the user edits by hand in herdr, and it is read at the
-  /// one instant somebody opens the drawer to look at it. A notifier would
-  /// buy a cadence nothing needs and would have to be kept honest across
-  /// disconnects for a value no widget renders in between.
-  ///
-  /// Never throws and never rejects. Every failure — a torn-down session, a
-  /// dropped connection, a multiplexer with no workspaces, a wedged host,
-  /// or the [StateError] `listWorkspaceTree` raises for an unrecognized
-  /// herdr error envelope — becomes a variant the caller must switch over.
-  /// It NEVER degrades to [MuxWorkspaceTreeAvailable], which is the only
-  /// variant a caller may draw a tree from.
-  ///
-  /// [MuxWorkspaceTreeUnsupported] is reached ONLY past the connected
-  /// check, and that ordering matters: before [connect] resolves a
-  /// multiplexer, `_muxAdapter` is still the unconnected tmux fallback, and
-  /// naming it here would be a fabricated claim about a multiplexer this
-  /// session never selected — the trap [connect]'s own agent-tracking guard
-  /// is written about.
-  Future<MuxWorkspaceTreeResult> refreshWorkspaceTree() async {
-    if (_disposed) return const MuxWorkspaceTreeUnreachable();
-    if (statusNotifier.value != ConnectionStatus.connected) {
-      return const MuxWorkspaceTreeUnreachable();
-    }
-    if (_workspaceTreeQueryInFlight) {
-      return const MuxWorkspaceTreeUnreachable();
-    }
-
-    final treeApi = _muxAdapter.workspaces;
-    if (treeApi == null) return MuxWorkspaceTreeUnsupported(_muxAdapter.id);
-
-    _workspaceTreeQueryInFlight = true;
-    final query = treeApi.listWorkspaceTree();
-    // Released when the QUERY settles, not when this call stops waiting —
-    // the discipline [kAgentListTimeout] documents. `.timeout` abandons the
-    // Future without closing the remote channel, so releasing on
-    // abandonment would let the next drawer-open stack a second channel on
-    // top of one nobody closed.
-    //
-    // The error is swallowed here and handled on the awaited branch below:
-    // both observe the same Future, and an unobserved rejection on this one
-    // would surface as an unhandled async error.
-    unawaited(
-      query
-          .then<void>((_) {}, onError: (Object _) {})
-          .whenComplete(() => _workspaceTreeQueryInFlight = false),
-    );
-
-    try {
-      final result = await query.timeout(kWorkspaceTreeTimeout);
-      // The session can be torn down or dropped during the round-trip.
-      // Handing back a tree then would describe a host this session is no
-      // longer attached to.
-      if (_disposed) return const MuxWorkspaceTreeUnreachable();
-      if (statusNotifier.value != ConnectionStatus.connected) {
-        return const MuxWorkspaceTreeUnreachable();
-      }
-      return result;
-    } catch (e) {
-      _log.w('Workspace tree query failed for ${profile.name}: $e');
-      return const MuxWorkspaceTreeUnreachable();
-    }
-  }
-
-  /// Asks the host to switch to [tabId], so the user is looking at that
-  /// project.
-  ///
-  /// [tabId] is a [MuxTab.tabId] straight from the tree the caller is
-  /// rendering. This is [focusAgent] aimed at a different target, and every
-  /// word of that method's doc comment applies here — including the reason
-  /// the in-flight guard is released by the request settling rather than by
-  /// this call giving up on it.
-  Future<MuxTabFocusResult> focusTab(String tabId) async {
-    if (_disposed) return const MuxTabFocusFailed('session_disposed');
-    if (statusNotifier.value != ConnectionStatus.connected) {
-      return const MuxTabFocusFailed('not_connected');
-    }
-    if (_tabFocusInFlight) {
-      return const MuxTabFocusFailed('focus_already_in_flight');
-    }
-
-    final treeApi = _muxAdapter.workspaces;
-    if (treeApi == null) {
-      return const MuxTabFocusFailed('multiplexer_cannot_focus_tabs');
-    }
-
-    _tabFocusInFlight = true;
-    final request = treeApi.focusTab(tabId);
-    unawaited(
-      request
-          .then<void>((_) {}, onError: (Object _) {})
-          .whenComplete(() => _tabFocusInFlight = false),
-    );
-
-    try {
-      return await request.timeout(kTabFocusTimeout);
-    } catch (e) {
-      _log.w('Tab focus failed for ${profile.name} ($tabId): $e');
-      return const MuxTabFocusFailed(null);
-    }
-  }
-
-  /// Asks for the vitality verdict the first time an AUTHORITATIVE agent
-  /// snapshot makes one reachable.
-  ///
-  /// Gated on [AgentsKnown] because a VIRGIN verdict requires the absence
-  /// of agents to have been MEASURED — see [judgeSessionVitality]. Any
-  /// other snapshot could only ever produce
-  /// [SessionVitalityIndeterminate], so spending a host round-trip on it
-  /// would buy nothing.
-  ///
-  /// Gated on [SessionVitalityNotProbed] because this is a ONE-SHOT
-  /// question, and that is what keeps the agent poll from becoming a pane
-  /// poll. A session does not become virgin while you are connected to it:
-  /// the verdict describes how the session came back, which is settled
-  /// before helm ever attaches. Re-asking every ten seconds would hammer a
-  /// host the user is also working on — the constraint
-  /// [kAgentPollInterval] was written about — to re-derive a constant.
-  ///
-  /// KNOWN LIMIT, stated rather than hidden: a query that fails publishes
-  /// [SessionVitalityUnreachable] and is never retried for the life of the
-  /// connection. The UI draws nothing for that variant, so the cost is a
-  /// missing signal rather than a wrong one — which is the correct side to
-  /// fail on for a claim this loud.
-  void _maybeJudgeSessionVitality() {
-    if (agentsNotifier.value is! AgentsKnown) return;
-    if (sessionVitalityNotifier.value is! SessionVitalityNotProbed) return;
-    unawaited(refreshSessionVitality());
-  }
-
-  /// Asks the host once whether this session has been worked in, and
-  /// publishes the verdict on [sessionVitalityNotifier].
-  ///
-  /// Never throws and never rejects. Every failure degrades to a variant
-  /// that says we could not find out; it never degrades to
-  /// [SessionVitalityKnown], which is the only variant the UI speaks from.
-  Future<void> refreshSessionVitality() async {
-    if (_disposed || _vitalityQueryInFlight) return;
-    if (statusNotifier.value != ConnectionStatus.connected) return;
-
-    final paneApi = _muxAdapter.panes;
-    if (paneApi == null) {
-      sessionVitalityNotifier.value = SessionVitalityUnsupported(
-        _muxAdapter.id,
-      );
-      return;
-    }
-
-    // Checked BEFORE the round-trip, not inside the judge. Home comes from
-    // the probe, which already ran for this connection — if it is missing
-    // now it will still be missing later, so the panes could only ever
-    // feed an indeterminate verdict. Asking anyway would spend a channel
-    // to learn nothing.
-    final home = _hostReport?.env['home'];
-    if (home == null) {
-      sessionVitalityNotifier.value = const SessionVitalityIndeterminate();
-      return;
-    }
-
-    _vitalityQueryInFlight = true;
-    final query = paneApi.listPanes();
-    // Released when the QUERY settles, not when this call stops waiting —
-    // the discipline [kAgentListTimeout] documents. `.timeout` abandons the
-    // Future without closing the remote channel, so releasing on
-    // abandonment would let a later call stack a second channel on top of
-    // one nobody closed.
-    unawaited(
-      query
-          .then<void>((_) {}, onError: (Object _) {})
-          .whenComplete(() => _vitalityQueryInFlight = false),
-    );
-
-    try {
-      final result = await query.timeout(kPaneListTimeout);
-      // The session can be torn down during the round-trip — closing a tab
-      // disposes it while this is still in flight, and writing to a
-      // disposed ValueNotifier throws.
-      if (_disposed) return;
-      if (statusNotifier.value != ConnectionStatus.connected) return;
-      sessionVitalityNotifier.value = switch (result) {
-        MuxPanesAvailable(:final panes) => judgeSessionVitality(
-          panes: panes,
-          agents: agentsNotifier.value,
-          homeDirectory: home,
-        ),
-        MuxPaneServerNotRunning() => const SessionVitalityUnreachable(),
-      };
-    } catch (e) {
-      _log.w('Session vitality check failed for ${profile.name}: $e');
-      if (_disposed) return;
-      if (statusNotifier.value != ConnectionStatus.connected) return;
-      sessionVitalityNotifier.value = const SessionVitalityUnreachable();
-    }
-  }
+  /// See [HostQueries.refreshSessionVitality].
+  Future<void> refreshSessionVitality() =>
+      _hostQueries.refreshSessionVitality();
 
   /// Collects host findings and publishes them for the failure surface.
   ///
@@ -2143,44 +1382,4 @@ class TerminalSession {
           }),
     );
   }
-}
-
-/// Builds the disconnect message for [outcome]. See [AttachExitOutcome]'s
-/// class doc comment for what each variant means and its real-world
-/// limits. [AttachExitUnknown] keeps the pre-existing generic message
-/// unchanged, so a disconnect with no attach-session signal (e.g. a plain
-/// shell session, or the transport dropping before any exit status was
-/// read) reads exactly as it did before this classification existed.
-/// The [_disconnectMessageFor] copy, cut down to one overlay line.
-///
-/// Kept beside its terminal counterpart so the two cannot drift into
-/// telling the user two different stories about the same disconnect.
-String _disconnectSummaryFor(AttachExitOutcome outcome) {
-  return switch (outcome) {
-    AttachEndedCleanly() =>
-      'The session ended - you may have detached, or it was closed on the '
-          'host',
-    AttachEndedAbnormally(:final exitCode, :final exitSignal) =>
-      'The session exited abnormally'
-          '${exitCode != null ? ' (exit code $exitCode)' : ''}'
-          '${exitSignal != null ? ' (signal ${exitSignal.signalName})' : ''}',
-    // Deliberately not a guess. This is the branch a dropped TCP
-    // connection lands on, and naming a cause here — the network, the
-    // host, the server — would be inventing one.
-    AttachExitUnknown() => 'The connection to the host ended',
-  };
-}
-
-String _disconnectMessageFor(AttachExitOutcome outcome) {
-  return switch (outcome) {
-    AttachEndedCleanly() =>
-      '\r\n[Helm] Disconnected - the session ended (you may have detached, '
-          'or it was closed on the host)\r\n',
-    AttachEndedAbnormally(:final exitCode, :final exitSignal) =>
-      '\r\n[Helm] Disconnected - the session exited abnormally'
-          '${exitCode != null ? ' (exit code $exitCode)' : ''}'
-          '${exitSignal != null ? ' (signal ${exitSignal.signalName})' : ''}'
-          '\r\n',
-    AttachExitUnknown() => '\r\n[Helm] Disconnected\r\n',
-  };
 }

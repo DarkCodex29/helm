@@ -43,8 +43,10 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 | T1 | S1-S5 | App protocol client `AgentdClient` + token provisioning over SFTP into the Keychain; tested against an in-process `AgentServer` + fake Pi | worker | 8102e58, c993ef6, 75b4b3e, 1b924f4, 06f2b74, 5dc51ba (PR #10, merge b5e0c88) |
 | T2 | S1, S4, S5 | Run `helm-agentd` on the Mac as a LaunchAgent bound to the Tailscale IP (installer like the notifier's) | worker | 8df6919, b333ec0, 93ad16a, 44f63de, e2f44c2 (PR #9, merge 960ca7d) |
 | T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | 95ca413, 2b41ff8, 937ce9e, 9772a73, 2bf99aa (PR #11, merge c9f8228) |
-| T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | |
-| T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer) | pending | |
+| T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | 4cb1f93, adc4230, 50157f3, eb52fb2 (PR #12, merge dca8941) |
+| T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer): this task covers four behavior-preserving slices (types/timings/factories, `ObservableValueNotifier`, `OutputSettle`, `HostQueries`) | worker | |
+| T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | pending | |
+| T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | pending | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
 ## Log
@@ -177,3 +179,26 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   every build and a failure only marks an ask still open. (4) Disposing the
   banner with an answer in flight raises nothing (tested). Unverified: real
   device, Linux CI.
+- **L14** — T5 built by a worker (S1, S4), uncommitted, behavior-preserving:
+  existing tests are the spec and no test file changed. Four slices, each
+  compiling and passing alone: (1) pure types, constants and factories to
+  `terminal_session_types.dart`, `terminal_session_timings.dart` and
+  `session_factories.dart`, re-exported from `terminal_session.dart` with
+  `show` lists so import paths and the public API are unchanged (the
+  formerly private helpers, which became library-visible names, are NOT
+  exported); (2) `ObservableValueNotifier` to
+  `observable_value_notifier.dart`; (3) `OutputSettle`
+  (`output_settle.dart`), owned by the session with one-line delegations,
+  creating no Timer and reading no clock at construction, so timers still
+  bind to the zone of `connect()`; `armTracking()` still runs before
+  `statusNotifier.value = connected`, and `resolve()` keeps its place in
+  `_handleDisconnect` and `dispose`; (4) `HostQueries` (`host_queries.dart`)
+  for focus agent, workspace tree, focus tab and session vitality, reading
+  adapter, status, host report, agents and disposed state through getters;
+  the four in-flight guards moved with it, and `sessionVitalityNotifier`
+  stays owned and disposed by `TerminalSession`. Follow-ups recorded as
+  T5b (agent watch) and T5c (probe), both high risk and not done here.
+  Do NOT split `connect`, `reconnect`, `dispose`, `_handleDisconnect`,
+  `_publishAdvisories` or the viewport sizing: their ordering is the
+  contract. Comments moved verbatim; the channel-budget documentation
+  moved with the constants and the guards that it describes.
