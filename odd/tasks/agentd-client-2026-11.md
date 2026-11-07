@@ -252,3 +252,32 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   between publication, adoption, advisories and the notice, which rests on
   reading the code, as it did before the move. Follow-up T5d: an ordering
   trace test for the probe and explicit per-await bounds in its tests.
+- **L18** (2026-11-07) — Physical validation on the iPhone 16 (release build
+  from `6ca8ce6`), driven with DeviceLab `maestro-runner` over Wi-Fi, as
+  the owner asked: "pero usa maestro para controlar". Results:
+  (1) `helm-agentd` installed with `install.sh --load`, bound to the
+  Tailscale IP, Pi in RPC mode running. (2) The app connected to the Mac
+  profile on its own, copied the daemon token and registered its own ntfy
+  topic (host file: 0 FCM tokens, 1 topic, mode 0600). (3) ntfy subscribed
+  by Maestro; the topic was checked by shape only, never printed. Notifier
+  log after that: `pushed[fcm x0, ntfy x1]`, one delivery per alert. (4)
+  Answer from the phone: the probe sent `/gentle:animations` to the daemon,
+  the real Pi raised `ctx.ui.select` ("Gentle animations", 4 options), the
+  tab went to `needs_you`, Maestro tapped `status` (read-only, writes no
+  config) in the banner, and the daemon answered `ask_resolved` for that
+  ask and went back to `idle`. T4 is accepted on hardware.
+  Lessons: gentle-pi's `ask_user_question`/`ask_user_choice` refuse to run
+  in RPC unless `GENTLE_SHELL_INTERACTIVE_HOST=1`, so asking the agent to
+  "use the ask tool" produces no dialog; slash commands that call
+  `ctx.ui.select` do. The banner only mounts on an open tab for the
+  profile, so an app relaunched with no tabs shows nothing. A paste in ntfy
+  once picked up unrelated text from the shared clipboard: copy and paste
+  must happen back to back, and checks must never print field contents.
+  Open, and the main finding: the daemon's Pi is ONE process per Mac,
+  separate from the Pi sessions the owner runs in herdr tabs inside
+  Ghostty, so the badge and asks in helm describe that daemon agent, not
+  the agent visible in the terminal. Owner: herdr, Ghostty, Pi and Gentle
+  Shell already have their own ways to ask and approve; helm should connect
+  to those instead of running a parallel agent. That design is the next
+  decision. ntfy is an external app the owner does not want to depend on;
+  native iOS push needs a paid developer account.
