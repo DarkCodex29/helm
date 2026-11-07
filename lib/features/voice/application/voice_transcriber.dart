@@ -120,6 +120,17 @@ class VoiceTranscriber {
     final remotePath = '$_remoteDirectory/${_basename(recording.path)}';
 
     try {
+      // SFTP creates the file with the server's default umask (dartssh2
+      // sends empty attrs), i.e. world-readable on a shared Mac. Creating
+      // it 0600 first works because an SFTP open with create|truncate on
+      // an existing file keeps its mode.
+      if (!await _precreatePrivately(remotePath)) {
+        await _deleteRemoteQuietly(remotePath);
+        return const VoiceTranscriptionFailed(
+          'Could not prepare a private remote file',
+        );
+      }
+
       final outcome = await _uploadService.upload(
         _FileUploadSource(localFile),
         remotePath,
@@ -161,6 +172,23 @@ class VoiceTranscriber {
       // Same guarantee, locally: this runs whether upload, transcription,
       // or neither failed.
       await _deleteLocalQuietly(localFile);
+    }
+  }
+
+  /// Creates [remotePath] empty with mode 0600. False on a throw, timeout
+  /// or non-zero exit, so the caller never uploads audio it could not
+  /// protect.
+  Future<bool> _precreatePrivately(String remotePath) async {
+    final quoted = shellQuote(remotePath);
+    try {
+      final result = await _hostRunner.run(
+        'umask 077; : > $quoted && chmod 600 $quoted',
+      );
+      if (result.timedOut) return false;
+      return result.exitCode == null || result.exitCode == 0;
+    } catch (error) {
+      _log.w('Could not pre-create private remote audio: $error');
+      return false;
     }
   }
 

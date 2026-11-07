@@ -32,17 +32,31 @@ import '../../helpers/fake_sftp_session.dart';
 /// duplicate the transcriber's own command-building logic to tell the two
 /// calls apart.
 class _ScriptedHostCommandRunner implements HostCommandRunner {
-  _ScriptedHostCommandRunner({this.failTranscribeWith, this.stdout = ''})
-    : exitCode = 0;
+  _ScriptedHostCommandRunner({
+    this.failTranscribeWith,
+    this.stdout = '',
+    this.precreateExitCode = 0,
+    this.session,
+  }) : exitCode = 0;
 
   final Object? failTranscribeWith;
   final String stdout;
   final int exitCode;
+  final int precreateExitCode;
+
+  /// When set, each call records how many SFTP uploads had opened by then,
+  /// so a test can prove the order of remote commands versus the upload.
+  final FakeSftpSession? session;
   final runCalls = <String>[];
+  final uploadsOpenedAtCall = <int>[];
 
   @override
   Future<HostCommandResult> run(String command, {Duration? timeout}) async {
     runCalls.add(command);
+    uploadsOpenedAtCall.add(session?.openedWritePaths.length ?? 0);
+    if (command.contains('umask 077')) {
+      return HostCommandResult(stdout: '', exitCode: precreateExitCode);
+    }
     final isDelete = command.trimLeft().startsWith('rm ');
     final error = failTranscribeWith;
     if (!isDelete && error != null) throw error;
@@ -95,7 +109,7 @@ void main() {
       await transcriber.transcribe(VoiceRecording(path));
 
       expect(runner.runCalls, isNotEmpty);
-      final transcribeCommand = runner.runCalls.first;
+      final transcribeCommand = runner.runCalls[1];
       // The remote path — built from this attacker-shaped basename —
       // reaches the command ONLY inside shellQuote's own single-quoted
       // form. If the transcriber ever built this command by naive
@@ -115,6 +129,56 @@ void main() {
     });
   });
 
+  group('security: the remote audio is private to the owner', () {
+    test('pre-creates the remote file as 0600 before the upload opens it, '
+        'so SFTP\'s default-umask create cannot leave it world-readable', () async {
+      final path = await _createTempFile('.wav');
+      final remoteBasename = path.substring(path.lastIndexOf('/') + 1);
+      final session = FakeSftpSession();
+      final runner = _ScriptedHostCommandRunner(
+        stdout: 'hola',
+        session: session,
+      );
+      final transcriber = VoiceTranscriber(
+        uploadService: SftpUploadService.withOpener(() async => session),
+        hostRunner: runner,
+      );
+
+      await transcriber.transcribe(VoiceRecording(path));
+
+      final precreate = runner.runCalls.first;
+      final quoted = shellQuote('/tmp/$remoteBasename');
+      expect(precreate, contains('umask 077'));
+      expect(precreate, contains('chmod 600'));
+      expect(precreate, contains(quoted));
+      // Nothing had been uploaded when the pre-create ran...
+      expect(runner.uploadsOpenedAtCall.first, 0);
+      // ...and the upload happened afterwards.
+      expect(session.openedWritePaths, isNotEmpty);
+    });
+
+    test('a failing pre-create yields a failure, never uploads, and still '
+        'deletes the local file', () async {
+      final path = await _createTempFile('.wav');
+      final session = FakeSftpSession();
+      final runner = _ScriptedHostCommandRunner(
+        precreateExitCode: 1,
+        session: session,
+      );
+      final transcriber = VoiceTranscriber(
+        uploadService: SftpUploadService.withOpener(() async => session),
+        hostRunner: runner,
+      );
+
+      final result = await transcriber.transcribe(VoiceRecording(path));
+
+      expect(result, isA<VoiceTranscriptionFailed>());
+      expect(session.openedWritePaths, isEmpty);
+      expect(runner.runCalls.any((c) => c.contains('whisper-cli')), isFalse);
+      expect(File(path).existsSync(), isFalse);
+    });
+  });
+
   group('security: remote cleanup survives a failing transcription', () {
     test('the remote audio is deleted even when the transcription command '
         'throws', () async {
@@ -130,10 +194,10 @@ void main() {
       final result = await transcriber.transcribe(VoiceRecording(path));
 
       expect(result, isA<VoiceTranscriptionFailed>());
-      // Exactly one call besides the thrown transcription attempt: the
-      // delete. A runner that never got a second call would mean the
-      // delete was skipped on the failing path.
-      expect(runner.runCalls.length, 2);
+      // Pre-create, the thrown transcription attempt, then the delete. A
+      // runner that never got a third call would mean the delete was
+      // skipped on the failing path.
+      expect(runner.runCalls.length, 3);
       expect(runner.runCalls.last.trimLeft(), startsWith('rm '));
     });
   });
@@ -216,9 +280,9 @@ void main() {
 
       expect(result, isA<VoiceTranscriptionSucceeded>());
       expect((result as VoiceTranscriptionSucceeded).text, 'hola mundo');
-      expect(runner.runCalls.first, contains('whisper-cli'));
+      expect(runner.runCalls[1], contains('whisper-cli'));
       expect(
-        runner.runCalls.first,
+        runner.runCalls[1],
         contains(shellQuote(VoiceTranscriber.vocabularyPrompt)),
       );
     });
