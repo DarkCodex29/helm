@@ -27,6 +27,9 @@ void main() {
 
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('helm_agentd_server_');
+    // systemTemp dirs are 0700 on macOS but not everywhere; the token store
+    // now refuses a token whose directory chain is open to others.
+    await chmod('700', tmp.path);
     tokenPath = '${tmp.path}/state/token';
     tokens = TokenStore(tokenPath);
     await tokens.ensure();
@@ -145,6 +148,37 @@ void main() {
 
     test('default path lives under ~/.helm-agentd', () {
       expect(TokenStore.defaultPath(), endsWith('/.helm-agentd/token'));
+    });
+
+    test('refuses a token path that is a symlink, even to a 0600 file', () async {
+      final link = '${tmp.path}/state/link-token';
+      Link(link).createSync(tokenPath);
+      await expectLater(
+        TokenStore(link).ensure(),
+        throwsA(isA<TokenFileException>()),
+      );
+      expect(TokenStore(link).verify((await currentToken()).trim()), isFalse);
+    });
+
+    test('refuses to create the token in a directory others can enter', () async {
+      final loose = Directory('${tmp.path}/loose')..createSync();
+      await chmod('755', loose.path);
+      final path = '${loose.path}/token';
+      await expectLater(
+        TokenStore(path).ensure(),
+        throwsA(isA<TokenFileException>()),
+      );
+      expect(File(path).existsSync(), isFalse, reason: 'no secret written');
+    });
+
+    test('refuses an existing token in a directory others can enter', () async {
+      await chmod('755', '${tmp.path}/state');
+      final secret = (await currentToken()).trim();
+      await expectLater(
+        TokenStore(tokenPath).ensure(),
+        throwsA(isA<TokenFileException>()),
+      );
+      expect(tokens.verify(secret), isFalse);
     });
   });
 
