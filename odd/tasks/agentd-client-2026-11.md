@@ -45,7 +45,7 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 | T3 | S1, S4 | UI: per-tab agent state (needs you / working / thinking / idle) from `AgentdClient`, PTY lane untouched | worker | 95ca413, 2b41ff8, 937ce9e, 9772a73, 2bf99aa (PR #11, merge c9f8228) |
 | T4 | S1, S4 | Answer `ask` (confirm/select) from the phone; first answer wins | worker | 4cb1f93, adc4230, 50157f3, eb52fb2 (PR #12, merge dca8941) |
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer): this task covers four behavior-preserving slices (types/timings/factories, `ObservableValueNotifier`, `OutputSettle`, `HostQueries`) | worker | |
-| T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | pending | |
+| T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | worker | |
 | T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | pending | |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
@@ -202,3 +202,22 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   `_publishAdvisories` or the viewport sizing: their ordering is the
   contract. Comments moved verbatim; the channel-budget documentation
   moved with the constants and the guards that it describes.
+- **L15** — User decision: "si primero haz", answering the parent's "¿Validamos
+  ya, o prefieres que antes haga T5b y T5c?". T5b built by a worker (S1, S4),
+  uncommitted, behavior-preserving. Slice A: 26 characterization tests
+  (`agent_watch_characterization_test.dart`) pin exact snapshot values (const
+  identity for NotProbed/Unreachable), list/wait counts across observe,
+  unobserve and re-observe, 12 toggles holding one wait, the failed-wait
+  retry cadence, in-flight refresh, disconnect reset, reconnect only while
+  observed, and no adapter call after dispose; all green on the old code.
+  Slice B: the loop moved to `agent_watch.dart` (`AgentWatch`: notifier,
+  epoch, active, wait-in-flight, observed, poll-in-flight, retry timer and
+  the loop methods), comments verbatim. It reads adapter, connected, disposed
+  and the vitality judge through getters/callbacks, creates no Timer at
+  construction, and `TerminalSession` keeps `agentsNotifier`, `tracksAgents`
+  and `refreshAgents` as delegations; `_agentWatch.enable()` replaces the two
+  lines in `connect`, and `_agentWatch.stop()` keeps both call positions
+  (`_handleDisconnect`, `dispose`). String literals diffed against
+  origin/main across all of `data/`: only imports and a second
+  `'TerminalSession'` logger tag differ. Mutating the join guard, the
+  poll-in-flight guard and the epoch check each fails the new tests.
