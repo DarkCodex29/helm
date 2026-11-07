@@ -253,7 +253,11 @@ registra solo, por SSH, cuando se conecta: con token FCM agrega el token; sin FC
 agrega un topic de ntfy aleatorio propio. Un archivo con solo `tokens` sigue funcionando, y
 el registro conserva la otra clave. Ante cada aviso el notifier envía a **todos** los tokens
 y a **todos** los topics, cada destino por separado: si uno falla, los demás igual reciben
-el aviso. El log dice solo cuántos (`pushed[fcm x1, ntfy x2]`), nunca un token ni un topic.
+el aviso. Cada destino que falla se reintenta hasta 2 veces (2 s y 5 s); si no llegó a
+ninguno, el evento no se da por consumido y el siguiente aviso equivalente vuelve a intentar.
+El archivo se lee en `devices.py`, independiente de FCM: si `fcm.py` no carga, los topics de
+ntfy siguen recibiendo (los tokens FCM se cuentan como no entregables). El registro deja
+`~/helm-notifier` en 0700 y `device-tokens.json` en 0600. El log dice solo cuántos (`pushed[fcm x1, ntfy x2]`), nunca un token ni un topic.
 
 Cada teléfono con topic se suscribe en la app ntfy con el topic que muestra
 **Ajustes → Notifications on this device** (**+**, pegar, servidor `ntfy.sh`). El topic es un

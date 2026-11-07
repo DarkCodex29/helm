@@ -76,7 +76,7 @@ class RedactionTest(LoggingBase):
     def test_notification_body_is_not_logged_by_delivery(self):
         import notifier
         long_body = "SECRET-BODY-" + "z" * 200
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=["tok-aaaaaaaa"]), \
+        with mock.patch.object(notifier.devices, "device_tokens", return_value=["tok-aaaaaaaa"]), \
              mock.patch.object(notifier.fcm, "send"):
             notifier.deliver("Proj · claude needs you", long_body, "5", "w", {})
         self.assertNotIn("SECRET-BODY", self.read())
@@ -85,7 +85,7 @@ class RedactionTest(LoggingBase):
     def test_failed_send_log_has_no_token_fragment(self):
         import notifier
         device = "tok-ZZZZ1234abcd5678"  # noqa: S105
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=[device]), \
+        with mock.patch.object(notifier.devices, "device_tokens", return_value=[device]), \
              mock.patch.object(notifier.fcm, "send", side_effect=OSError("down")), \
              mock.patch.object(notifier, "push"):
             notifier.deliver("T", "B", "5", "w", {})
@@ -98,10 +98,10 @@ class RedactionTest(LoggingBase):
         secret = "opaque.title.secret/ABCDEFGHIJKLMNOP0123456789xyz"  # noqa: S105
         hlog.register_secret(secret)
         title = secret + " · claude is done"
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=["tok-aaaaaaaa"]), \
+        with mock.patch.object(notifier.devices, "device_tokens", return_value=["tok-aaaaaaaa"]), \
              mock.patch.object(notifier.fcm, "send"):
             notifier.deliver(title, "b", "5", "w", {})
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=[]), \
+        with mock.patch.object(notifier.devices, "device_tokens", return_value=[]), \
              mock.patch("netsafe.urlopen"):
             os.environ["HELM_NOTIFIER_TOPIC"] = "some-topic-zzzz"
             notifier.push(title, "b")

@@ -171,8 +171,9 @@ class DeliverRoutingTest(IsolatedEnv):
     def run_deliver(self, tokens=(), topics=(), send=None, legacy="", push_effect=None):
         if legacy:
             os.environ["HELM_NOTIFIER_TOPIC"] = legacy
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=list(tokens)), \
-             mock.patch.object(notifier.fcm, "device_ntfy_topics", return_value=list(topics)), \
+        with mock.patch.object(notifier.devices, "device_tokens", return_value=list(tokens)), \
+             mock.patch.object(notifier.devices, "device_ntfy_topics", return_value=list(topics)), \
+             mock.patch.object(notifier, "_sleep"), \
              mock.patch.object(notifier.fcm, "send", side_effect=send) as fcm_send, \
              mock.patch.object(notifier, "push_topic", side_effect=push_effect) as push_topic:
             notifier.deliver("T", "B", "5", "warning", {"a": 1}, tag="p")
@@ -202,8 +203,9 @@ class DeliverRoutingTest(IsolatedEnv):
     def test_ntfy_failure_does_not_skip_other_destinations(self):
         fcm_send, push_topic = self.run_deliver(
             tokens=["t1"], topics=[self.TOPIC_A, self.TOPIC_B],
-            push_effect=[OSError("x"), None])
-        self.assertEqual(push_topic.call_count, 2)
+            push_effect=[OSError("x"), None, None])
+        # topic A fails once and is retried, then topic B.
+        self.assertEqual(push_topic.call_count, 3)
         self.assertEqual(fcm_send.call_count, 1)
 
     def test_legacy_topic_used_only_without_devices(self):
@@ -235,8 +237,8 @@ class DeliverRoutingTest(IsolatedEnv):
         logged = []
         token = "tok-SECRET-0123456789"
         with mock.patch.object(notifier, "log", side_effect=logged.append), \
-             mock.patch.object(notifier.fcm, "device_tokens", return_value=[token]), \
-             mock.patch.object(notifier.fcm, "device_ntfy_topics",
+             mock.patch.object(notifier.devices, "device_tokens", return_value=[token]), \
+             mock.patch.object(notifier.devices, "device_ntfy_topics",
                                return_value=[self.TOPIC_A, self.TOPIC_B]), \
              mock.patch.object(notifier.fcm, "send"), \
              mock.patch.object(notifier, "push_topic"):

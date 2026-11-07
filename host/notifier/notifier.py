@@ -23,6 +23,7 @@ import time
 import urllib.request
 
 import config
+import devices
 import hlog
 import netsafe
 from hlog import clip, log
@@ -38,6 +39,32 @@ else:
     _FCM_IMPORT_ERROR = None
 
 NTFY_BASE = "https://ntfy.sh/"
+
+# Retries per failed destination, with the pause before each. Bounded on
+# purpose: a dead network must not pin a watcher thread.
+RETRY_BACKOFF = (2, 5)
+
+
+def _sleep(seconds):
+    time.sleep(seconds)
+
+
+def _with_retries(send):
+    """Call [send] until it succeeds or the backoff schedule runs out.
+
+    Returns True on success. The last exception is swallowed here; callers
+    log only its type.
+    """
+    for attempt in range(len(RETRY_BACKOFF) + 1):
+        try:
+            send()
+            return True
+        except Exception as exc:
+            last = type(exc).__name__
+            if attempt < len(RETRY_BACKOFF):
+                _sleep(RETRY_BACKOFF[attempt])
+    log("send failed after retries: " + last)
+    return False
 
 # Which states are worth telling a human about, and how loudly.
 #
@@ -189,7 +216,11 @@ def push_topic(topic, title, body, priority="5", tags="warning"):
     req.add_header("Title", title)
     req.add_header("Priority", priority)
     req.add_header("Tags", tags)
-    netsafe.urlopen(req, timeout=10).read()
+    try:
+        netsafe.urlopen(req, timeout=10).read()
+    except Exception as exc:
+        # Never chain: an exception can echo the URL, which holds the topic.
+        raise RuntimeError("ntfy send failed: " + type(exc).__name__) from None
 
 
 def push(title, body, priority="5", tags="warning"):
@@ -212,43 +243,54 @@ def deliver(title, body, priority, tags, data, tag=None):
     """Send one alert to EVERY registered device, each channel independently.
 
     A device is either an FCM token or its own ntfy topic (phones without
-    FCM). A failure on one destination never skips the others. The legacy
+    FCM). A failure on one destination never skips the others, and each
+    failed destination is retried a bounded number of times. The legacy
     host-wide topic is used only when no device registered anything, which
     keeps unconfigured hosts working and avoids duplicate alerts once
     devices register.
+
+    Returns True when the alert reached at least one destination (or went to
+    the legacy topic), False when nothing was delivered, so the caller can
+    leave the event un-consumed.
     """
-    tokens = fcm.device_tokens() if fcm is not None else []
-    topics = fcm.device_ntfy_topics() if fcm is not None else []
-    if fcm is None:
-        log(f"fcm unavailable ({_FCM_IMPORT_ERROR}); using ntfy")
+    # Read from devices.py, never from fcm: a broken FCM import must not
+    # hide the ntfy devices.
+    tokens = devices.device_tokens()
+    topics = devices.device_ntfy_topics()
 
     if not tokens and not topics:
         push(title, body, priority=priority, tags=tags)
-        return
+        return True
 
     fcm_sent = 0
-    for index, token in enumerate(tokens):
-        try:
-            fcm.send(token, title, body, data=data, tag=tag)
-            fcm_sent += 1
-        except Exception as exc:
+    if fcm is None:
+        log(f"fcm unavailable ({_FCM_IMPORT_ERROR}); "
+            f"{len(tokens)} fcm device(s) undeliverable")
+    else:
+        for index, token in enumerate(tokens):
             # Device N of M, never any part of the token.
-            log(f"fcm send failed for device {index + 1}/{len(tokens)}: "
-                f"{type(exc).__name__}")
+            if _with_retries(
+                lambda token=token: fcm.send(token, title, body, data=data, tag=tag)
+            ):
+                fcm_sent += 1
+            else:
+                log(f"fcm send failed for device {index + 1}/{len(tokens)}")
 
     ntfy_sent = 0
     for index, topic in enumerate(topics):
-        try:
-            push_topic(topic, title, body, priority=priority, tags=tags)
+        if _with_retries(
+            lambda topic=topic: push_topic(
+                topic, title, body, priority=priority, tags=tags)
+        ):
             ntfy_sent += 1
-        except Exception as exc:
-            log(f"ntfy send failed for device {index + 1}/{len(topics)}: "
-                f"{type(exc).__name__}")
+        else:
+            log(f"ntfy send failed for device {index + 1}/{len(topics)}")
 
     if fcm_sent or ntfy_sent:
         log(f"pushed[fcm x{fcm_sent}, ntfy x{ntfy_sent}]: {clip(title)}")
-    else:
-        log("every device delivery failed")
+        return True
+    log("every device delivery failed")
+    return False
 
 
 def build_alert(session, pane, state, rule, agent, place, area, doing):
@@ -292,6 +334,8 @@ def handle_event(session, msg, names):
             _last_state[key] = state
         if previous == state:
             return False
+    else:
+        previous = None
 
     rule = NOTIFY_ON.get(state)
     if not rule:
@@ -303,13 +347,22 @@ def handle_event(session, msg, names):
     title, body, payload = build_alert(
         session, pane, state, rule, agent, place, area, doing
     )
-    deliver(
+    delivered = deliver(
         title, body,
         priority=rule["priority"], tags=rule["tags"],
         # One slot per (session, pane): otherwise a second agent's alert
         # replaces the first one's and the user never learns it happened.
         tag=session + "/" + pane, data=payload,
     )
+    if delivered is False and isinstance(state, str):
+        # Nothing arrived: forget the state so the next equivalent event
+        # alerts again instead of being swallowed as a repeat.
+        with _state_lock:
+            if _last_state.get(key) == state:
+                if previous is None:
+                    _last_state.pop(key, None)
+                else:
+                    _last_state[key] = previous
     return True
 
 
