@@ -175,55 +175,80 @@ def describe(session, pane, fallback_agent):
     return place, area, doing, agent
 
 
+def push_topic(topic, title, body, priority="5", tags="warning"):
+    """POST one ntfy notification to [topic]. Raises on failure.
+
+    The caller counts successes, so errors propagate. The topic is a bearer
+    secret: it is registered for redaction and never logged.
+    """
+    hlog.register_secret(topic)
+    # NTFY_BASE is a fixed https URL; only the topic path varies.
+    req = urllib.request.Request(  # noqa: S310
+        NTFY_BASE + topic, data=body.encode("utf-8"), method="POST"
+    )
+    req.add_header("Title", title)
+    req.add_header("Priority", priority)
+    req.add_header("Tags", tags)
+    netsafe.urlopen(req, timeout=10).read()
+
+
 def push(title, body, priority="5", tags="warning"):
-    """Send one ntfy notification (fallback transport). No-op without a topic."""
+    """Send one ntfy notification to the legacy host-wide topic.
+
+    No-op without a topic.
+    """
     topic = config.topic()
     if not topic:
         log("ntfy not configured; notification dropped")
         return
-    hlog.register_secret(topic)
     try:
-        # NTFY_BASE is a fixed https URL; only the topic path varies.
-        req = urllib.request.Request(  # noqa: S310
-            NTFY_BASE + topic, data=body.encode("utf-8"), method="POST"
-        )
-        req.add_header("Title", title)
-        req.add_header("Priority", priority)
-        req.add_header("Tags", tags)
-        netsafe.urlopen(req, timeout=10).read()
+        push_topic(topic, title, body, priority=priority, tags=tags)
         log(f"pushed[ntfy {priority}]: {clip(title)}")
     except Exception as exc:
         log("push failed: " + type(exc).__name__)
 
 
 def deliver(title, body, priority, tags, data, tag=None):
-    """Send one alert by the best transport currently available.
+    """Send one alert to EVERY registered device, each channel independently.
 
-    Tokens registered means FCM (helm's own channel, tap opens the session);
-    none means ntfy. An FCM failure falls back rather than raising: a
-    notification lost to a transient 5xx is the failure this daemon exists to
-    prevent.
+    A device is either an FCM token or its own ntfy topic (phones without
+    FCM). A failure on one destination never skips the others. The legacy
+    host-wide topic is used only when no device registered anything, which
+    keeps unconfigured hosts working and avoids duplicate alerts once
+    devices register.
     """
     tokens = fcm.device_tokens() if fcm is not None else []
-
-    if tokens and fcm is not None:
-        sent = 0
-        for index, token in enumerate(tokens):
-            try:
-                fcm.send(token, title, body, data=data, tag=tag)
-                sent += 1
-            except Exception as exc:
-                # Device N of M, never any part of the token.
-                log(f"fcm send failed for device {index + 1}/{len(tokens)}: "
-                    f"{type(exc).__name__}")
-        if sent:
-            log(f"pushed[fcm x{sent}]: {clip(title)}")
-            return
-        log("every fcm delivery failed; falling back to ntfy")
-    elif fcm is None:
+    topics = fcm.device_ntfy_topics() if fcm is not None else []
+    if fcm is None:
         log(f"fcm unavailable ({_FCM_IMPORT_ERROR}); using ntfy")
 
-    push(title, body, priority=priority, tags=tags)
+    if not tokens and not topics:
+        push(title, body, priority=priority, tags=tags)
+        return
+
+    fcm_sent = 0
+    for index, token in enumerate(tokens):
+        try:
+            fcm.send(token, title, body, data=data, tag=tag)
+            fcm_sent += 1
+        except Exception as exc:
+            # Device N of M, never any part of the token.
+            log(f"fcm send failed for device {index + 1}/{len(tokens)}: "
+                f"{type(exc).__name__}")
+
+    ntfy_sent = 0
+    for index, topic in enumerate(topics):
+        try:
+            push_topic(topic, title, body, priority=priority, tags=tags)
+            ntfy_sent += 1
+        except Exception as exc:
+            log(f"ntfy send failed for device {index + 1}/{len(topics)}: "
+                f"{type(exc).__name__}")
+
+    if fcm_sent or ntfy_sent:
+        log(f"pushed[fcm x{fcm_sent}, ntfy x{ntfy_sent}]: {clip(title)}")
+    else:
+        log("every device delivery failed")
 
 
 def build_alert(session, pane, state, rule, agent, place, area, doing):

@@ -243,5 +243,39 @@ class TokenFileTest(IsolatedEnv):
         self.assertEqual(fcm.device_tokens(), ["z"])
 
 
+class DeviceNtfyTopicsTest(IsolatedEnv):
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(fcm.hlog._secrets.clear)
+
+    def load(self, text):
+        os.environ["HELM_NOTIFIER_TOKENS"] = self.write("tokens.json", text)
+        return fcm.device_ntfy_topics()
+
+    def test_missing_file(self):
+        self.assertEqual(fcm.device_ntfy_topics(), [])
+
+    def test_legacy_file_without_topics_key(self):
+        self.assertEqual(self.load('{"tokens": ["a"]}'), [])
+
+    def test_reads_topics_and_tokens_independently(self):
+        text = '{"tokens": ["a"], "ntfy_topics": ["helm-abcdefghijklmnop"]}'
+        self.assertEqual(self.load(text), ["helm-abcdefghijklmnop"])
+        self.assertEqual(fcm.device_tokens(), ["a"])
+
+    def test_malformed_entries_dropped_and_duplicates_collapse(self):
+        text = ('{"ntfy_topics": ["helm-abcdefghijklmnop", "", 5, null, "a/b", '
+                '"has space", "helm-abcdefghijklmnop", "../x"]}')
+        self.assertEqual(self.load(text), ["helm-abcdefghijklmnop"])
+
+    def test_wrong_shapes(self):
+        for text in ("[]", "{oops", '{"ntfy_topics": "abc"}', '{"ntfy_topics": {"a": 1}}'):
+            self.assertEqual(self.load(text), [], text)
+
+    def test_topics_are_registered_as_secrets(self):
+        self.load('{"ntfy_topics": ["helm-abcdefghijklmnop"]}')
+        self.assertNotIn("helm-abcdefghijklmnop", fcm.hlog.scrub("x helm-abcdefghijklmnop"))
+
+
 if __name__ == "__main__":
     unittest.main()

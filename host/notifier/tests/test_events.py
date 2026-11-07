@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest import mock
 
@@ -158,26 +159,100 @@ class EnrichmentTest(IsolatedEnv):
 
 
 class DeliverRoutingTest(IsolatedEnv):
-    def test_tokens_route_to_fcm_and_skip_ntfy(self):
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=["t1", "t2"]), \
-             mock.patch.object(notifier.fcm, "send") as send, \
-             mock.patch.object(notifier, "push") as push:
+    """Every registered device gets the alert, each channel independently."""
+
+    TOPIC_A = "helm-AAAAAAAAAAAAAAAAAAAAAAAA"
+    TOPIC_B = "helm-BBBBBBBBBBBBBBBBBBBBBBBB"
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(notifier.hlog._secrets.clear)
+
+    def run_deliver(self, tokens=(), topics=(), send=None, legacy="", push_effect=None):
+        if legacy:
+            os.environ["HELM_NOTIFIER_TOPIC"] = legacy
+        with mock.patch.object(notifier.fcm, "device_tokens", return_value=list(tokens)), \
+             mock.patch.object(notifier.fcm, "device_ntfy_topics", return_value=list(topics)), \
+             mock.patch.object(notifier.fcm, "send", side_effect=send) as fcm_send, \
+             mock.patch.object(notifier, "push_topic", side_effect=push_effect) as push_topic:
             notifier.deliver("T", "B", "5", "warning", {"a": 1}, tag="p")
-        self.assertEqual(send.call_count, 2)
-        push.assert_not_called()
+        return fcm_send, push_topic
 
-    def test_no_tokens_use_ntfy(self):
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=[]), \
-             mock.patch.object(notifier, "push") as push:
-            notifier.deliver("T", "B", "5", "warning", {})
-        push.assert_called_once()
+    def test_mixed_fleet_reaches_fcm_and_ntfy(self):
+        fcm_send, push_topic = self.run_deliver(tokens=["t1"], topics=[self.TOPIC_A])
+        self.assertEqual(fcm_send.call_count, 1)
+        push_topic.assert_called_once()
+        self.assertEqual(push_topic.call_args.args[0], self.TOPIC_A)
 
-    def test_every_fcm_failure_falls_back_to_ntfy(self):
-        with mock.patch.object(notifier.fcm, "device_tokens", return_value=["t1"]), \
-             mock.patch.object(notifier.fcm, "send", side_effect=OSError("x")), \
-             mock.patch.object(notifier, "push") as push:
+    def test_every_device_topic_gets_the_alert(self):
+        _, push_topic = self.run_deliver(topics=[self.TOPIC_A, self.TOPIC_B])
+        self.assertEqual([c.args[0] for c in push_topic.call_args_list],
+                         [self.TOPIC_A, self.TOPIC_B])
+
+    def test_priority_and_tags_are_kept(self):
+        _, push_topic = self.run_deliver(topics=[self.TOPIC_A])
+        self.assertEqual(push_topic.call_args.kwargs["priority"], "5")
+        self.assertEqual(push_topic.call_args.kwargs["tags"], "warning")
+
+    def test_fcm_failure_still_sends_ntfy(self):
+        _, push_topic = self.run_deliver(
+            tokens=["t1"], topics=[self.TOPIC_A], send=OSError("x"))
+        push_topic.assert_called_once()
+
+    def test_ntfy_failure_does_not_skip_other_destinations(self):
+        fcm_send, push_topic = self.run_deliver(
+            tokens=["t1"], topics=[self.TOPIC_A, self.TOPIC_B],
+            push_effect=[OSError("x"), None])
+        self.assertEqual(push_topic.call_count, 2)
+        self.assertEqual(fcm_send.call_count, 1)
+
+    def test_legacy_topic_used_only_without_devices(self):
+        _, push_topic = self.run_deliver(legacy="legacy-topic-123")
+        push_topic.assert_called_once()
+        self.assertEqual(push_topic.call_args.args[0], "legacy-topic-123")
+
+    def test_legacy_topic_not_used_once_a_device_topic_exists(self):
+        _, push_topic = self.run_deliver(topics=[self.TOPIC_A], legacy="legacy-topic-123")
+        self.assertNotIn("legacy-topic-123", [c.args[0] for c in push_topic.call_args_list])
+
+    def test_legacy_topic_not_used_when_fcm_token_exists(self):
+        fcm_send, push_topic = self.run_deliver(tokens=["t1"], legacy="legacy-topic-123")
+        self.assertEqual(fcm_send.call_count, 1)
+        push_topic.assert_not_called()
+
+    def test_legacy_topic_not_used_even_when_every_fcm_send_fails(self):
+        # A registered device means the legacy topic stays quiet; otherwise a
+        # transient FCM error would start duplicate alerts on a second channel.
+        _, push_topic = self.run_deliver(
+            tokens=["t1"], send=OSError("x"), legacy="legacy-topic-123")
+        push_topic.assert_not_called()
+
+    def test_no_devices_no_legacy_is_a_noop(self):
+        _, push_topic = self.run_deliver()
+        push_topic.assert_not_called()
+
+    def test_log_has_counts_but_never_topic_or_token(self):
+        logged = []
+        token = "tok-SECRET-0123456789"
+        with mock.patch.object(notifier, "log", side_effect=logged.append), \
+             mock.patch.object(notifier.fcm, "device_tokens", return_value=[token]), \
+             mock.patch.object(notifier.fcm, "device_ntfy_topics",
+                               return_value=[self.TOPIC_A, self.TOPIC_B]), \
+             mock.patch.object(notifier.fcm, "send"), \
+             mock.patch.object(notifier, "push_topic"):
             notifier.deliver("T", "B", "5", "warning", {})
-        push.assert_called_once()
+        text = "\n".join(logged)
+        self.assertIn("pushed[fcm x1, ntfy x2]", text)
+        self.assertNotIn(self.TOPIC_A, text)
+        self.assertNotIn(token, text)
+
+    def test_push_topic_failure_log_hides_the_topic(self):
+        logged = []
+        with mock.patch.object(notifier, "log", side_effect=logged.append), \
+             mock.patch("netsafe.urlopen", side_effect=OSError(self.TOPIC_A)):
+            with self.assertRaises(Exception):
+                notifier.push_topic(self.TOPIC_A, "T", "B")
+        self.assertNotIn(self.TOPIC_A, "\n".join(logged))
 
     def test_push_without_topic_is_a_noop(self):
         with mock.patch("netsafe.urlopen") as urlopen:

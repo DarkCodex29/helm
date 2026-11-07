@@ -80,7 +80,7 @@ class RedactionTest(LoggingBase):
              mock.patch.object(notifier.fcm, "send"):
             notifier.deliver("Proj · claude needs you", long_body, "5", "w", {})
         self.assertNotIn("SECRET-BODY", self.read())
-        self.assertIn("pushed[fcm x1]", self.read())
+        self.assertIn("pushed[fcm x1, ntfy x0]", self.read())
 
     def test_failed_send_log_has_no_token_fragment(self):
         import notifier
@@ -106,7 +106,7 @@ class RedactionTest(LoggingBase):
             os.environ["HELM_NOTIFIER_TOPIC"] = "some-topic-zzzz"
             notifier.push(title, "b")
         text = self.read()
-        self.assertIn("pushed[fcm x1]", text)
+        self.assertIn("pushed[fcm x1, ntfy x0]", text)
         self.assertIn("pushed[ntfy", text)
         for i in range(len(secret) - 7):
             self.assertNotIn(secret[i:i + 8], text, secret[i:i + 8])
