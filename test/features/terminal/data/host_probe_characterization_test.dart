@@ -42,6 +42,10 @@ class _RecordingTerminal extends Terminal {
   void write(String data) => writes.add(data);
 }
 
+/// Every awaited step is bounded so a hang fails fast with a TimeoutException
+/// instead of waiting for the global test timeout.
+const _bound = Duration(seconds: 10);
+
 const _secureStorageChannel = MethodChannel(
   'plugins.it_nomads.com/flutter_secure_storage',
 );
@@ -138,7 +142,7 @@ Future<_Fixture> _connect({
       return attach;
     },
   );
-  await session.connect('key');
+  await session.connect('key').timeout(_bound);
   return _Fixture(session, service, terminal, commands, attaches);
 }
 
@@ -212,11 +216,11 @@ void main() {
           "/home/deployer/.local/bin/herdr --session 'helm-0' "
           "agent focus 'w1:p1'";
       _answerFocus(runner, focus);
-      final result = await f.session.focusAgent('w1:p1');
+      final result = await f.session.focusAgent('w1:p1').timeout(_bound);
 
       expect(result, isA<MuxAgentFocused>());
       expect(runner.runCalls, [focus]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('publishes only the off-PATH advisory, exactly', () async {
@@ -229,7 +233,7 @@ void main() {
       expect(advisories.map((a) => a.id).toList(), [
         HostAdvisoryId.multiplexerOffPath,
       ]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -248,12 +252,12 @@ void main() {
       expect(f.session.advisoriesNotifier.value, isEmpty);
       expect(f.commands, ["/usr/bin/tmux new-session -A -s 'helm-0'"]);
 
-      final result = await f.session.focusAgent('w1:p1');
+      final result = await f.session.focusAgent('w1:p1').timeout(_bound);
 
       expect(result, isA<MuxAgentFocusFailed>());
       expect((result as MuxAgentFocusFailed).code, 'multiplexer_cannot_focus');
       expect(runner.runCalls, isEmpty);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -270,11 +274,11 @@ void main() {
       expect(_notices(f.terminal), isEmpty);
       expect(f.commands, ["/usr/bin/zellij attach --create 'helm-0'"]);
 
-      final result = await f.session.focusAgent('w1:p1');
+      final result = await f.session.focusAgent('w1:p1').timeout(_bound);
 
       expect((result as MuxAgentFocusFailed).code, 'multiplexer_cannot_focus');
       expect(runner.runCalls, isEmpty);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -291,7 +295,7 @@ void main() {
       );
       expect(_notices(f.terminal), isEmpty);
       expect(f.commands, ["/usr/bin/tmux new-session -A -s 'helm-0'"]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -328,9 +332,12 @@ void main() {
           "/home/deployer/.local/bin/herdr --session 'helm-0' "
           "agent focus 'w1:p1'";
       _answerFocus(runner, focus);
-      expect(await f.session.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+      expect(
+        await f.session.focusAgent('w1:p1').timeout(_bound),
+        isA<MuxAgentFocused>(),
+      );
       expect(runner.runCalls, [focus]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('the notice is the only [Helm] line the probe writes', () async {
@@ -343,7 +350,7 @@ void main() {
         '\r\n[Helm] zellij is not installed on this host - '
             'attaching with herdr instead. Available: herdr, tmux.\r\n',
       ]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -368,10 +375,10 @@ void main() {
       ]);
       expect(f.commands, ["tmux new-session -A -s 'helm-0'"]);
 
-      final result = await f.session.focusAgent('w1:p1');
+      final result = await f.session.focusAgent('w1:p1').timeout(_bound);
       expect((result as MuxAgentFocusFailed).code, 'multiplexer_cannot_focus');
       expect(runner.runCalls, isEmpty);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('with no choice, the herdr default is named and drives focus under '
@@ -391,9 +398,12 @@ void main() {
 
       const focus = "herdr --session 'helm-0' agent focus 'w1:p1'";
       _answerFocus(runner, focus);
-      expect(await f.session.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+      expect(
+        await f.session.focusAgent('w1:p1').timeout(_bound),
+        isA<MuxAgentFocused>(),
+      );
       expect(runner.runCalls, [focus]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -418,7 +428,7 @@ void main() {
       expect(f.commands, ["zellij attach --create 'helm-0'"]);
       expect(f.session.status, ConnectionStatus.connected);
       expect(runner.runScriptCalls, [probeScriptV1]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('a failed probe with no choice leaves the herdr default under a '
@@ -434,9 +444,12 @@ void main() {
 
       const focus = "herdr --session 'helm-0' agent focus 'w1:p1'";
       _answerFocus(runner, focus);
-      expect(await f.session.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+      expect(
+        await f.session.focusAgent('w1:p1').timeout(_bound),
+        isA<MuxAgentFocused>(),
+      );
       expect(runner.runCalls, [focus]);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('a timed-out probe publishes the exact truncated report and an '
@@ -457,7 +470,7 @@ void main() {
       expect(f.terminal.writes.where((w) => w.contains('[Helm]')), isEmpty);
       expect(f.commands, ["tmux new-session -A -s 'helm-0'"]);
       expect(f.session.status, ConnectionStatus.connected);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -473,10 +486,10 @@ void main() {
       expect(f.terminal.writes.where((w) => w.contains('[Helm]')), isEmpty);
       expect(runner.runScriptCalls, isEmpty);
 
-      final result = await f.session.focusAgent('w1:p1');
+      final result = await f.session.focusAgent('w1:p1').timeout(_bound);
       expect((result as MuxAgentFocusFailed).code, 'multiplexer_cannot_focus');
       expect(runner.runCalls, isEmpty);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('an explicit adapter skips the probe: nothing published, nothing '
@@ -494,10 +507,13 @@ void main() {
       expect(f.terminal.writes.where((w) => w.contains('[Helm]')), isEmpty);
       expect(f.commands, ['fake-attach helm-0']);
 
-      expect(await f.session.focusAgent('w1:p1'), isA<MuxAgentFocused>());
+      expect(
+        await f.session.focusAgent('w1:p1').timeout(_bound),
+        isA<MuxAgentFocused>(),
+      );
       expect(adapter.focusTargets, ['w1:p1']);
       expect(runner.runCalls, isEmpty);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
   });
 
@@ -515,13 +531,13 @@ void main() {
       final report = f.session.hostReport;
       final selection = f.session.multiplexerSelection;
 
-      await f.drops.last.endWithExitCode(0);
-      await pumpEventQueue();
+      await f.drops.last.endWithExitCode(0).timeout(_bound);
+      await pumpEventQueue().timeout(_bound);
 
       expect(f.session.status, ConnectionStatus.disconnected);
       expect(identical(f.session.hostReport, report), isTrue);
       expect(identical(f.session.multiplexerSelection, selection), isTrue);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('dispose resets both to null', () async {
@@ -532,7 +548,7 @@ void main() {
       expect(f.session.hostReport, isNotNull);
       expect(f.session.multiplexerSelection, isNotNull);
 
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
 
       expect(f.session.hostReport, isNull);
       expect(f.session.multiplexerSelection, isNull);
@@ -551,7 +567,7 @@ void main() {
       expect(f.session.hostReport, isNotNull);
       expect(f.session.multiplexerSelection, isNotNull);
 
-      await f.session.reconnect();
+      await f.session.reconnect().timeout(_bound);
 
       expect(
         f.terminal.writes,
@@ -560,7 +576,7 @@ void main() {
       expect(f.session.hostReport, isNull);
       expect(f.session.multiplexerSelection, isNull);
       expect(f.session.hostRunner, isNull);
-      await f.session.dispose();
+      await f.session.dispose().timeout(_bound);
     });
 
     test('a reconnect that finds a key probes again and publishes the new '
@@ -591,7 +607,7 @@ void main() {
           return FakeSSHSession();
         },
       );
-      await session.connect('key');
+      await session.connect('key').timeout(_bound);
       expect(
         _describe(session.multiplexerSelection),
         'Verified(herdr, /home/deployer/.local/bin/herdr, inherited=false)',
@@ -604,7 +620,7 @@ void main() {
         ),
       );
 
-      await session.reconnect();
+      await session.reconnect().timeout(_bound);
 
       // herdr is absent on the second host, so the choice is substituted.
       expect(
@@ -615,7 +631,7 @@ void main() {
       expect(commands.last, "/usr/bin/tmux new-session -A -s 'helm-0'");
       expect(first.runScriptCalls, [probeScriptV1]);
       expect(second.runScriptCalls, [probeScriptV1]);
-      await session.dispose();
+      await session.dispose().timeout(_bound);
     });
   });
 }

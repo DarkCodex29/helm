@@ -47,7 +47,7 @@ bytes. The herdr PTY lane stays as the fallback throughout.
 | T5 | S1, S4 | Split `terminal_session.dart` (transport / probe / agent watch / transfer): this task covers four behavior-preserving slices (types/timings/factories, `ObservableValueNotifier`, `OutputSettle`, `HostQueries`) | worker | |
 | T5b | S1, S4 | Extract agent watch from `terminal_session.dart` (the agent-tracking loop and its 5 interlocking in-flight guards) | worker |  44f1543, c371618, 37c7e07 (pushed to main) |
 | T5c | S1, S4 | Extract the host probe from `terminal_session.dart` | worker |  9419a27, bec4790 (pushed to main) |
-| T5d | S4 | Pin the host probe's internal order (publication, adoption, advisories, notice) with an event-trace test; add explicit per-await bounds to its characterization tests | pending | |
+| T5d | S4 | Pin the host probe's internal order (publication, adoption, advisories, notice) with an event-trace test; add explicit per-await bounds to its characterization tests | worker | uncommitted |
 | T6 | S4-S6 | Push per device: each phone without FCM registers its own random ntfy topic over SSH (like the FCM token); notifier delivers to every FCM token and every device topic; Settings screen to subscribe this device in ntfy | worker | fad0a2c, a56c216, 524cdab, fa8eea8, 56e2ac7 (PR #8, merge bef361c) |
 
 ## Log
@@ -281,3 +281,23 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   to those instead of running a parallel agent. That design is the next
   decision. ntfy is an external app the owner does not want to depend on;
   native iOS push needs a paid developer account.
+- **L19** — T5d built by a worker (S4), uncommitted, tests only (`git diff
+  --stat -- lib` empty). New `host_probe_order_test.dart` records one event
+  trace through public surfaces (host runner, `advisoriesNotifier`, terminal
+  write, attach opener, `statusNotifier`) and pins this order on main: probe
+  script, advisories published, terminal notice, attach, `connected`;
+  `hostReport` and `multiplexerSelection` are already set at the first
+  event, and the herdr adapter is already adopted then (sampled once by
+  lifting the status for one synchronous `focusAgent`, which reaches the
+  runner only with the adopted adapter). Limit: report, selection and
+  adoption run synchronously with no public hook between them, so their
+  order among themselves is not distinguishable from outside and is not
+  claimed. Mutations, each restored byte for byte: (A) `_publishAdvisories`
+  moved after the notice, so the trace shows notice before advisories and
+  the test fails; (B) `_adoptAdapter` moved after `_publishAdvisories`, so
+  the first snapshot shows `adopted=false` and the test fails.
+  `host_probe_characterization_test.dart` now bounds every awaited step
+  (connect, reconnect, dispose, focus, drop, event-queue pump) with a 10 s
+  `.timeout`; no expected value changed. Checks: `dart format
+  --set-exit-if-changed lib test` clean; `flutter analyze` no issues;
+  `flutter test` full: 1660 passed, 0 failed.
