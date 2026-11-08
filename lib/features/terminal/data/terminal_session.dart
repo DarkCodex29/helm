@@ -267,8 +267,8 @@ class TerminalSession {
   /// Exposes the active [SSHClient] for one-shot command execution.
   /// Returns null if not connected.
   SSHClient? get sshClient => _client;
-  StreamSubscription<Uint8List>? _stdoutSub;
-  StreamSubscription<Uint8List>? _stderrSub;
+  StreamSubscription<String>? _stdoutSub;
+  StreamSubscription<String>? _stderrSub;
 
   final ValueNotifier<ConnectionStatus> statusNotifier = ValueNotifier(
     ConnectionStatus.disconnected,
@@ -846,22 +846,33 @@ class TerminalSession {
   }
 
   void _bridgeIO(SSHSession session) {
-    _stdoutSub = session.stdout.listen(
-      (data) {
-        terminal.write(utf8.decode(data, allowMalformed: true));
-        // Every byte that reaches the terminal while a share is held is
-        // evidence the remote is still attaching/repainting — see
-        // [waitForOutputToSettle].
-        _outputSettle.noteOutputActivity();
-      },
-      onError: (e) => _log.e('stdout stream error', e),
-      onDone: () => _log.i('stdout stream closed'),
-    );
+    // One streaming decoder per stream: the host sends output in arbitrary
+    // chunks, so a multibyte character (a border, an accent, an icon) is
+    // often split between two of them. Decoding each chunk on its own
+    // turned both halves into U+FFFD and shifted every column after them.
+    // The streaming decoder holds the partial bytes until the rest arrive.
+    _stdoutSub = session.stdout
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(
+          (text) {
+            terminal.write(text);
+            // Every byte that reaches the terminal while a share is held is
+            // evidence the remote is still attaching/repainting — see
+            // [waitForOutputToSettle].
+            _outputSettle.noteOutputActivity();
+          },
+          onError: (e) => _log.e('stdout stream error', e),
+          onDone: () => _log.i('stdout stream closed'),
+        );
 
-    _stderrSub = session.stderr.listen((data) {
-      terminal.write(utf8.decode(data, allowMalformed: true));
-      _outputSettle.noteOutputActivity();
-    }, onError: (e) => _log.e('stderr stream error', e));
+    _stderrSub = session.stderr
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen((text) {
+          terminal.write(text);
+          _outputSettle.noteOutputActivity();
+        }, onError: (e) => _log.e('stderr stream error', e));
 
     terminal.onOutput = (data) {
       final sessionRef = _session;

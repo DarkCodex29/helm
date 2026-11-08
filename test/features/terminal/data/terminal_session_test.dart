@@ -330,6 +330,35 @@ void main() {
       expect(terminal.writes, contains('an error line'));
     });
 
+    // The host sends output in arbitrary chunks, so a multibyte character
+    // (a box-drawing border, an accent, an icon) is often split between two
+    // of them. Decoding each chunk on its own turned both halves into U+FFFD
+    // and shifted the columns after them: the garbled characters seen on the
+    // phone.
+    for (final (name, emit) in [
+      (
+        'stdout',
+        (FakeSSHSession s, List<int> b) => s.emitStdout(Uint8List.fromList(b)),
+      ),
+      (
+        'stderr',
+        (FakeSSHSession s, List<int> b) => s.emitStderr(Uint8List.fromList(b)),
+      ),
+    ]) {
+      test('a character split across two $name chunks arrives whole', () async {
+        final bytes = utf8.encode('╭─ á');
+        // ╭ is E2 95 AD: cut after its first byte. á is C3 A1: cut inside it.
+        final cuts = [1, bytes.length - 1];
+        emit(fakeSession, bytes.sublist(0, cuts[0]));
+        emit(fakeSession, bytes.sublist(cuts[0], cuts[1]));
+        emit(fakeSession, bytes.sublist(cuts[1]));
+        await Future.delayed(Duration.zero);
+
+        expect(terminal.writes.join(), '╭─ á');
+        expect(terminal.writes.join(), isNot(contains('\uFFFD')));
+      });
+    }
+
     test('decodes malformed UTF-8 without throwing (allowMalformed)', () async {
       // A lone continuation byte (0x80) is not valid standalone UTF-8.
       fakeSession.emitStdout(Uint8List.fromList([0x80, 0x41]));
