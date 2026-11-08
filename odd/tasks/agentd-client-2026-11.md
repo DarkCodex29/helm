@@ -301,3 +301,20 @@ bytes. The herdr PTY lane stays as the fallback throughout.
   `.timeout`; no expected value changed. Checks: `dart format
   --set-exit-if-changed lib test` clean; `flutter analyze` no issues;
   `flutter test` full: 1660 passed, 0 failed.
+- **L20** (2026-11-07) — Closing the day. The owner decided "solo
+  necesitamos una terminal": helm-agentd was removed (see
+  `odd/tasks/remove-agentd-2026-11.md`, `b617b11`). Garbled characters on
+  the phone were fixed in `2087b30`: each SSH chunk was decoded alone, so a
+  multibyte character split across chunks became U+FFFD and shifted the
+  columns; stdout and stderr now go through a streaming UTF-8 decoder
+  (RED reproduced `���─ ��`). T5d landed as `922c754`; CI 42428119981
+  green. Notifications set aside (S6 deferred): "notificaciones dejaré de
+  lado, voy a desinstlaar el app esa, porque lo haremos nativo para no
+  tener dependencias". The parent stopped `dev.helm.notifier`, emptied the
+  host's `ntfy_topics` and moved the legacy global topic file away, with a
+  backup of the plist and both files in
+  `~/helm-notifier/backup-20261107-191013-ntfy`. The app still registers
+  its ntfy topic on connect and shows the ntfy tile in Settings; the owner
+  chose to remove that together with the native push work ("lo dejamos para
+  cuando hagamos los de notificaciones"). Native iOS push needs APNs, which
+  needs a paid Apple Developer account.
